@@ -1,0 +1,11 @@
+{
+    "url": "http://localhost:9001",
+    "id": "md-text",
+    "api_type": "elg",
+    "api": "/api",
+    "name" :"Text process",
+    "description": "This is a test",
+    "supported_types": ["text"],
+    "supported_formats": ["txt"]
+
+}
