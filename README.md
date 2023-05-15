@@ -16,7 +16,7 @@ Things you can do:
 ### status
 
 Hardly anything works yet :)
-
+See you in DARIAH Annual Event 2023 in Budapest!
 
 
 
@@ -35,7 +35,7 @@ curl http://localhost:8200/api/projects/234:0/upload -F "file=@files/test.pdf"
 image processin service
 https://hub.docker.com/r/nextcloud/aio-imaginary
 
-    cd test/services/test-service
+    cd test/services/test-image-service
     make start
 
 
