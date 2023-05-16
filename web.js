@@ -1,7 +1,6 @@
 const axios = require("axios")
 
 const username = 'root'
-const password = 'node_master'
 
 let web = {}
 
@@ -12,7 +11,7 @@ web.cypher = async function(url, query, serializer, schemas, current) {
 	var config = {
 		auth: {
 			username: username,
-			password: password
+			password: process.env.DB_PASSWORD
 		}
 	};
 	query_data = {

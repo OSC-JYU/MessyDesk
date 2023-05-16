@@ -100,7 +100,12 @@ app.use(async function handleError(context, next) {
 	}
 });
 
+async function poll() {
+	var data = await cypher.pollQueue(global_services)
+	//console.log(data)
+} 
 
+setInterval(poll, 5000);
 
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
@@ -148,7 +153,6 @@ router.post('/api/services', async function (ctx) {
 	} else {
 		throw('invalid service data!')
 	}
-
 })
 
 router.get('/api/services', async function (ctx) {
@@ -160,13 +164,18 @@ router.get('/api/services', async function (ctx) {
 router.get('/api/services/files/:rid', async function (ctx) {
 	var services = await cypher.getServicesForFile(global_services, ctx.request.params.rid)
 	ctx.body = services
-
 })
 
 
 // un-register
 
 // add to queue
+router.post('/api/queue', async function (ctx) {
+	console.log(ctx.request.body)
+	var n = await cypher.addToQueue(ctx.request.body)
+	ctx.body = n
+})
+
 
 
 
