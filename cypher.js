@@ -78,37 +78,9 @@ module.exports = class Cypher {
 
 
 
-	async addToQueue(data) {
-
-		const queue_url = `http://${DB_HOST}:2480/api/v1/command/messydesk-queue`
-		var date = Date.now()
-		const query = `CREATE (m:Message {
-			channel: "${data.channel}",
-			target: "${data.target}",
-			timestamp: ${date}
-		}) RETURN m`
-		var response = await web.cypher(queue_url, query)
-		return response.result
-
-	}
 
 
-	async pollQueue(services) {
-		console.log(services)
-		const queue_url = `http://${DB_HOST}:2480/api/v1/command/messydesk-queue`
-		// get all "open" messages for registered services
-		const query = 'match (n:Message) return n order by n.timestamp asc'
-		var response = await web.cypher(queue_url, query)
-		return response.result
-	}
-
-
-
-
-
-
-
-
+	
 
 
 

@@ -18,9 +18,13 @@ Things you can do:
 Hardly anything works yet :)
 See you in DARIAH Annual Event 2023 in Budapest!
 
+## Texh stuff
 
+MessyDesk is a web application. UI is written with Vue.js and backend is Nodejs. Apache Kafka is used for event queue handling and database is ArcadeDB.
 
 ## API
+
+### Projects
 
 project creation:
 curl  http://localhost:8200/api/projects -d @files/project.json --header "Content-Type: application/json"
@@ -29,23 +33,17 @@ http POST :8200/api/projects @test/files/project.json
 
 http POST :8200/api/projects label="really messy"
 
-
+### Uploads
 
 upload:
-curl http://localhost:8200/api/projects/234:0/upload -F "file=@test/files/test.pdf" 
-
-
-
-
-## SERVICES
+curl http://localhost:8200/api/projects/1:0/upload -F "file=@test/files/test.pdf" 
 
 
 ### processing queue
 
 
 
-
-    docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.11-management
+## SERVICES
 
 
 
@@ -61,12 +59,14 @@ https://hub.docker.com/r/nextcloud/aio-imaginary
 
 
 ### registering service:
-curl http://localhost:8200/api/services -d "@test/services/test-image-service/service.json" --header "Content-Type: application/json"
 
+    curl http://localhost:8200/api/services -d "@test/services/test-image-service/service.json" --header "Content-Type: application/json"
 
+This create a consumer for topic "md-imaginary". 
 
-esimerkki:
-curl -X POST -o "filu.png" "http://localhost:9000/crop?width=500&height=400&file=uusi.png" -F "file=@test.png"
+One can send a processing request to that service like this:
+
+    curl -X POST http://localhost:8200/api/queue/md-imaginary
 
 
 

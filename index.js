@@ -9,17 +9,20 @@ const path 			= require('path')
 const fs 			= require('fs')
 const { Index, Document, Worker } = require("flexsearch");
 const Cypher 		= require('./cypher.js');
+const queue 		= require('./queue.js');
 const media 		= require('./media.js');
 
 
 
 (async () => {
 	console.log('initing...')
+	await queue.init()
 })();
 
 const global_services = {}
 
 const cypher = new Cypher()
+
 
 const docIndex = new Document( {
 	tokenize: "full",
@@ -100,12 +103,11 @@ app.use(async function handleError(context, next) {
 	}
 });
 
-async function poll() {
-	var data = await cypher.pollQueue(global_services)
-	//console.log(data)
-} 
 
-setInterval(poll, 5000);
+
+queue.add()
+queue.add()
+queue.add()
 
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
@@ -116,6 +118,9 @@ router.get('/api/me', async function (ctx) {
 	ctx.body = {rid: me, id: ctx.request.headers.mail}
 })
 
+router.get('/api/stall', async function (ctx) {
+
+})
 
 
 // upload
@@ -146,13 +151,12 @@ router.get('/api/projects/:rid', async function (ctx) {
 
 // services
 
+// register service
 router.post('/api/services', async function (ctx) {
-	if(ctx.request.body.id && ctx.request.body.url && ctx.request.body.api && ctx.request.body.supported_formats && ctx.request.body.supported_types && ctx.request.body.name && ctx.request.body.api_type) {
-		global_services[ctx.request.body.id] = ctx.request.body
-		ctx.body = ctx.request.body
-	} else {
-		throw('invalid service data!')
-	}
+
+	await queue.registerService(ctx.request.body)
+	ctx.body = ctx.request.body
+
 })
 
 router.get('/api/services', async function (ctx) {
@@ -170,10 +174,18 @@ router.get('/api/services/files/:rid', async function (ctx) {
 // un-register
 
 // add to queue
-router.post('/api/queue', async function (ctx) {
-	console.log(ctx.request.body)
-	var n = await cypher.addToQueue(ctx.request.body)
-	ctx.body = n
+router.post('/api/queue/:topic', async function (ctx) {
+	const topic = ctx.request.params.topic 
+	const message = {
+		key: "md",
+		value: "Hello, Messydesk!",
+	  };
+	await queue.producer.send({
+		topic,
+		messages: [message],
+	  });
+	console.log('message ok')
+	ctx.body = 'sdf'
 })
 
 
