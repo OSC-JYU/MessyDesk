@@ -18,9 +18,7 @@ Things you can do:
 Hardly anything works yet :)
 See you in DARIAH Annual Event 2023 in Budapest!
 
-## Texh stuff
 
-MessyDesk is a web application. UI is written with Vue.js and backend is Nodejs. Apache Kafka is used for event queue handling and database is ArcadeDB.
 
 ## API
 
@@ -70,3 +68,19 @@ One can send a processing request to that service like this:
 
 
 
+### ELG service examples
+
+    docker pull lingsoft/heli-ots:1.4.0-elg
+
+    docker run -d -p 8080:8080 lingsoft/heli-ots:1.4.0-elg
+
+## Tech stuff
+
+MessyDesk is a web application. UI is written with Vue.js and backend is Nodejs. Apache Kafka is used for event queue handling and database is ArcadeDB.
+
+
+### ELG API
+
+https://european-language-grid.readthedocs.io/en/stable/all/A3_API/LTInternalAPI.html#
+
+https://www.lingsoft.fi/en/microservices-at-your-service-bridging-gap-between-nlp-research-and-industry
