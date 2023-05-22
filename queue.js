@@ -6,7 +6,7 @@ const fs 			= require('fs');
 const fsPromises 	= require('fs').promises;
 const { Kafka }     = require('kafkajs');
 var FormData        = require('form-data');
-;
+
 
 process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
 
@@ -56,24 +56,24 @@ queue.add = async function(ctx) {
 queue.registerService = async function(data) {
 
     if(data.id && data.url && data.api && data.supported_formats && data.supported_types && data.name && data.api_type) {
+        queue.services[data.id] = data
+        queue.services[data.id].consumer = await kafka.consumer({ groupId: data.id})
 
-        const consumer = kafka.consumer({ groupId: data.id})
-
-        await consumer.connect()
-        await consumer.subscribe({ topic: data.id, fromBeginning: false })
+        await queue.services[data.id].consumer.connect()
+        await queue.services[data.id].consumer.subscribe({ topic: data.id, fromBeginning: false })
 
         // listen to heartbeat 
-        consumer.on('consumer.heartbeat', () => {
-            console.log('heartbeat')
+        queue.services[data.id].consumer.on('consumer.heartbeat', () => {
+            console.log('heartbeat ' + queue.services[data.id].id)
         })
 
-        await consumer.run({
+        await queue.services[data.id].consumer.run({
           eachMessage: async ({ topic, partition, message,  heartbeat, pause }) => {
             // do actual processing
-            await this.callService()
-            console.log({
-              value: message.value.toString(),
-            })
+            await this.callFileService(message, queue.services[data.id])
+            // console.log({
+            //   value: message.value.toString(),
+            // })
           },
         })
 
@@ -81,12 +81,23 @@ queue.registerService = async function(data) {
 
 }
 
-queue.callService = async function() {
+queue.callFileService = async function(message, service, me_email) {
     try {
-        await imaginary();
+//        console.log(service.url)
+        var data = JSON.parse(message.value.toString())
+        console.log('callservice...')
+        // console.log(message.value.toString())
+        // console.log(data.content)
+
+
+        if(service.api_type.toLowerCase() == 'elg') {
+          await ELG_api(data, service)
+        }
+       // await imaginary();
         //const response = await axios.get('http://localhost:8200/api/stall');
         //console.log(response);
       } catch (error) {
+        console.log('PAM')
         if (error.response) {
             // The request was made and the server responded with a status code
             // that falls out of the range of 2xx
@@ -107,6 +118,56 @@ queue.callService = async function() {
 
 
 }
+
+async function ELG_api(data, service) {
+
+    const got = await import('got');
+
+    console.log(data.target)
+    console.log(service.url)
+    
+    const filePath = data.file.path
+    const outputStream = fs.createReadStream(filePath, 'utf8');
+    
+    let content = '';
+    
+    outputStream.on('data', (data) => {
+      console.log(data)
+      content += data;
+    });
+    
+    outputStream.on('end', async() => {
+      console.log('stream ended.')
+      data.content = content
+      console.log(data.content)
+
+      var d = {
+        "type": "text",
+        "content": "Hello, world! And here is some more text for you. This is a VERY early version of MessyDesk, a digital humanities desktop (for humanists). The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.",
+        "params": {
+            "nbest": 1,
+            "languages": ["fin","swe","eng"]
+        }
+    }
+      try {
+        const {response} = await got.default.post(service.url + service.api, {
+          json: data
+        }).json();
+        console.log(response)
+
+      } catch(e) {
+        console.log(e)
+      }
+
+
+    });
+    
+    outputStream.on('error', (error) => {
+      console.error(`Error reading file: ${error}`);
+    });
+
+}
+
 
 async function imaginary() {
 

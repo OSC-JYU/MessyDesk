@@ -1,4 +1,3 @@
-const axios = require("axios")
 const web = require("./web.js")
 
 const MAX_STR_LENGTH = 2048
@@ -25,17 +24,38 @@ module.exports = class Cypher {
 		}
 	}
 
-	async createProject(data) {
-		await this.create('Project', data)
+	async createProject(data, me_rid) {
+		
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
+		var response = await web.cypher(URL, query)
+		console.log(response.result[0])
+		if(response.result[0].projects == 0) {
+			var project = await this.create('Project', data)
+			var project_rid = project.result[0]['@rid']
+			await this.connect(me_rid, 'IS_OWNER', project_rid)
+		} else {
+			console.log('Project exists')
+			throw('Project with that name exists!')
+		}
+
 	}
 
 
-	async getProject(rid) {
-		const query = `MATCH (p:Project) WHERE id(p) = "#${rid}" RETURN p`
-		console.log(query)
+
+	async getProject(rid, me_email) {
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
 		var result = await web.cypher(URL, query)
 		return result
 	}
+
+
+
+	async getProjects(me_email) {
+		const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" RETURN pr`
+		var result = await web.cypher(URL, query)
+		return result
+	}
+
 
 
  	async createFileGraph(project_rid, filedata) {
@@ -52,6 +72,16 @@ module.exports = class Cypher {
 		var result = await web.cypher(URL, query)
 		return result
 	}
+
+
+
+	async getUserFileMetadata(file_rid, me_email) {
+		// file must be somehow related to a project that is owned by user
+		const query = `MATCH (f:File) -[*]-(pr:Project)<-[:IS_OWNER]-(p:Person) WHERE id(f) = "#${file_rid}" AND p.id = "${me_email}" RETURN COLLECT (distinct f) as file`
+		var file_response = await web.cypher(URL, query)
+		return file_response.result[0].file
+	}
+
 
 
 	async getServicesForFile(services, rid) {

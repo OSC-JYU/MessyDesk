@@ -10,6 +10,7 @@
   "license": "ISC",
   "dependencies": {
     "@koa/multer": "^3.0.2",
+    "axios": "^1.4.0",
     "flexsearch": "^0.7.21",
     "got": "^12.6.0",
     "kafkajs": "^2.2.4",

@@ -68,7 +68,7 @@ app.use(serve(path.join(__dirname, '/public')))
 
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
-	if(!process.env.DOCKER) context.request.headers.mail = "ari.hayrinen@jyu.fi" // dummy shibboleth
+	context.request.headers.mail = "ari.hayrinen@jyu.fi" // dummy shibboleth
 	await next()
 });
 
@@ -105,10 +105,6 @@ app.use(async function handleError(context, next) {
 
 
 
-queue.add()
-queue.add()
-queue.add()
-
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
 })
@@ -127,11 +123,13 @@ router.get('/api/stall', async function (ctx) {
 
 router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
 
-	var response = await cypher.getProject(ctx.request.params.rid)
+	var response = await cypher.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	console.log(response)
 	if (response.result.length == 0) return
 
 	var filedata = await media.uploadFile(ctx)
-	await cypher.createFileGraph(response.result[0]["@rid"], filedata)
+	var filegraph = await cypher.createFileGraph(response.result[0]["@rid"], filedata)
+	ctx.body = filegraph
 
 })
 
@@ -139,13 +137,19 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 // project
 
 router.post('/api/projects', async function (ctx) {
-	console.log(ctx.request.body)
-	var n = await cypher.createProject(ctx.request.body)
+	var me_rid = await cypher.myId(ctx.request.headers.mail)
+	var n = await cypher.createProject(ctx.request.body, me_rid)
 	ctx.body = n
 })
 
+router.get('/api/projects', async function (ctx) {
+	var n = await cypher.getProjects(ctx.request.headers.mail)
+	ctx.body = n.result
+})
+
+
 router.get('/api/projects/:rid', async function (ctx) {
-	var n = await cypher.getProject(ctx.request.params.rid)
+	var n = await cypher.getProject(ctx.request.params.rid, ctx.request.headers.mail)
 	ctx.body = n.result
 })
 
@@ -174,18 +178,26 @@ router.get('/api/services/files/:rid', async function (ctx) {
 // un-register
 
 // add to queue
-router.post('/api/queue/:topic', async function (ctx) {
+router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
+
 	const topic = ctx.request.params.topic 
+	var file_metadata = await cypher.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+	console.log(file_metadata)
+	ctx.request.body.file = file_metadata
+	ctx.request.body.target = ctx.request.params.file_rid
 	const message = {
 		key: "md",
-		value: "Hello, Messydesk!",
+		value: JSON.stringify(ctx.request.body),
 	  };
 	await queue.producer.send({
 		topic,
 		messages: [message],
 	  });
+
 	console.log('message ok')
-	ctx.body = 'sdf'
+
+	ctx.body = ctx.request.params.file_rid
+
 })
 
 

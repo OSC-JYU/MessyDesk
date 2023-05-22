@@ -25,7 +25,8 @@ See you in DARIAH Annual Event 2023 in Budapest!
 ### Projects
 
 project creation:
-curl  http://localhost:8200/api/projects -d @files/project.json --header "Content-Type: application/json"
+
+    curl  http://localhost:8200/api/projects -d @test/files/project.json --header "Content-Type: application/json"
 
 http POST :8200/api/projects @test/files/project.json
 
@@ -34,7 +35,8 @@ http POST :8200/api/projects label="really messy"
 ### Uploads
 
 upload:
-curl http://localhost:8200/api/projects/1:0/upload -F "file=@test/files/test.pdf" 
+
+    curl http://localhost:8200/api/projects/1:0/upload -F "file=@test/files/test.pdf" 
 
 
 ### processing queue
@@ -43,7 +45,10 @@ curl http://localhost:8200/api/projects/1:0/upload -F "file=@test/files/test.pdf
 
 ## SERVICES
 
+### start Kafka
 
+    cd test/kafka
+    docker-compose up
 
 ### test image processig service
 
@@ -70,9 +75,27 @@ One can send a processing request to that service like this:
 
 ### ELG service examples
 
+Language detection
+
+First, start elg-container:
+
     docker pull lingsoft/heli-ots:1.4.0-elg
 
     docker run -d -p 8080:8080 lingsoft/heli-ots:1.4.0-elg
+
+
+Register ELG service:
+
+    curl http://localhost:8200/api/services -d "@test/services/heli-ots/service.json" --header "Content-Type: application/json"
+
+
+Add file to an existing project (create project if necessary):
+
+    curl http://localhost:8200/api/projects/1:0/upload -F "file=@test/files/test.txt" 
+
+Call service:
+
+    curl -X POST http://localhost:8200/api/queue/md-heli-ots/files/108:3 -d "@test/services/heli-ots/heli-ots_sample.json" --header "Content-Type: application/json"
 
 ## Tech stuff
 
