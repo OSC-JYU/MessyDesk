@@ -124,11 +124,13 @@ router.get('/api/stall', async function (ctx) {
 router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
 
 	var response = await cypher.getProject(ctx.request.params.rid, ctx.request.headers.mail)
-	console.log(response)
-	if (response.result.length == 0) return
+	if (response.result.length == 0) throw('Project not found')
 
-	var filedata = await media.uploadFile(ctx)
-	var filegraph = await cypher.createFileGraph(response.result[0]["@rid"], filedata)
+
+	project_rid = response.result[0]["@rid"]
+	file_type = await media.detectType(ctx)
+	var filegraph = await cypher.createFileGraph(project_rid, ctx, file_type)
+	await media.uploadFile(ctx, filegraph)
 	ctx.body = filegraph
 
 })
@@ -139,6 +141,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 router.post('/api/projects', async function (ctx) {
 	var me_rid = await cypher.myId(ctx.request.headers.mail)
 	var n = await cypher.createProject(ctx.request.body, me_rid)
+	await media.createProjectDir(n)
 	ctx.body = n
 })
 
@@ -153,6 +156,11 @@ router.get('/api/projects/:rid', async function (ctx) {
 	ctx.body = n.result
 })
 
+router.get('/api/projects/:rid/files', async function (ctx) {
+	var n = await cypher.getProjectFiles(ctx.request.params.rid, ctx.request.headers.mail)
+	ctx.body = n.result
+})
+
 // services
 
 // register service
@@ -164,7 +172,7 @@ router.post('/api/services', async function (ctx) {
 })
 
 router.get('/api/services', async function (ctx) {
-	ctx.body = global_services
+	ctx.body = queue.services
 
 })
 
@@ -181,22 +189,36 @@ router.get('/api/services/files/:rid', async function (ctx) {
 router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
-	var file_metadata = await cypher.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-	console.log(file_metadata)
-	ctx.request.body.file = file_metadata
-	ctx.request.body.target = ctx.request.params.file_rid
-	const message = {
-		key: "md",
-		value: JSON.stringify(ctx.request.body),
-	  };
-	await queue.producer.send({
-		topic,
-		messages: [message],
-	  });
+	if(topic in queue.services) {
 
-	console.log('message ok')
+		var file_metadata = await cypher.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+		console.log(file_metadata)
+		if(file_metadata.path) {
+			// add process to graph
+			await cypher.createProcessGraph(topic, ctx.request.body, ctx.request.params.file_rid, ctx.request.headers.mail)
 
-	ctx.body = ctx.request.params.file_rid
+			ctx.request.body.file = file_metadata
+			ctx.request.body.target = ctx.request.params.file_rid
+			const message = {
+				key: "md",
+				value: JSON.stringify(ctx.request.body),
+			  };
+			await queue.producer.send({
+				topic,
+				messages: [message],
+			  });
+		
+			// console.log('message ok')
+		
+			ctx.body = ctx.request.params.file_rid
+		} else {
+			throw('File not found!')
+		}
+
+	
+	} else {
+		ctx.body = 'ERROR: service not available'
+	}
 
 })
 

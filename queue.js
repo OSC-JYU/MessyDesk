@@ -27,7 +27,6 @@ const kafka = new Kafka({
 queue.init = async function() {
 
     queue.got = await import('got')
-    //got.default();
 
     try {
         console.log('connecting kafka: ' + KAFKA_URL)
@@ -39,7 +38,9 @@ queue.init = async function() {
         console.log(`connected to Kafka at ${KAFKA_URL}!`)
 
       } catch (error) {
-        console.error("Error running producer:", error);
+        console.error("\nERROR: Kafka connection failed!\n")
+        console.log(error.message);
+        process.exit(1)
       }
     
 }

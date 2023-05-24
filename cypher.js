@@ -1,4 +1,6 @@
-const web = require("./web.js")
+const path 			= require('path');
+const web 			= require("./web.js")
+const media 			= require("./media.js")
 
 const MAX_STR_LENGTH = 2048
 const DB_HOST = process.env.ARCADEDB_HOST || 'localhost'
@@ -26,17 +28,19 @@ module.exports = class Cypher {
 
 	async createProject(data, me_rid) {
 		
+		var project = {}
 		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
 		var response = await web.cypher(URL, query)
 		console.log(response.result[0])
 		if(response.result[0].projects == 0) {
-			var project = await this.create('Project', data)
+			project = await this.create('Project', data)
 			var project_rid = project.result[0]['@rid']
 			await this.connect(me_rid, 'IS_OWNER', project_rid)
 		} else {
 			console.log('Project exists')
 			throw('Project with that name exists!')
 		}
+		return project
 
 	}
 
@@ -57,20 +61,54 @@ module.exports = class Cypher {
 	}
 
 
+	async getProjectFiles(rid, me_email) {
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[:IS_PART_OF]-(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
+		var result = await web.cypher(URL, query)
+		return result
+	}
 
- 	async createFileGraph(project_rid, filedata) {
+
+	async createProcessGraph(topic, params, file_rid, me_email) {
+		
+		var process = {}
+		params.topic = topic
+		// file must be part of project that user owns
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN pr`
+		var response = await web.cypher(URL, query)
+		console.log(response.result[0])
+//		if(response.result[0].projects == 0) {
+			process = await this.create('Process', {label: topic})
+			var process_rid = process.result[0]['@rid']
+			await this.connect(file_rid, 'WAS_PROCESSED_BY', process_rid)
+		// } else {
+		// 	console.log('Project exists')
+		// 	throw('Project with that name exists!')
+		// }
+		return process
+
+	}
+
+
+ 	async createFileGraph(project_rid, ctx, file_type) {
+		
+		var extension = path.extname(ctx.file.originalname).replace('.','')
 		const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
 			CREATE (file:File 
 				{
-					path:"${filedata.filepath}", 
-					type: "${filedata.type}",
-					extension: "${filedata.extension}",
-					label: "${filedata.originalname}"
+					type: "${file_type}",
+					extension: "${extension}",
+					label: "${ctx.file.originalname}"
 				}
 			) - [r:IS_PART_OF] -> (p) 
 			RETURN file`
-		var result = await web.cypher(URL, query)
-		return result
+		var response = await web.cypher(URL, query)
+		console.log(response)
+
+		var file_rid = response.result[0]['@rid']
+		var file_path = path.join('data', 'projects', media.rid2path(project_rid),'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+		const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
+		var update_response = await web.cypher(URL, update)
+		return update_response
 	}
 
 
