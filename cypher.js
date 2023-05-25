@@ -68,23 +68,25 @@ module.exports = class Cypher {
 	}
 
 
-	async createProcessGraph(topic, params, file_rid, me_email) {
+	async createProcessGraph(topic, params, filegraph, me_email) {
 		
-		var process = {}
 		params.topic = topic
+		var file_rid = filegraph['@rid']
+		var file_path = filegraph.path.split('/').slice( 0, -1 ).join('/')
+		var process = {}
 		// file must be part of project that user owns
-		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN pr`
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "${file_rid}" RETURN pr`
 		var response = await web.cypher(URL, query)
 		console.log(response.result[0])
-//		if(response.result[0].projects == 0) {
-			process = await this.create('Process', {label: topic})
-			var process_rid = process.result[0]['@rid']
-			await this.connect(file_rid, 'WAS_PROCESSED_BY', process_rid)
-		// } else {
-		// 	console.log('Project exists')
-		// 	throw('Project with that name exists!')
-		// }
-		return process
+
+		process = await this.create('Process', {label: topic})
+		var process_rid = process.result[0]['@rid']
+		var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+		var update_response = await web.cypher(URL, update)
+		await this.connect(file_rid, 'WAS_PROCESSED_BY', process_rid)
+
+		return update_response.result[0]
 
 	}
 

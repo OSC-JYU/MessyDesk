@@ -195,7 +195,9 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		console.log(file_metadata)
 		if(file_metadata.path) {
 			// add process to graph
-			await cypher.createProcessGraph(topic, ctx.request.body, ctx.request.params.file_rid, ctx.request.headers.mail)
+			var process = await cypher.createProcessGraph(topic, ctx.request.body, file_metadata, ctx.request.headers.mail)
+			await media.createProcessDir(process.path) 
+			await media.writeJSON(ctx.request.body, 'params.json', process.path)
 
 			ctx.request.body.file = file_metadata
 			ctx.request.body.target = ctx.request.params.file_rid
@@ -208,18 +210,13 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 				messages: [message],
 			  });
 		
-			// console.log('message ok')
-		
 			ctx.body = ctx.request.params.file_rid
 		} else {
 			throw('File not found!')
 		}
-
-	
 	} else {
 		ctx.body = 'ERROR: service not available'
 	}
-
 })
 
 

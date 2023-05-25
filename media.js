@@ -19,12 +19,11 @@ media.createProjectDir = async function(project) {
 	}
 }
 
-media.createProcessDir = async function(project) {
-	const rid = this.rid2path(project.result[0]['@rid'])
+media.createProcessDir = async function(process_path) {
 	try {
-		await fs.ensureDir(path.join('data', 'projects', rid, 'files'))
+		await fs.ensureDir(process_path)
 	} catch(e) {
-		throw('Could not create project directory!' + e.message)
+		throw('Could not create process directory!' + e.message)
 	}
 }
 
@@ -55,6 +54,18 @@ media.uploadFile = async function(ctx, filegraph) {
 		console.log('File upload failed')
 		console.log(e.message)
 	}
+}
+
+media.writeJSON =  async function(data, filename, fpath) {
+
+	try {
+		const jsonData = JSON.stringify(data, null, 2);
+		await fs.promises.writeFile(path.join(fpath, filename), jsonData);
+		console.log('Data successfully written to params.json!');
+	  } catch (error) {
+		console.error('Error writing data to params.json:', error);
+	  }
+
 }
 
 media.detectType = async function(ctx) {

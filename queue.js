@@ -124,6 +124,7 @@ async function ELG_api(data, service) {
 
     const got = await import('got');
 
+      console.log(data)
     console.log(data.target)
     console.log(service.url)
     
@@ -141,15 +142,9 @@ async function ELG_api(data, service) {
       console.log('stream ended.')
       data.content = content
       console.log(data.content)
+      // write parameters to disk
+     // await media.writeJSON(data)
 
-      var d = {
-        "type": "text",
-        "content": "Hello, world! And here is some more text for you. This is a VERY early version of MessyDesk, a digital humanities desktop (for humanists). The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.",
-        "params": {
-            "nbest": 1,
-            "languages": ["fin","swe","eng"]
-        }
-    }
       try {
         const {response} = await got.default.post(service.url + service.api, {
           json: data
