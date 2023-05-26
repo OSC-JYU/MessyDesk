@@ -8,6 +8,7 @@ const { Kafka }     = require('kafkajs');
 var FormData        = require('form-data');
 
 
+
 process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
 
 const KAFKA_URL = "localhost:9094"
@@ -92,11 +93,12 @@ queue.callFileService = async function(message, service, me_email) {
 
 
         if(service.api_type.toLowerCase() == 'elg') {
-          await ELG_api(data, service)
+          if(service.type == 'text') {
+            await ELG_api_text(data, service)
+          } else {
+            await ELG_api_binary(data, service)
+          }
         }
-       // await imaginary();
-        //const response = await axios.get('http://localhost:8200/api/stall');
-        //console.log(response);
       } catch (error) {
         console.log('PAM')
         if (error.response) {
@@ -120,14 +122,11 @@ queue.callFileService = async function(message, service, me_email) {
 
 }
 
-async function ELG_api(data, service) {
+async function ELG_api_text(data, service) {
 
     const got = await import('got');
-
-      console.log(data)
-    console.log(data.target)
-    console.log(service.url)
     
+    // read text to JSON object (content)
     const filePath = data.file.path
     const outputStream = fs.createReadStream(filePath, 'utf8');
     
@@ -141,9 +140,7 @@ async function ELG_api(data, service) {
     outputStream.on('end', async() => {
       console.log('stream ended.')
       data.content = content
-      console.log(data.content)
-      // write parameters to disk
-     // await media.writeJSON(data)
+  
 
       try {
         const {response} = await got.default.post(service.url + service.api, {
@@ -155,13 +152,45 @@ async function ELG_api(data, service) {
         console.log(e)
       }
 
-
     });
     
     outputStream.on('error', (error) => {
       console.error(`Error reading file: ${error}`);
     });
 
+}
+
+
+
+
+async function ELG_api_binary(data, service) {
+  try {
+    const { default: got } = await import('got');
+    const formData = new FormData();
+
+
+    // Append JSON file
+    const jsonContent = { type: 'pdf', params: {task: 'pdf2text'} };
+
+    formData.append('request', JSON.stringify(jsonContent), {contentType: 'application/json',
+    filename: 'request.json'});
+
+    // append content file
+    const filepath = data.file.path
+    const binaryReadStream = fs.createReadStream(filepath);
+    formData.append('content', binaryReadStream, { filename: 'content.pdf', contentType: 'application/pdf'  });
+
+    console.log('Sending files via POST request...');
+
+    const response = await got.post(service.url + service.api, {
+      body: formData,
+      headers: formData.getHeaders(),
+    });
+
+    console.log(response.body);
+  } catch (error) {
+    console.error('Error sending the files:', error);
+  }
 }
 
 

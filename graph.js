@@ -7,7 +7,7 @@ const DB_HOST = process.env.ARCADEDB_HOST || 'localhost'
 const URL = `http://${DB_HOST}:2480/api/v1/command/messydesk`
 
 // Assigning to exports will not modify module, must use module.exports
-module.exports = class Cypher {
+module.exports = class Graph {
 
 	async createIndex(docIndex) {
 		var query = 'MATCH (n) return id(n) as id, n.label as label'
@@ -115,11 +115,25 @@ module.exports = class Cypher {
 
 
 
+	async getUserFileMetadata_old(file_rid, me_email) {
+		// file must be somehow related to a project that is owned by user
+		const query = `g.V(\"#${file_rid}\")
+		.as(\"f\")
+		.repeat(both().simplePath())
+		.until(hasLabel(\"Project\"))
+		.in(\"IS_OWNER\")
+		.hasLabel(\"Person\")
+		.has(\"id\", \"${me_email}\")
+		.select(\"f\")`
+		var file_response = await web.gremlin(URL, query)
+		return file_response.result[0]
+	}
+
 	async getUserFileMetadata(file_rid, me_email) {
 		// file must be somehow related to a project that is owned by user
-		const query = `MATCH (f:File) -[*]-(pr:Project)<-[:IS_OWNER]-(p:Person) WHERE id(f) = "#${file_rid}" AND p.id = "${me_email}" RETURN COLLECT (distinct f) as file`
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN file`
 		var file_response = await web.cypher(URL, query)
-		return file_response.result[0].file
+		return file_response.result[0]
 	}
 
 

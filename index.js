@@ -8,7 +8,7 @@ const winston 		= require('winston');
 const path 			= require('path')
 const fs 			= require('fs')
 const { Index, Document, Worker } = require("flexsearch");
-const Cypher 		= require('./cypher.js');
+const Graph 		= require('./graph.js');
 const queue 		= require('./queue.js');
 const media 		= require('./media.js');
 
@@ -21,7 +21,7 @@ const media 		= require('./media.js');
 
 const global_services = {}
 
-const cypher = new Cypher()
+const graph = new Graph()
 
 
 const docIndex = new Document( {
@@ -32,7 +32,7 @@ const docIndex = new Document( {
 	}
 })
 
-//cypher.createIndex(docIndex)
+//graph.createIndex(docIndex)
 
 // LOGGING
 require('winston-daily-rotate-file');
@@ -110,7 +110,7 @@ router.get('/api', function (ctx) {
 })
 
 router.get('/api/me', async function (ctx) {
-	var me = await cypher.myId(ctx.request.headers.mail)
+	var me = await graph.myId(ctx.request.headers.mail)
 	ctx.body = {rid: me, id: ctx.request.headers.mail}
 })
 
@@ -123,13 +123,13 @@ router.get('/api/stall', async function (ctx) {
 
 router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
 
-	var response = await cypher.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	var response = await graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
 	if (response.result.length == 0) throw('Project not found')
 
 
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
-	var filegraph = await cypher.createFileGraph(project_rid, ctx, file_type)
+	var filegraph = await graph.createFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx, filegraph)
 	ctx.body = filegraph
 
@@ -139,25 +139,25 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 // project
 
 router.post('/api/projects', async function (ctx) {
-	var me_rid = await cypher.myId(ctx.request.headers.mail)
-	var n = await cypher.createProject(ctx.request.body, me_rid)
+	var me_rid = await graph.myId(ctx.request.headers.mail)
+	var n = await graph.createProject(ctx.request.body, me_rid)
 	await media.createProjectDir(n)
 	ctx.body = n
 })
 
 router.get('/api/projects', async function (ctx) {
-	var n = await cypher.getProjects(ctx.request.headers.mail)
+	var n = await graph.getProjects(ctx.request.headers.mail)
 	ctx.body = n.result
 })
 
 
 router.get('/api/projects/:rid', async function (ctx) {
-	var n = await cypher.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
 	ctx.body = n.result
 })
 
 router.get('/api/projects/:rid/files', async function (ctx) {
-	var n = await cypher.getProjectFiles(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await graph.getProjectFiles(ctx.request.params.rid, ctx.request.headers.mail)
 	ctx.body = n.result
 })
 
@@ -178,7 +178,7 @@ router.get('/api/services', async function (ctx) {
 
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
-	var services = await cypher.getServicesForFile(global_services, ctx.request.params.rid)
+	var services = await graph.getServicesForFile(global_services, ctx.request.params.rid)
 	ctx.body = services
 })
 
@@ -190,13 +190,14 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
 	if(topic in queue.services) {
-
-		var file_metadata = await cypher.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+		console.log('calleing qe')
+		var file_metadata = await graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 		console.log(file_metadata)
 		if(file_metadata.path) {
 			// add process to graph
-			var process = await cypher.createProcessGraph(topic, ctx.request.body, file_metadata, ctx.request.headers.mail)
+			var process = await graph.createProcessGraph(topic, ctx.request.body, file_metadata, ctx.request.headers.mail)
 			await media.createProcessDir(process.path) 
+			console.log('Writing params.json...')
 			await media.writeJSON(ctx.request.body, 'params.json', process.path)
 
 			ctx.request.body.file = file_metadata
@@ -225,49 +226,49 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 
 router.get('/api/search', async function (ctx) {
 	var result =  docIndex.search(ctx.request.query.search)
-	var n = await cypher.getSearchData(result)
+	var n = await graph.getSearchData(result)
 	ctx.body = n.result
 
 })
 
 router.post('/api/query', async function (ctx) {
-	var n = await cypher.query(ctx.request.body)
+	var n = await graph.query(ctx.request.body)
 	ctx.body = n
 })
 
 router.get('/api/schemas', async function (ctx) {
-	var n = await cypher.getSchemaTypes()
+	var n = await graph.getSchemaTypes()
 	ctx.body = n
 })
 
 router.get('/api/tags', async function (ctx) {
-	var n = await cypher.getTags()
+	var n = await graph.getTags()
 	ctx.body = n
 })
 
 router.get('/api/queries', async function (ctx) {
-	var n = await cypher.getQueries()
+	var n = await graph.getQueries()
 	ctx.body = n
 })
 
 router.get('/api/schemas/:schema', async function (ctx) {
-	var n = await cypher.getSchema(ctx.request.params.schema)
+	var n = await graph.getSchema(ctx.request.params.schema)
 	ctx.body = n
 })
 
 router.post('/api/graph/query/me', async function (ctx) {
-	var n = await cypher.myGraph(user, ctx.request.body)
+	var n = await graph.myGraph(user, ctx.request.body)
 	ctx.body = n
 })
 
 router.post('/api/graph/query', async function (ctx) {
-	var n = await cypher.getGraph(ctx.request.body)
+	var n = await graph.getGraph(ctx.request.body)
 	ctx.body = n
 })
 
 router.post('/api/graph/vertices', async function (ctx) {
 	var type = ctx.request.body.type
-	var n = await cypher.create(type, ctx.request.body)
+	var n = await graph.create(type, ctx.request.body)
 	console.log(n)
 	var node = n.result[0]
 	docIndex.add({id: node['@rid'],label:node.label})
@@ -276,17 +277,17 @@ router.post('/api/graph/vertices', async function (ctx) {
 
 
 router.get('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await cypher.getDataWithSchema(ctx.request.params.rid)
+	var n = await graph.getDataWithSchema(ctx.request.params.rid)
 	ctx.body = n
 })
 
 router.post('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await cypher.setNodeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	var n = await graph.setNodeAttribute('#' + ctx.request.params.rid, ctx.request.body)
 	ctx.body = n
 })
 
 router.post('/api/graph/edges', async function (ctx) {
-	var n = await cypher.connect(
+	var n = await graph.connect(
 		ctx.request.body.from,
 		ctx.request.body.relation,
 		ctx.request.body.to)
@@ -294,37 +295,37 @@ router.post('/api/graph/edges', async function (ctx) {
 })
 
 router.delete('/api/graph/edges/:rid', async function (ctx) {
-	var n = await cypher.deleteEdge('#' + ctx.request.params.rid)
+	var n = await graph.deleteEdge('#' + ctx.request.params.rid)
 	ctx.body = n
 })
 
 router.post('/api/graph/edges/:rid', async function (ctx) {
-	var n = await cypher.setEdgeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	var n = await graph.setEdgeAttribute('#' + ctx.request.params.rid, ctx.request.body)
 	ctx.body = n
 })
 
 router.post('/api/graph/edges/connect/me', async function (ctx) {
-	var me = await cypher.myId(user)
+	var me = await graph.myId(user)
 	ctx.request.body.from = me
-	var n = await cypher.connect(ctx.request.body)
+	var n = await graph.connect(ctx.request.body)
 	ctx.body = n
 })
 
 router.post('/api/graph/edges/unconnect/me', async function (ctx) {
-	var me = await cypher.myId(user)
+	var me = await graph.myId(user)
 	console.log(me)
 	ctx.request.body.from = me
-	var n = await cypher.unconnect(ctx.request.body)
+	var n = await graph.unconnect(ctx.request.body)
 	ctx.body = n
 })
 
 router.get('/api/documents', async function (ctx) {
-	var n = await cypher.getListByType(ctx.request.query)
+	var n = await graph.getListByType(ctx.request.query)
 	ctx.body = n
 })
 
 router.get('/api/documents/:rid', async function (ctx) {
-	var n = await cypher.getNodeAttributes(ctx.request.params.rid)
+	var n = await graph.getNodeAttributes(ctx.request.params.rid)
 	ctx.body = n
 })
 

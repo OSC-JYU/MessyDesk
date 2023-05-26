@@ -5,6 +5,32 @@ const username = 'root'
 let web = {}
 
 
+web.gremlin = async function(url, query, serializer, current) {
+
+	var config = {
+		auth: {
+			username: username,
+			password: process.env.DB_PASSWORD
+		}
+	};
+	query_data = {
+		command:query,
+		language:'gremlin'
+	}
+	if(serializer) query_data.serializer = serializer
+	console.log(query)
+
+	try {
+		var response = await axios.post(url, query_data, config)
+		if(!serializer) return response.data
+		else return convert2CytoScapeJs(response.data, schemas, current)
+	} catch(e) {
+		console.log(e)
+		console.log(query)
+		return e
+	}
+}
+
 web.cypher = async function(url, query, serializer, schemas, current) {
 	if(current && !current.includes('#')) current = '#' + current
 
