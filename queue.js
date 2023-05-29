@@ -7,6 +7,7 @@ const fsPromises 	= require('fs').promises;
 const { Kafka }     = require('kafkajs');
 var FormData        = require('form-data');
 
+const Graph 		= require('./graph.js');
 
 
 process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
@@ -27,7 +28,9 @@ const kafka = new Kafka({
 
 queue.init = async function() {
 
-    queue.got = await import('got')
+    const { default: got } = await import('got');
+    this.got = got
+    this.graph = new Graph()
 
     try {
         console.log('connecting kafka: ' + KAFKA_URL)
@@ -94,9 +97,9 @@ queue.callFileService = async function(message, service, me_email) {
 
         if(service.api_type.toLowerCase() == 'elg') {
           if(service.type == 'text') {
-            await ELG_api_text(data, service)
+            await this.ELG_api_text(data, service)
           } else {
-            await ELG_api_binary(data, service)
+            await this.ELG_api_binary(data, service)
           }
         }
       } catch (error) {
@@ -122,10 +125,8 @@ queue.callFileService = async function(message, service, me_email) {
 
 }
 
-async function ELG_api_text(data, service) {
+queue.ELG_api_text = async function(data, service) {
 
-    const got = await import('got');
-    
     // read text to JSON object (content)
     const filePath = data.file.path
     const outputStream = fs.createReadStream(filePath, 'utf8');
@@ -143,7 +144,7 @@ async function ELG_api_text(data, service) {
   
 
       try {
-        const {response} = await got.default.post(service.url + service.api, {
+        const {response} = await this.got.default.post(service.url + service.api, {
           json: data
         }).json();
         console.log(response)
@@ -163,9 +164,8 @@ async function ELG_api_text(data, service) {
 
 
 
-async function ELG_api_binary(data, service) {
+queue.ELG_api_binary = async function(data, service) {
   try {
-    const { default: got } = await import('got');
     const formData = new FormData();
 
 
@@ -182,16 +182,65 @@ async function ELG_api_binary(data, service) {
 
     console.log('Sending files via POST request...');
 
-    const response = await got.post(service.url + service.api, {
+    const response = await this.got.post(service.url + service.api, {
       body: formData,
       headers: formData.getHeaders(),
-    });
+    }).json();
 
-    console.log(response.body);
+    console.log(response.response);
+    await this.getFilesFromStore(response.response, data, service)
+
   } catch (error) {
     console.error('Error sending the files:', error);
   }
 }
+
+
+
+queue.getFilesFromStore = async function(response, data, service) {
+
+  if(response.uri) {
+    const filename = path.basename(response.uri)
+    const filepath = path.join(data.process.path, filename)
+    // download array of files
+    if(Array.isArray(response.uri)) {
+      
+    // download single file
+    } else {
+      // first, create file object to graph
+      // process_rid, file_type, extension, label
+      const fileNode = await this.graph.createProcessFileNode(data.process['@rid'], 'text', 'txt', 'text.txt')
+
+      const url = service.url + response.uri
+      console.log(url)
+      const downloadStream = this.got.stream(url);
+      const fileWriterStream = fs.createWriteStream(filepath);
+
+      downloadStream
+      .on("downloadProgress", ({ transferred, total, percent }) => {
+        const percentage = Math.round(percent * 100);
+        console.error(`progress: ${transferred}/${total} (${percentage}%)`);
+      })
+      .on("error", (error) => {
+        console.error(`Download failed: ${error.message}`);
+      });
+
+      fileWriterStream
+      .on("error", (error) => {
+        console.error(`Could not write file to system: ${error.message}`);
+      })
+      .on("finish", () => {
+        console.log(`File downloaded to ${filepath}`);
+      });
+    
+    downloadStream.pipe(fileWriterStream);
+
+    }
+  } else {
+    console.log('File download not found!')
+  }
+}
+
 
 
 async function imaginary() {

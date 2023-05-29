@@ -91,7 +91,7 @@ module.exports = class Graph {
 	}
 
 
- 	async createFileGraph(project_rid, ctx, file_type) {
+ 	async createProjectFileGraph(project_rid, ctx, file_type) {
 		
 		var extension = path.extname(ctx.file.originalname).replace('.','')
 		const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
@@ -113,6 +113,27 @@ module.exports = class Graph {
 		return update_response
 	}
 
+
+	async createProcessFileNode(process_rid, file_type, extension, label) {
+		
+		const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
+			CREATE (file:File 
+				{
+					type: "${file_type}",
+					extension: "${extension}",
+					label: "${label}"
+				}
+			) - [r:WAS_PRODUCED_BY] -> (p) 
+			RETURN file, p.path as process_path`
+		var response = await web.cypher(URL, query)
+		console.log(response)
+
+		var file_rid = response.result[0].file['@rid']
+		var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+		const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
+		var update_response = await web.cypher(URL, update)
+		return update_response
+	}
 
 
 	async getUserFileMetadata_old(file_rid, me_email) {
