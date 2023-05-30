@@ -4,13 +4,24 @@
     "api_type": "elg",
     "api": "/process",
     "name" :"Poppler",
-    "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
+    
     "supported_types": ["pdf"],
     "supported_formats": ["pdf"],
-    "tasks": {
+
+    "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
+
+    "services": {
         "pdf2text": {
             "params": {"task": "pdf2text"},
-            "output": "store"
+            "output": "store",
+            "name": "Extract text from PDF",
+            "description": "Creates a txt file from PDF."
+        },
+        "pdf2images": {
+            "params": {"task": "pdf2images"},
+            "output": "store",
+            "name": "Extract images from PDF",
+            "description": "Creates separate image files from images in PDF file."           
         }
     }
 

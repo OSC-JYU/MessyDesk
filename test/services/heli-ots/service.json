@@ -1,12 +1,27 @@
 {
     "url": "http://localhost:8080",
     "id": "md-heli-ots",
-    "type": "text",
-    "supported_formats": ["txt"],
     "api_type": "elg",
     "api": "/process",
     "name" :"Language detection",
+
+    "supported_types": ["text"],
+    "supported_formats": ["txt"],
+
     "description": "The HeLI-OTS language identifier is equipped with language models for 200 languages and licensed for academic as
-    well as commercial use."
+    well as commercial use.",
+
+    "services": {
+        "language_detection_doc": {
+            "name": "Detect language per document",
+            "output": "json",
+            "description": "Detect language of the text."
+        },
+        "language_detection_line": {
+            "name": "Detect language per line in document",
+            "output": "json",
+            "description": "Detect language of the text."
+        }
+    }
 
 }

@@ -233,7 +233,7 @@ function convert2CytoScapeJs(data, options) {
 
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
-				if(v.p._image) node.data.image = v.p._image
+				if(v.p.type) node.data._type = v.p.type
 				nodes.push(node)
 				vertex_ids.push(v.r)
 				//console.log(node)

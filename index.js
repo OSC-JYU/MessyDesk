@@ -24,7 +24,6 @@ const styles 		= require('./styles.js');
 	await styles.importSystemStyle()
 })();
 
-const global_services = {}
 const Graph = new graph()
 
 const docIndex = new Document( {
@@ -191,7 +190,7 @@ router.get('/api/services', async function (ctx) {
 
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
-	var services = await Graph.getServicesForFile(global_services, ctx.request.params.rid)
+	var services = await Graph.getServicesForFile(queue.services, ctx.request.params.rid)
 	ctx.body = services
 })
 
