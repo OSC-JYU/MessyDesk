@@ -1,0 +1,27 @@
+# Basic organisation schema with english labels
+
+
+nodes:
+  - Person:
+      label: Person
+  - Process:
+      label: Process
+  - File:
+      label: File
+  - Project:
+      label: Project
+
+
+
+
+
+edges:
+  - Person:IS_OWNER_OF:Project:
+      label: owner of
+      label_rev: owners
+  - File:IS_PART_OF:Project:
+      label: belongs to
+      label_rev: files
+  - File:WAS_PRODUCED_BY:Process:
+      label: was produced by
+      label_rev: produced files

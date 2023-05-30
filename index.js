@@ -11,12 +11,17 @@ const { Index, Document, Worker } = require("flexsearch");
 const graph 		= require('./graph.js');
 const queue 		= require('./queue.js');
 const media 		= require('./media.js');
+const schema 		= require('./schema.js');
+const styles 		= require('./styles.js');
 
 
 
 (async () => {
 	console.log('initing...')
 	await queue.init()
+	// import schema
+	await schema.importSystemSchema()
+	await styles.importSystemStyle()
 })();
 
 const global_services = {}
@@ -31,6 +36,8 @@ const docIndex = new Document( {
 })
 
 //Graph.createIndex(docIndex)
+
+const AUTH_HEADER = 'mail'
 
 // LOGGING
 require('winston-daily-rotate-file');
@@ -55,6 +62,7 @@ const logger = winston.createLogger({
 
 logger.info('MessyDesk started');
 // LOGGING ENDS
+var visitors = []
 
 var app				= new Koa();
 var router			= new Router();
@@ -108,8 +116,15 @@ router.get('/api', function (ctx) {
 })
 
 router.get('/api/me', async function (ctx) {
-	var me = await Graph.myId(ctx.request.headers.mail)
-	ctx.body = {rid: me, id: ctx.request.headers.mail}
+	if(process.env.CREATE_USERS_ON_THE_FLY = 1) {
+		// keep list of visitors so that we do not create double users on sequential requests
+		if(!visitors.includes(ctx.request.headers[AUTH_HEADER])) {
+			visitors.push(ctx.request.headers[AUTH_HEADER])
+			await Graph.checkMe(ctx.request.headers[AUTH_HEADER])
+		}
+	}
+	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
 
 router.get('/api/stall', async function (ctx) {
@@ -137,8 +152,8 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 // project
 
 router.post('/api/projects', async function (ctx) {
-	var me_rid = await Graph.myId(ctx.request.headers.mail)
-	var n = await Graph.createProject(ctx.request.body, me_rid)
+	var me = await Graph.myId(ctx.request.headers.mail)
+	var n = await Graph.createProject(ctx.request.body, me.rid)
 	await media.createProjectDir(n)
 	ctx.body = n
 })
@@ -216,8 +231,40 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 	}
 })
 
+router.get('/api/queries', async function (ctx) {
+	ctx.body = []
+
+})
 
 
+router.get('/api/menus', async function (ctx) {
+	ctx.body = []
+
+})
+
+
+router.get('/api/groups', async function (ctx) {
+	ctx.body = []
+
+})
+
+router.post('/api/layouts', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.setLayout(ctx.request.body, me)
+	ctx.body = n
+})
+
+router.get('/api/layouts/:rid', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getLayoutByTarget(ctx.request.params.rid, me)
+	ctx.body = n
+})
+
+
+router.get('/api/styles', async function (ctx) {
+	var n = await styles.getStyle()
+	ctx.body = n
+})
 
 
 router.get('/api/search', async function (ctx) {
@@ -233,7 +280,7 @@ router.post('/api/query', async function (ctx) {
 })
 
 router.get('/api/schemas', async function (ctx) {
-	var n = await Graph.getSchemaTypes()
+	var n = await schema.getSchemaTypes()
 	ctx.body = n
 })
 
@@ -248,7 +295,7 @@ router.get('/api/queries', async function (ctx) {
 })
 
 router.get('/api/schemas/:schema', async function (ctx) {
-	var n = await Graph.getSchema(ctx.request.params.schema)
+	var n = await schema.getSchema(ctx.request.params.schema)
 	ctx.body = n
 })
 
@@ -258,7 +305,7 @@ router.post('/api/graph/query/me', async function (ctx) {
 })
 
 router.post('/api/graph/query', async function (ctx) {
-	var n = await Graph.getGraph(ctx.request.body)
+	var n = await Graph.getGraph(ctx.request.body, ctx)
 	ctx.body = n
 })
 

@@ -1,0 +1,44 @@
+# Base system Schema for MessyDesk.
+# Edit only if you really, really want to (might mess things)!
+
+
+nodes:
+  - Person:
+      label: Person
+      id: text
+  - UserGroup: {}
+  - Menu: {}
+  - Query:
+      query: ''
+  - Tag:
+      layout: fcose
+  - NodeGroup: {}
+
+
+  - Process:
+      label: Process
+  - File:
+      label: File
+  - Project:
+      label: Project
+
+edges:
+  - Menu:VISIBLE_FOR_GROUP:UserGroup:
+      label: visible for user group(s)
+      label_rev: visible menus
+  - Query:IN_MENU:Menu:
+      label: shown in menu
+      label_rev: queries
+  - Tag:PART_OF_MENU:Menu:
+      label: shown in menu
+      label_rev: tags
+
+  - Person:IS_OWNER_OF:Project:
+      label: owner of
+      label_rev: owners
+  - File:IS_PART_OF:Project:
+      label: belongs to
+      label_rev: files
+  - File:WAS_PRODUCED_BY:Process:
+      label: was produced by
+      label_rev: produced files
