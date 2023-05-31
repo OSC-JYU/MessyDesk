@@ -7,7 +7,7 @@ This is a VERY early version of MessyDesk, a digital humanities desktop (for hum
 The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
 
 
-![UI](https://github.com/OSC-JYU/MessyDesk/PDFSense/blob/main/test/files/messydesk-ui.png)
+![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/test/files/messydesk-ui.png)
 
 Things you can do:
 - extract images and text from PDF
