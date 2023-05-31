@@ -1,6 +1,7 @@
 {
     "url": "http://localhost:8300",
     "id": "md-poppler",
+    "type": "pdf",
     "api_type": "elg",
     "api": "/process",
     "name" :"Poppler",
@@ -10,7 +11,7 @@
 
     "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
 
-    "services": {
+    "crunchers": {
         "pdf2text": {
             "params": {"task": "pdf2text"},
             "output": "store",

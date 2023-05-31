@@ -6,6 +6,9 @@ This is a VERY early version of MessyDesk, a digital humanities desktop (for hum
 
 The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
 
+
+![UI](https://github.com/OSC-JYU/MessyDesk/PDFSense/blob/main/test/files/messydesk-ui.png)
+
 Things you can do:
 - extract images and text from PDF
 - process images
@@ -67,9 +70,7 @@ https://hub.docker.com/r/nextcloud/aio-imaginary
 
 This create a consumer for topic "md-imaginary". 
 
-One can send a processing request to that service like this:
 
-    curl -X POST http://localhost:8200/api/queue/md-imaginary
 
 
 

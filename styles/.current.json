@@ -186,11 +186,16 @@
 	 {
 		 "selector": "node[type='Process']",
 		 "style": {
-		 	"shape": "ellipse",
-			"height": "60",
-			"width": "60",
+		 	"shape": "rectangle",
+			"height": "40",
+			"width": "40",
 			 "color":"black",
-			 "background-color": "cyan"
+			 "text-valign": "top",
+			 "border-width": 0,
+			 "background-color": "white",
+			 "background-fit": "cover",
+			 "background-image": "icons/cookie-bite-solid.svg",
+			 "content": "(node) => node.data('name')"
 		 }
 	 },
 

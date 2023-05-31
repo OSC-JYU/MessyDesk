@@ -86,20 +86,15 @@ queue.registerService = async function(data) {
 
 }
 
-queue.callFileService = async function(message, service, me_email) {
+queue.callFileService = async function(message, service) {
     try {
-//        console.log(service.url)
-        var data = JSON.parse(message.value.toString())
-        console.log('callservice...')
-        // console.log(message.value.toString())
-        // console.log(data.content)
-
+        var message_json = JSON.parse(message.value.toString())
 
         if(service.api_type.toLowerCase() == 'elg') {
           if(service.type == 'text') {
-            await this.ELG_api_text(data, service)
+            await this.ELG_api_text(message_json, service)
           } else {
-            await this.ELG_api_binary(data, service)
+           await this.ELG_api_binary(message_json, service)
           }
         }
       } catch (error) {
@@ -133,18 +128,19 @@ queue.ELG_api_text = async function(data, service) {
     
     let content = '';
     
-    outputStream.on('data', (data) => {
-      console.log(data)
-      content += data;
+    outputStream.on('data', (chunk) => {
+      console.log(chunk)
+      content += chunk;
     });
     
     outputStream.on('end', async() => {
       console.log('stream ended.')
       data.content = content
-  
-
+      delete(data.process)
+      delete(data.file)
+      console.log(data)
       try {
-        const {response} = await this.got.default.post(service.url + service.api, {
+        const {response} = await this.got.post(service.url + service.api, {
           json: data
         }).json();
         console.log(response)

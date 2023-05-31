@@ -155,7 +155,7 @@ module.exports = class Graph {
 
 
 	async getProjectFiles(rid, me_email) {
-		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[:IS_PART_OF]-(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
 		var result = await web.cypher(query)
 		return result
 	}
@@ -177,7 +177,7 @@ module.exports = class Graph {
 		var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
 		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
 		var update_response = await web.cypher(update)
-		await this.connect(file_rid, 'WAS_PROCESSED_BY', process_rid)
+		await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 
 		return update_response.result[0]
 
@@ -195,7 +195,7 @@ module.exports = class Graph {
 					label: "${ctx.file.originalname}",
                     _active: true
 				}
-			) - [r:IS_PART_OF] -> (p) 
+			) <- [r:HAS_FILE] - (p) 
 			RETURN file`
 		var response = await web.cypher(query)
 		console.log(response)
@@ -215,9 +215,10 @@ module.exports = class Graph {
 				{
 					type: "${file_type}",
 					extension: "${extension}",
-					label: "${label}"
+					label: "${label}",
+					_active: true
 				}
-			) - [r:WAS_PRODUCED_BY] -> (p) 
+			) <- [r:PRODUCED] - (p) 
 			RETURN file, p.path as process_path`
 		var response = await web.cypher(query)
 		console.log(response)
@@ -246,7 +247,7 @@ module.exports = class Graph {
 
 	async getUserFileMetadata(file_rid, me_email) {
 		// file must be somehow related to a project that is owned by user
-		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN file`
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[*]->(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN file`
 		var file_response = await web.cypher(query)
 		return file_response.result[0]
 	}
