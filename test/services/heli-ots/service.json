@@ -32,7 +32,7 @@
         }
     },
 
-    "crunchers": {
+    "tasks": {
         "language_detection_doc": {
             "name": "Detect language per document",
             "output": "json",

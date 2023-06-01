@@ -42,8 +42,8 @@
 		"selector": "node[type='Person']",
 		"style": {
 			"shape": "ellipse",
-			"height": "60",
-			"width": "60",
+			"height": "30",
+			"width": "30",
 			"font-size": 10,
 			"text-valign": "top",
 			"color":"black",
@@ -80,46 +80,7 @@
 	 },
 
 
-	 {
-		 "selector": "node[type='QueryMap']",
-		 "style": {
-			 "height": 40,
-			 "width": 40,
-			 "shape": "rectangle",
-			 "background-color": "white",
-			 "font-size": 10,
-			 "text-valign": "top",
-			 "color":"black",
-			 "border-width": 0,
-			 "background-fit": "cover",
-			 "background-image": "icons/map_icon.svg"
-		 }
-	 },
 
-	 {
-		 "selector": "node[type='Container']",
-		 "style": {
-			 "height": 40,
-			 "width": 40,
-			 "font-size": 10,
-			 "text-valign": "top",
-			 "color":"black",
-			 "background-fit": "cover",
-			 "background-image": "icons/docker_icon.svg"
-		 }
-	 },
-
-	 {
-		 "selector": "node[type='Repository']",
-		 "style": {
-			 "height": 20,
-			 "font-size": 8,
-			 "color":"white",
-			 "background-position-x": "3px",
-		     "background-width": "20px",
-			 "background-image": "icons/gitlab_icon.svg"
-		 }
-	 },
 
 	 {
 		 "selector": "node[_type='text']",
@@ -235,6 +196,16 @@
 			 "color":"black",
 			 "background-color": "#F1C827"
 		 }
-	 }
+	 },
+
+
+	 {
+		"selector": ".selected",
+		"style": {
+
+			"background-color": "#99cc00"
+
+		}
+	}
 
 ]

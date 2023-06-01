@@ -168,7 +168,7 @@ module.exports = class Graph {
 		var file_path = filegraph.path.split('/').slice( 0, -1 ).join('/')
 		var process = {}
 		// file must be part of project that user owns
-		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)<-[*]-(file:File) WHERE p.id = "${me_email}" AND id(file) = "${file_rid}" RETURN pr`
+		const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[*]->(file:File) WHERE p.id = "${me_email}" AND id(file) = "${file_rid}" RETURN pr`
 		var response = await web.cypher(query)
 		console.log(response.result[0])
 
@@ -319,7 +319,10 @@ module.exports = class Graph {
 
 	async deleteNode(rid) {
 		if(!rid.match(/^#/)) rid = '#' + rid
-		var query = `MATCH (n) WHERE id(n) = '${rid}' RETURN labels(n) as type`
+		var query = `MATCH (n)
+			WHERE id(n) = "${rid}" 
+			OPTIONAL MATCH (n)-[*]->(child)
+			DETACH delete n,child`
 		var response = await web.cypher(query)
 		if(response.result && response.result.length == 1) {
 			var type = response.result[0].type

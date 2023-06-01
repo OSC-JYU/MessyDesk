@@ -1,11 +1,10 @@
 
-const util			= require('util');
-const path 			= require('path');
+const util			  = require('util');
+const path 			  = require('path');
 const {pipeline} 	= require('stream');
-const fs 			= require('fs');
-const fsPromises 	= require('fs').promises;
-const { Kafka }     = require('kafkajs');
-var FormData        = require('form-data');
+const fs 			    = require('fs-extra');
+const { Kafka }   = require('kafkajs');
+var FormData      = require('form-data');
 
 const Graph 		= require('./graph.js');
 
@@ -187,7 +186,7 @@ queue.ELG_api_binary = async function(data, service) {
     await this.getFilesFromStore(response.response, data, service)
 
   } catch (error) {
-    console.error('Error sending the files:', error);
+    console.error('Error sending the files:', error.message);
   }
 }
 
@@ -197,7 +196,7 @@ queue.getFilesFromStore = async function(response, data, service) {
 
   if(response.uri) {
     const filename = path.basename(response.uri)
-    const filepath = path.join(data.process.path, filename)
+ 
     // download array of files
     if(Array.isArray(response.uri)) {
       
@@ -206,6 +205,15 @@ queue.getFilesFromStore = async function(response, data, service) {
       // first, create file object to graph
       // process_rid, file_type, extension, label
       const fileNode = await this.graph.createProcessFileNode(data.process['@rid'], 'text', 'txt', 'text.txt')
+      console.log(fileNode)
+      var filepath = ''
+
+      try {
+        filepath = fileNode.result[0].path
+        await fs.ensureDir(path.dirname(filepath))
+      } catch(e) {
+        throw('Could not create file directory!' + e.message)
+      }
 
       const url = service.url + response.uri
       console.log(url)

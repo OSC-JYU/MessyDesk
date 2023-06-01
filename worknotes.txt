@@ -1,0 +1,14 @@
+
+
+
+  GREMLIN
+
+g.V('#105:7')
+  .as('f')
+  .repeat(both().simplePath())
+  .until(hasLabel('Project'))
+  .in('IS_OWNER')
+  .hasLabel('Person')
+  .has('id', 'ari.hayrinen@jyu.fi')
+  .select('f')
+

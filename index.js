@@ -138,7 +138,6 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	var response = await Graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
 	if (response.result.length == 0) throw('Project not found')
 
-
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
@@ -147,6 +146,24 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 
 })
 
+
+router.get('/api/files/:file_rid', async function (ctx) {
+	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+    const src = fs.createReadStream(file_metadata.path);
+	if(file_metadata.type =='pdf') {
+		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
+		ctx.set('Content-Type', 'application/pdf');
+	} else if(file_metadata.type =='image') {
+		ctx.body = `<h2>Image display not implemented yet</h2> `
+	} else if(file_metadata.type =='text') {
+		ctx.set('Content-Type', 'text/plain; charset=utf-8');
+	} else {
+		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+	}
+	//ctx.type = 'application/octet-stream';
+
+   ctx.body = src
+})
 
 // project
 
@@ -325,6 +342,12 @@ router.get('/api/graph/vertices/:rid', async function (ctx) {
 
 router.post('/api/graph/vertices/:rid', async function (ctx) {
 	var n = await Graph.setNodeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	ctx.body = n
+})
+
+router.delete('/api/graph/vertices/:rid', async function (ctx) {
+	var n = await Graph.deleteNode(ctx.request.params.rid)
+	docIndex.remove('#' + ctx.request.params.rid)
 	ctx.body = n
 })
 
