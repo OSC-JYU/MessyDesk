@@ -27,8 +27,9 @@
         "languages": {
             "name": "language selection",
             "default": ["fin","swe","eng"],
-            "help": "You can limit language selection with this list of strings. Use ISO 639-3 language codes.",
-            "display": "textinput"
+            "help": "You can limit language selection with this list of strings. Use ISO 639-3 language codes separated with comma.",
+            "display": "textinput",
+            "type": "array"
         }
     },
 

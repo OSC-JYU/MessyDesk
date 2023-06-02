@@ -7,6 +7,7 @@ const { Kafka }   = require('kafkajs');
 var FormData      = require('form-data');
 
 const Graph 		= require('./graph.js');
+const media 		= require('./media.js');
 
 
 process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
@@ -75,9 +76,6 @@ queue.registerService = async function(data) {
           eachMessage: async ({ topic, partition, message,  heartbeat, pause }) => {
             // do actual processing
             await this.callFileService(message, queue.services[data.id])
-            // console.log({
-            //   value: message.value.toString(),
-            // })
           },
         })
 
@@ -95,7 +93,10 @@ queue.callFileService = async function(message, service) {
           } else {
            await this.ELG_api_binary(message_json, service)
           }
+        } else if(service.api_type.toLowerCase() == 'imaginary') {
+          await this.imaginary_api(message_json, service)
         }
+
       } catch (error) {
         console.log('PAM')
         if (error.response) {
@@ -119,10 +120,13 @@ queue.callFileService = async function(message, service) {
 
 }
 
-queue.ELG_api_text = async function(data, service) {
+queue.ELG_api_text = async function(message, service) {
+
+  console.log('**************** ELG api binary ***************')
+  console.log(message)
 
     // read text to JSON object (content)
-    const filePath = data.file.path
+    const filePath = message.file.path
     const outputStream = fs.createReadStream(filePath, 'utf8');
     
     let content = '';
@@ -133,19 +137,35 @@ queue.ELG_api_text = async function(data, service) {
     });
     
     outputStream.on('end', async() => {
+
       console.log('stream ended.')
-      data.content = content
-      delete(data.process)
-      delete(data.file)
-      console.log(data)
+      message.content = content
+      process_rid = message.process['@rid']
+      delete(message.process)
+      delete(message.file)
+      message.params.nbest = 1
+      message.params.languages = ['fin','eng']
+      message.type = "text"
+      console.log(message)
+
       try {
         const {response} = await this.got.post(service.url + service.api, {
-          json: data
+          json: message
         }).json();
         console.log(response)
+        // first, create file object to graph
+        // process_rid, file_type, extension, label
+        const fileNode = await this.graph.createProcessFileNode(process_rid, 'data', 'json', 'response.json')
+        try {
+          filepath = fileNode.result[0].path
+          await fs.ensureDir(path.dirname(filepath))
+          await media.writeJSON(response, path.basename(filepath), path.dirname(filepath))
+        } catch(e) {
+          throw('Could not create file directory!' + e.message)
+        }
 
       } catch(e) {
-        console.log(e)
+        console.log(e.message)
       }
 
     });
@@ -159,19 +179,21 @@ queue.ELG_api_text = async function(data, service) {
 
 
 
-queue.ELG_api_binary = async function(data, service) {
+queue.ELG_api_binary = async function(message, service) {
   try {
+    console.log('**************** ELG api binary ***************')
+    console.log(message)
     const formData = new FormData();
 
 
     // Append JSON file
-    const jsonContent = { type: 'pdf', params: {task: 'pdf2text'} };
+    const jsonContent = { type: service.type, params: {task: 'pdf2text'} };
 
     formData.append('request', JSON.stringify(jsonContent), {contentType: 'application/json',
     filename: 'request.json'});
 
     // append content file
-    const filepath = data.file.path
+    const filepath = message.file.path
     const binaryReadStream = fs.createReadStream(filepath);
     formData.append('content', binaryReadStream, { filename: 'content.pdf', contentType: 'application/pdf'  });
 
@@ -183,7 +205,7 @@ queue.ELG_api_binary = async function(data, service) {
     }).json();
 
     console.log(response.response);
-    await this.getFilesFromStore(response.response, data, service)
+    await this.getFilesFromStore(response.response, message, service)
 
   } catch (error) {
     console.error('Error sending the files:', error.message);
@@ -192,7 +214,109 @@ queue.ELG_api_binary = async function(data, service) {
 
 
 
-queue.getFilesFromStore = async function(response, data, service) {
+queue.imaginary_api = async function(message, service) {
+
+    //const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
+
+    try {
+      console.log('**************** IMAGINARY api ***************')
+      console.log(message)
+        const got = await import('got');
+        const filepath = message.file.path
+        const readStream = fs.createReadStream(filepath);
+        const formData = new FormData();
+        formData.append('file', readStream);
+        
+        console.log('Sending image via POST request...');
+        // first, create file object to graph
+      // process_rid, file_type, extension, label
+      const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
+      console.log(fileNode)
+      var writepath = ''
+      try {
+        writepath = fileNode.result[0].path
+        await fs.ensureDir(path.dirname(writepath))
+      } catch(e) {
+        throw('Could not create file directory!' + e.message)
+      }
+        const url_params = objectToURLParams(message.params)
+        var url = service.url + service.api +  message.task + '?' + url_params
+        console.log('**********************************')
+        console.log(url)
+        const postStream = queue.got.stream.post(url, {
+          body: formData,
+          headers: formData.getHeaders(),
+        });
+        
+        console.log(writepath)
+        const writeStream = fs.createWriteStream(writepath);
+        
+        pipeline(postStream, writeStream, (error) => {
+          if (error) {
+            console.error('Error sending or saving the image:', error);
+          } else {
+            console.log('Image sent and saved successfully.');
+          }
+        });
+      } catch (error) {
+        console.error('Error reading, sending, or saving the image:', error.message);
+      }
+}
+
+
+queue.pdfsense_api = async function(message, service) {
+
+  const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
+
+  try {
+    console.log('**************** PDFSENSE api ***************')
+    console.log(message)
+    const got = await import('got');
+    const filepath = message.file.path
+    const readStream = fs.createReadStream(filepath);
+    const formData = new FormData();
+    formData.append('file', readStream);
+    
+    console.log('Sending image via POST request...');
+    // first, create file object to graph
+    // process_rid, file_type, extension, label
+    const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
+    console.log(fileNode)
+    var writepath = ''
+    try {
+      writepath = fileNode.result[0].path
+      await fs.ensureDir(path.dirname(writepath))
+    } catch(e) {
+      throw('Could not create file directory!' + e.message)
+    }
+      const url_params = objectToURLParams(message.params)
+      var url = service.url + service.api +  message.task + '?' + url_params
+      console.log('**********************************')
+      console.log(url)
+      const postStream = queue.got.stream.post(url, {
+        body: formData,
+        headers: formData.getHeaders(),
+      });
+      
+      console.log(writepath)
+      const writeStream = fs.createWriteStream(writepath);
+      
+      pipeline(postStream, writeStream, (error) => {
+        if (error) {
+          console.error('Error sending or saving the image:', error);
+        } else {
+          console.log('Image sent and saved successfully.');
+        }
+      });
+    } catch (error) {
+      console.error('Error reading, sending, or saving the image:', error.message);
+    }
+}
+
+
+
+
+queue.getFilesFromStore = async function(response, message, service) {
 
   if(response.uri) {
     const filename = path.basename(response.uri)
@@ -204,7 +328,7 @@ queue.getFilesFromStore = async function(response, data, service) {
     } else {
       // first, create file object to graph
       // process_rid, file_type, extension, label
-      const fileNode = await this.graph.createProcessFileNode(data.process['@rid'], 'text', 'txt', 'text.txt')
+      const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'text', 'txt', 'text.txt')
       console.log(fileNode)
       var filepath = ''
 
@@ -245,43 +369,23 @@ queue.getFilesFromStore = async function(response, data, service) {
   }
 }
 
+function objectToURLParams(obj) {
+  const params = [];
 
-
-async function imaginary() {
-
-    const imageFilePath = './test/files/sorsa.jpg'; // Replace with the actual image file path
-    const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20'; // Replace with the actual image destination URL
-    const savedImageFilePath = './saved-image.jpg'; // Replace with the desired file path to save the returned image
-    
-
-    try {
-        const got = await import('got');
-        
-        const readStream = fs.createReadStream(imageFilePath);
-        const formData = new FormData();
-        formData.append('file', readStream);
-        
-        console.log('Sending image via POST request...');
-        
-        const postStream = queue.got.default.stream.post(imageDestinationUrl, {
-          body: formData,
-          headers: formData.getHeaders(),
+  for (let key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      let value = obj[key];
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          params.push(`${encodeURIComponent(key)}[]=${encodeURIComponent(item)}`);
         });
-        
-        const writeStream = fs.createWriteStream(savedImageFilePath);
-        
-        pipeline(postStream, writeStream, (error) => {
-          if (error) {
-            console.error('Error sending or saving the image:', error);
-          } else {
-            console.log('Image sent and saved successfully.');
-          }
-        });
-      } catch (error) {
-        console.error('Error reading, sending, or saving the image:', error.message);
+      } else {
+        params.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
       }
+    }
+  }
+
+  return params.join('&');
 }
-
-
 
 module.exports = queue

@@ -22,7 +22,7 @@
             "params": {"task": "pdf2images"},
             "output": "store",
             "name": "Extract images from PDF",
-            "description": "Creates separate image files from images in PDF file."           
+            "description": "Creates separate image files from images in PDF file in any resolution."           
         }
     }
 

@@ -154,8 +154,11 @@ router.get('/api/files/:file_rid', async function (ctx) {
 		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 		ctx.set('Content-Type', 'application/pdf');
 	} else if(file_metadata.type =='image') {
-		ctx.body = `<h2>Image display not implemented yet</h2> `
+		//ctx.body = `<h2>Image display not implemented yet</h2> <img src="">`
+		ctx.set('Content-Type', 'image/png');
 	} else if(file_metadata.type =='text') {
+		ctx.set('Content-Type', 'text/plain; charset=utf-8');
+	} else if(file_metadata.type =='data') {
 		ctx.set('Content-Type', 'text/plain; charset=utf-8');
 	} else {
 		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
@@ -222,7 +225,8 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 		if(file_metadata.path) {
 			// add process to graph
-			var process = await Graph.createProcessGraph(topic, ctx.request.body, file_metadata, ctx.request.headers.mail)
+			var task_name = queue.services[topic].tasks[ctx.request.body.task].name
+			var process = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
 			await media.createProcessDir(process.path) 
 			await media.writeJSON(ctx.request.body, 'params.json', path.dirname(process.path))
 

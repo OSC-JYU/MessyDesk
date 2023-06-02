@@ -74,7 +74,7 @@
 		     "background-position-y":"0px",
 		     "background-width":"20px",
 		     "background-height":"20px",
-		     "background-image": "icons/team_icon2.svg",
+		     "background-image": "/icons/team_icon2.svg",
 		     "content": "(node) => node.data('name')"
 		 }
 	 },
@@ -93,7 +93,7 @@
 			  "border-width": 0,
 			 "background-color": "white",
 			 "background-fit": "cover",
-			 "background-image": "icons/file-text.svg",
+			 "background-image": "/icons/file-text.svg",
 			 "content": "(node) => node.data('name')"
 		 }
 	 },
@@ -110,7 +110,7 @@
 			 "border-width": 0,
 			"background-color": "white",
 			"background-fit": "cover",
-			"background-image": "icons/file-pdf.svg",
+			"background-image": "/icons/file-pdf.svg",
 			"content": "(node) => node.data('name')"
 		}
 	},
@@ -127,10 +127,27 @@
 			"border-width": 0,
 			"background-color": "white",
 			"background-fit": "cover",
-			"background-image": "icons/file-image.svg",
+			"background-image": "/icons/file-image.svg",
 			"content": "(node) => node.data('name')"
 		}
 	},
+
+	{
+		"selector": "node[_type='data']",
+		"style": {
+			"height": 40,
+			"width": 40,
+			"shape": "rectangle",
+			"color":"black",
+			"text-valign": "top",
+			"border-width": 0,
+			"background-color": "white",
+			"background-fit": "cover",
+			"background-image": "icons/filetype-json.svg",
+			"content": "(node) => node.data('name')"
+		}
+	},
+
 
 
 
