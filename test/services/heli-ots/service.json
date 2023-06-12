@@ -4,7 +4,7 @@
     "type": "text",
     "api_type": "elg",
     "api": "/process",
-    "name" :"Language detection",
+    "name" :"HELI-OTS",
 
     "supported_types": ["text"],
     "supported_formats": ["txt"],
@@ -36,11 +36,6 @@
     "tasks": {
         "language_detection_doc": {
             "name": "Detect language per document",
-            "output": "json",
-            "description": "Detect language of the text."
-        },
-        "language_detection_line": {
-            "name": "Detect language per line in document",
             "output": "json",
             "description": "Detect language of the text."
         }
