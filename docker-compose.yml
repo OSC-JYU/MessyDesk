@@ -14,3 +14,16 @@ services:
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
       - BITNAMI_DEBUG=yes
 
+
+  arcadedb:
+    image: arcadedata/arcadedb:22.11.1
+    container_name: arcadedb_comp
+    ports:
+      - 2480:2480
+    environment:
+     - JAVA_OPTS=-Darcadedb.server.rootPassword=node_master
+    volumes:
+     - arcadedata:/home/arcadedb/databases
+
+volumes:
+  arcadedata: {}

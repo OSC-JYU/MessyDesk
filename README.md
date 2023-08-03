@@ -19,7 +19,6 @@ Things you can do:
 ### status
 
 Hardly anything works yet :)
-See you in DARIAH Annual Event 2023 in Budapest!
 
 
 

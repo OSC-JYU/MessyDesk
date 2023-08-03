@@ -5,7 +5,6 @@ const {pipeline} 	= require('stream');
 const fs 			    = require('fs-extra');
 const { Kafka }   = require('kafkajs');
 var FormData      = require('form-data');
-const { uuid }    = require('uuidv4');
 
 const Graph 		= require('./graph.js');
 const media 		= require('./media.js');
@@ -31,6 +30,7 @@ queue.init = async function() {
 
     const { default: got } = await import('got');
     this.got = got
+    this.graph = new Graph()
 
     try {
         console.log('connecting kafka: ' + KAFKA_URL)
@@ -93,12 +93,8 @@ queue.callFileService = async function(message, service) {
           } else {
            await this.ELG_api_binary(message_json, service)
           }
-        } else if(service.api_type.toLowerCase() == 'thumbnail') {
-          await this.thumbnailer_api(message_json, service)
         } else if(service.api_type.toLowerCase() == 'imaginary') {
           await this.imaginary_api(message_json, service)
-        } else if(service.api_type.toLowerCase() == 'pdfsense') {
-          await this.pdfsense_api(message_json, service)
         }
 
       } catch (error) {
@@ -123,123 +119,6 @@ queue.callFileService = async function(message, service) {
 
 
 }
-
-
-queue.thumbnailer_api = async function(message, service) {
-
-  //create preview and thumbnails images
-
-  try {
-    console.log('**************** THUMBNAILER api ***************')
-    console.log(message)
-    const got = await import('got');
-    const filepath = message.path
-    const readStream = fs.createReadStream(filepath);
-    const formData = new FormData();
-    formData.append('file', readStream);
-    
-    console.log('Sending image via POST request...');
-
-    var thumb_path = ''
-    var preview_path = ''
-    try {
-      await fs.ensureDir(path.dirname(message.path))
-      thumb_path = path.join(path.dirname(message.path), "thumbnail.jpg")
-      preview_path = path.join(path.dirname(message.path), "preview.jpg")
-    } catch(e) {
-      throw('Could not create file directory!' + e.message)
-    }
-
-    // preview
-    var url = service.url + service.api +  'thumbnail?width=800&type=jpeg' 
-    const postStream = queue.got.stream.post(url, {
-      body: formData,
-      headers: formData.getHeaders(),
-    });
-    
-    const previewStream = fs.createWriteStream(preview_path);
-    
-    pipeline(postStream, previewStream, (error) => {
-      if (error) {
-        console.error('Error sending or saving the image:', error);
-      } else {
-        console.log('Image sent and saved successfully.');
-      }
-    });
-    
-    // // thumbnail
-    // url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
-    // const postStream2 = queue.got.stream.post(url, {
-    //   body: formData,
-    //   headers: formData.getHeaders(),
-    // });
-
-    // const thumbStream = fs.createWriteStream(thumb_path);
-
-    // pipeline(postStream2, thumbStream, (error) => {
-    //   if (error) {
-    //     console.error('Error sending or saving the image:', error);
-    //   } else {
-    //     console.log('Image sent and saved successfully.');
-    //   }
-    // });
-
-    } catch (error) {
-      console.error('Error reading, sending, or saving the image:', error.message);
-    }
-}
-
-queue.imaginary_api = async function(message, service) {
-
-  //const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
-
-  try {
-    console.log('**************** IMAGINARY api ***************')
-    console.log(message)
-      const got = await import('got');
-      const filepath = message.file.path
-      const readStream = fs.createReadStream(filepath);
-      const formData = new FormData();
-      formData.append('file', readStream);
-      
-      console.log('Sending image via POST request...');
-      // first, create file object to graph
-    // process_rid, file_type, extension, label
-    const fileNode = await Graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
-    console.log(fileNode)
-    var writepath = ''
-    try {
-      writepath = fileNode.result[0].path
-      await fs.ensureDir(path.dirname(writepath))
-    } catch(e) {
-      throw('Could not create file directory!' + e.message)
-    }
-      const url_params = objectToURLParams(message.params)
-      var url = service.url + service.api +  message.task + '?' + url_params
-      console.log('**********************************')
-      console.log(url)
-      const postStream = queue.got.stream.post(url, {
-        body: formData,
-        headers: formData.getHeaders(),
-      });
-      
-      console.log(writepath)
-      const writeStream = fs.createWriteStream(writepath);
-      
-      pipeline(postStream, writeStream, (error) => {
-        if (error) {
-          console.error('Error sending or saving the image:', error);
-        } else {
-          console.log('Image sent and saved successfully.');
-        }
-      });
-    } catch (error) {
-      console.error('Error reading, sending, or saving the image:', error.message);
-    }
-}
-
-
-
 
 queue.ELG_api_text = async function(message, service) {
 
@@ -276,7 +155,7 @@ queue.ELG_api_text = async function(message, service) {
         console.log(response)
         // first, create file object to graph
         // process_rid, file_type, extension, label
-        const fileNode = await Graph.createProcessFileNode(process_rid, 'data', 'json', 'response.json')
+        const fileNode = await this.graph.createProcessFileNode(process_rid, 'data', 'json', 'response.json')
         try {
           filepath = fileNode.result[0].path
           await fs.ensureDir(path.dirname(filepath))
@@ -335,6 +214,56 @@ queue.ELG_api_binary = async function(message, service) {
 
 
 
+queue.imaginary_api = async function(message, service) {
+
+    //const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
+
+    try {
+      console.log('**************** IMAGINARY api ***************')
+      console.log(message)
+        const got = await import('got');
+        const filepath = message.file.path
+        const readStream = fs.createReadStream(filepath);
+        const formData = new FormData();
+        formData.append('file', readStream);
+        
+        console.log('Sending image via POST request...');
+        // first, create file object to graph
+      // process_rid, file_type, extension, label
+      const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
+      console.log(fileNode)
+      var writepath = ''
+      try {
+        writepath = fileNode.result[0].path
+        await fs.ensureDir(path.dirname(writepath))
+      } catch(e) {
+        throw('Could not create file directory!' + e.message)
+      }
+        const url_params = objectToURLParams(message.params)
+        var url = service.url + service.api +  message.task + '?' + url_params
+        console.log('**********************************')
+        console.log(url)
+        const postStream = queue.got.stream.post(url, {
+          body: formData,
+          headers: formData.getHeaders(),
+        });
+        
+        console.log(writepath)
+        const writeStream = fs.createWriteStream(writepath);
+        
+        pipeline(postStream, writeStream, (error) => {
+          if (error) {
+            console.error('Error sending or saving the image:', error);
+          } else {
+            console.log('Image sent and saved successfully.');
+          }
+        });
+      } catch (error) {
+        console.error('Error reading, sending, or saving the image:', error.message);
+      }
+}
+
+
 queue.pdfsense_api = async function(message, service) {
 
   const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
@@ -347,53 +276,31 @@ queue.pdfsense_api = async function(message, service) {
     const readStream = fs.createReadStream(filepath);
     const formData = new FormData();
     formData.append('file', readStream);
-
     
     console.log('Sending image via POST request...');
+
+    // we first upload file without any parameters
+
+
     // first, create file object to graph
     // process_rid, file_type, extension, label
-    // const fileNode = await Graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
-    // console.log(fileNode)
-    // var writepath = ''
-    // try {
-    //   writepath = fileNode.result[0].path
-    //   await fs.ensureDir(path.dirname(writepath))
-    // } catch(e) {
-    //   throw('Could not create file directory!' + e.message)
-    // }
-
-
-     // we first upload image to pdfsense
-    var upload_url = service.url + service.api + '/uploads?prefix=' + uuid()
-    console.log('**********************')
-    console.log(upload_url)
-
-    const response = await this.got.post(upload_url, {
-      body: formData,
-      headers: formData.getHeaders(),
-    }).json();
-
-    console.log(response)
-    response.path = response.path.replace(':8200','')
-
-    var process_url = service.url + response.path + '/extracted/text'
-    console.log(process_url)
-    const process_response = await this.got.post(process_url).json()
-    console.log(process_response)
-
-    var f = {}
-    f.uri =  response.path + '/extracted/text/' + process_response.files[0]
-    console.log(f)
-    await this.getFilesFromStore(f, message, service)
-
-      // const url_params = objectToURLParams(message.params)
-      // var url = service.url + service.api +  message.task + '?' + url_params
-      // console.log('**********************************')
-      // console.log(url)
-      // const postStream = queue.got.stream.post(url, {
-      //   body: formData,
-      //   headers: formData.getHeaders(),
-      // });
+    const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
+    console.log(fileNode)
+    var writepath = ''
+    try {
+      writepath = fileNode.result[0].path
+      await fs.ensureDir(path.dirname(writepath))
+    } catch(e) {
+      throw('Could not create file directory!' + e.message)
+    }
+      const url_params = objectToURLParams(message.params)
+      var url = service.url + service.api +  message.task + '?' + url_params
+      console.log('**********************************')
+      console.log(url)
+      const postStream = queue.got.stream.post(url, {
+        body: formData,
+        headers: formData.getHeaders(),
+      });
       
       // console.log(writepath)
       // const writeStream = fs.createWriteStream(writepath);
@@ -411,6 +318,25 @@ queue.pdfsense_api = async function(message, service) {
 }
 
 
+queue.hugging_face_inference_image_api = async function(message, service) {
+  async function query(filename) {
+    const data = fs.readFileSync(filename);
+    const response = await fetch(
+      "https://api-inference.huggingface.co/models/facebook/detr-resnet-50",
+      {
+        headers: { Authorization: "Bearer {API_TOKEN}" },
+        method: "POST",
+        body: data,
+      }
+    );
+    const result = await response.json();
+    return result;
+  }
+
+  query("cats.jpg").then((response) => {
+    console.log(JSON.stringify(response));
+  });
+}
 
 
 queue.getFilesFromStore = async function(response, message, service) {
@@ -425,52 +351,46 @@ queue.getFilesFromStore = async function(response, message, service) {
     } else {
       // first, create file object to graph
       // process_rid, file_type, extension, label
-      await this.downLoadFile(message, response.uri, service)
+      const fileNode = await this.graph.createProcessFileNode(message.process['@rid'], 'text', 'txt', 'text.txt')
+      console.log(fileNode)
+      var filepath = ''
+
+      try {
+        filepath = fileNode.result[0].path
+        await fs.ensureDir(path.dirname(filepath))
+      } catch(e) {
+        throw('Could not create file directory!' + e.message)
+      }
+
+      const url = service.url + response.uri
+      console.log(url)
+      const downloadStream = this.got.stream(url);
+      const fileWriterStream = fs.createWriteStream(filepath);
+
+      downloadStream
+      .on("downloadProgress", ({ transferred, total, percent }) => {
+        const percentage = Math.round(percent * 100);
+        console.error(`progress: ${transferred}/${total} (${percentage}%)`);
+      })
+      .on("error", (error) => {
+        console.error(`Download failed: ${error.message}`);
+      });
+
+      fileWriterStream
+      .on("error", (error) => {
+        console.error(`Could not write file to system: ${error.message}`);
+      })
+      .on("finish", () => {
+        console.log(`File downloaded to ${filepath}`);
+      });
+    
+    downloadStream.pipe(fileWriterStream);
+
     }
   } else {
     console.log('File download not found!')
   }
 }
-
-
-
-queue.downLoadFile = async function(message, uri, service) {
-  const fileNode = await Graph.createProcessFileNode(message.process['@rid'], 'text', 'txt', 'text.txt')
-  console.log(fileNode)
-  var filepath = ''
-
-  try {
-    filepath = fileNode.result[0].path
-    await fs.ensureDir(path.dirname(filepath))
-  } catch(e) {
-    throw('Could not create file directory!' + e.message)
-  }
-
-  const url = service.url + uri
-  console.log(url)
-  const downloadStream = this.got.stream(url);
-  const fileWriterStream = fs.createWriteStream(filepath);
-
-  downloadStream
-  .on("downloadProgress", ({ transferred, total, percent }) => {
-    const percentage = Math.round(percent * 100);
-    console.error(`progress: ${transferred}/${total} (${percentage}%)`);
-  })
-  .on("error", (error) => {
-    console.error(`Download failed: ${error.message}`);
-  });
-
-  fileWriterStream
-  .on("error", (error) => {
-    console.error(`Could not write file to system: ${error.message}`);
-  })
-  .on("finish", () => {
-    console.log(`File downloaded to ${filepath}`);
-  });
-
-  downloadStream.pipe(fileWriterStream);
-}
-
 
 function objectToURLParams(obj) {
   const params = [];
@@ -490,5 +410,7 @@ function objectToURLParams(obj) {
 
   return params.join('&');
 }
+
+
 
 module.exports = queue

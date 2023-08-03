@@ -1,0 +1,19 @@
+{
+    "url": "http://localhost:9000",
+    "id": "thumbnailer",
+    "api_type": "thumbnail",
+    "api": "/",
+    "name" :"Imaginary",
+    "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
+    "source_url": "https://github.com/h2non/node-imaginary",
+    
+    "supported_types": ["image"],
+    "supported_formats": ["png", "jpg"],
+
+
+    "params": {
+        "width": 200,
+        "height": 200
+    }
+
+}

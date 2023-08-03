@@ -1,4 +1,6 @@
 const axios = require("axios")
+const path 	= require("path")
+const fs 	= require("fs-extra")
 
 const username = 'root'
 const password = process.env.DB_PASSWORD
@@ -9,6 +11,8 @@ const DB = process.env.ARCADEDB_DB || 'messydesk'
 const PORT = process.env.ARCADEDB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
+console.log(URL)
+
 let web = {}
 
 web.getURL = function() {
@@ -16,14 +20,14 @@ web.getURL = function() {
 }
 
 web.createDB = async function() {
-	url = URL.replace('/command/', '/create/')
+	url = URL.replace(`/command/${DB}`, '/server')
 	var config = {
 		auth: {
 			username: username,
 			password: password
 		}
 	};
-	return axios.post(url, {}, config)
+	return axios.post(url, {command: `create database ${DB}`}, config)
 }
 
 web.createVertexType = async function(type) {
@@ -47,6 +51,7 @@ web.sql = async function(query, options) {
 		command:query,
 		language:'sql'
 	}
+	console.log(config.auth)
 	var response = await axios.post(URL, query_data, config)
 	return response.data
 }
@@ -81,7 +86,7 @@ web.cypher = async function(query, options, no_console) {
 		}
 	} catch(e) {
 		console.log(e.message)
-		//throw({msg: 'error in query', query: query, error: e})
+		throw({msg: 'error in query', query: query, error: e})
 	}
 }
 
@@ -194,7 +199,7 @@ function cluster(nodes, edges) {
 }
 
 
-function convert2CytoScapeJs(data, options) {
+async function convert2CytoScapeJs(data, options) {
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []
@@ -234,6 +239,13 @@ function convert2CytoScapeJs(data, options) {
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
+				if(node.data._type == 'image') {
+					const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
+					const exists = await fs.pathExists(img_path)
+					if(exists) {
+						node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+					}
+				}
 				nodes.push(node)
 				vertex_ids.push(v.r)
 				//console.log(node)

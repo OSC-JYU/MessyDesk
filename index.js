@@ -8,7 +8,7 @@ const winston 		= require('winston');
 const path 			= require('path')
 const fs 			= require('fs')
 const { Index, Document, Worker } = require("flexsearch");
-const graph 		= require('./graph.js');
+const Graph 		= require('./graph.js');
 const queue 		= require('./queue.js');
 const media 		= require('./media.js');
 const schema 		= require('./schema.js');
@@ -20,11 +20,12 @@ const styles 		= require('./styles.js');
 	console.log('initing...')
 	await queue.init()
 	// import schema
+	await Graph.initDB()
 	await schema.importSystemSchema()
 	await styles.importSystemStyle()
 })();
 
-const Graph = new graph()
+
 
 const docIndex = new Document( {
 	tokenize: "full",
@@ -142,6 +143,17 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx, filegraph)
+
+	const topic = 'thumbnailer' 
+	const message = {
+		key: "md",
+		value: JSON.stringify(filegraph.result[0])
+	};
+
+	await queue.producer.send({
+		topic,
+		messages: [message],
+	});
 	ctx.body = filegraph
 
 })
@@ -165,6 +177,14 @@ router.get('/api/files/:file_rid', async function (ctx) {
 	}
 	//ctx.type = 'application/octet-stream';
 
+   ctx.body = src
+})
+
+
+router.get('/api/thumbnails/(.*)', async function (ctx) {
+
+    const src = fs.createReadStream(path.join(ctx.request.path.replace('/api/thumbnails/',''), 'thumbnail.jpg'));
+	ctx.set('Content-Type', 'image/jpeg');
    ctx.body = src
 })
 
@@ -236,11 +256,12 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 			const message = {
 				key: "md",
 				value: JSON.stringify(ctx.request.body),
-			  };
+			};
+
 			await queue.producer.send({
 				topic,
 				messages: [message],
-			  });
+			});
 		
 			ctx.body = ctx.request.params.file_rid
 		} else {
