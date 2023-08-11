@@ -56,7 +56,7 @@ web.sql = async function(query, options) {
 	return response.data
 }
 
-web.cypher = async function(query, options, no_console) {
+web.cypher = async function(query, options) {
 
 	if(!options) var options = {}
 	if(options.current && !options.current.includes('#')) options.current = '#' + options.current
@@ -72,7 +72,7 @@ web.cypher = async function(query, options, no_console) {
 		language:'cypher'
 	}
 	if(options.serializer) query_data.serializer = options.serializer
-	if(!no_console) console.log(query)
+	if(process.env.MODE == 'development') console.log(query)
 
 	try {
 		var response = await axios.post(URL, query_data, config)
@@ -243,7 +243,7 @@ async function convert2CytoScapeJs(data, options) {
 					const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
 					const exists = await fs.pathExists(img_path)
 					if(exists) {
-						node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+						node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
 					}
 				}
 				nodes.push(node)

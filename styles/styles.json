@@ -121,7 +121,7 @@
 		"style": {
 			"height": 40,
 			"width": 40,
-			"shape": "rectangle",
+			"shape": "round-rectangle",
 			"color":"black",
 			"text-valign": "top",
 			"border-width": 0,

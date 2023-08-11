@@ -167,22 +167,25 @@ queue.thumbnailer_api = async function(message, service) {
       }
     });
     
-    // // thumbnail
-    // url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
-    // const postStream2 = queue.got.stream.post(url, {
-    //   body: formData,
-    //   headers: formData.getHeaders(),
-    // });
+    // thumbnail
+    const readStream2 = fs.createReadStream(filepath);
+    const formData2 = new FormData();
+    formData2.append('file', readStream2);
+    url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
+    const postStream2 = queue.got.stream.post(url, {
+      body: formData2,
+      headers: formData2.getHeaders(),
+    });
 
-    // const thumbStream = fs.createWriteStream(thumb_path);
+    const thumbStream = fs.createWriteStream(thumb_path);
 
-    // pipeline(postStream2, thumbStream, (error) => {
-    //   if (error) {
-    //     console.error('Error sending or saving the image:', error);
-    //   } else {
-    //     console.log('Image sent and saved successfully.');
-    //   }
-    // });
+    pipeline(postStream2, thumbStream, (error) => {
+      if (error) {
+        console.error('Error sending or saving the image:', error);
+      } else {
+        console.log('Image sent and saved successfully.');
+      }
+    });
 
     } catch (error) {
       console.error('Error reading, sending, or saving the image:', error.message);

@@ -183,7 +183,7 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join(ctx.request.path.replace('/api/thumbnails/',''), 'thumbnail.jpg'));
+    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/thumbnails/','/'), 'thumbnail.jpg'));
 	ctx.set('Content-Type', 'image/jpeg');
    ctx.body = src
 })
@@ -192,7 +192,11 @@ router.get('/api/thumbnails/(.*)', async function (ctx) {
 
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
+	console.log(me)
+	console.log('creating project')
 	var n = await Graph.createProject(ctx.request.body, me.rid)
+	console.log('project created')
+	console.log(n)
 	await media.createProjectDir(n)
 	ctx.body = n
 })

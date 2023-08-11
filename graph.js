@@ -12,6 +12,7 @@ const timers = require('timers-promises')
 
 // some layouts are same for all users
 const COMMON_LAYOUTS = ['schema', 'navigation', 'about']
+const MAX_STR_LENGTH = 2048
 
 
 let graph = {}
@@ -235,7 +236,7 @@ graph.getUserFileMetadata = async function(file_rid, me_email) {
 
 
 
-graph.createProject = async function getServicesForFile(services, rid) {
+graph.getServicesForFile = async function (services, rid) {
 	const query = `MATCH (file:File) WHERE id(file) = "#${rid}" RETURN file`
 	var response = await web.cypher(query)
 	if(response.result.length == 1) {
