@@ -16,7 +16,7 @@ services:
 
 
   arcadedb:
-    image: arcadedata/arcadedb:22.11.1
+    image: arcadedata/arcadedb:23.5.1
     container_name: arcadedb_comp
     ports:
       - 2480:2480

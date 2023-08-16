@@ -34,7 +34,7 @@
             "output": "store",
             "description": "Extract text from PDF",
             "supported_types": ["pdf"],
-            "path":"extracted/text",
+            "path":"/extracted/text",
             "params":{},
             "params_help":{}
         },
@@ -43,7 +43,7 @@
             "output": "store",
             "description": "Extract image form PDF in their native resolution.",
             "supported_types": ["pdf"],
-            "path":"extracted/images"
+            "path":"/extracted/images"
         },
 
         "render_images": {

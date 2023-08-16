@@ -12,7 +12,7 @@ nodes:
       query: ''
   - Tag:
       layout: fcose
-  - NodeGroup: {}
+  - Set: {}
 
 
   - Process:
@@ -38,6 +38,9 @@ edges:
       label_rev: owners
   - File:IS_PART_OF:Project:
       label: belongs to
+      label_rev: files
+  - File:IS_PART_OF:Set:
+      label: is part of
       label_rev: files
   - File:WAS_PRODUCED_BY:Process:
       label: was produced by
