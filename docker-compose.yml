@@ -3,6 +3,7 @@ version: "3"
 services:
   kafka:
     image: 'bitnami/kafka:latest'
+    container_name: md-kafka
     ports:
       - '9094:9094'
     environment:
@@ -12,18 +13,28 @@ services:
       - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
       - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
       - BITNAMI_DEBUG=yes
 
 
   arcadedb:
     image: arcadedata/arcadedb:23.5.1
-    container_name: arcadedb_comp
+    container_name: md-arcadedb
     ports:
       - 2480:2480
     environment:
-     - JAVA_OPTS=-Darcadedb.server.rootPassword=node_master
+      - JAVA_OPTS=-Darcadedb.server.rootPassword=node_master
     volumes:
-     - arcadedata:/home/arcadedb/databases
+      - arcadedata_md:/home/arcadedb/databases
+
+  imaginary:
+    image: nextcloud/aio-imaginary:latest
+    container_name: md-imaginary
+    volumes:
+      - imaginary_md:/logs
+    ports:
+      - 9000:9000
 
 volumes:
-  arcadedata: {}
+  arcadedata_md: {}
+  imaginary_md: {}

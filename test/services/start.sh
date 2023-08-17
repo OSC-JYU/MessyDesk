@@ -9,7 +9,7 @@
 
 #curl "http://localhost:8200/api/services" -d "@md-poppler/service.json" --header "Content-Type: application/json" 
 
-docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary
+#docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary
 
 curl "http://localhost:8200/api/services" -d "@imaginary/service.json" --header "Content-Type: application/json" 
 

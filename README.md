@@ -20,7 +20,42 @@ Things you can do:
 
 Hardly anything works yet :)
 
+## Getting started
 
+Clone this repo:
+
+   git clone https://github.com/OSC-JYU/MessyDesk.git
+   cd MessyDesk
+
+Start services:
+
+    docker-compose up
+
+This will start Kafka, Arcadedb and Imaginary (thumbnailer)
+
+Start back end:
+
+    MODE=development DB_PASSWORD=node_master node index.js
+
+Then we must create queues for thumbnailer and imaginary (both using the same Imaginary service). 
+
+    curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
+
+    curl http://localhost:8200/api/services -d "@test/services/imaginary/service.json" --header "Content-Type: application/json"
+
+
+Now we should have backend running!
+
+Let's launch frontend:
+
+    cd ..
+    git clone https://github.com/OSC-JYU/MessyDesk-UI.git
+    cd MessyDesk-UI
+    npm run dev
+
+Aim your browser to [http://localhost:3000](http://localhost:3000)
+
+There is not much MessyDesk can do yet, but you should be able to see the idea. Create a project, add few images and blur them :) 
 
 ## API
 
@@ -67,7 +102,7 @@ https://hub.docker.com/r/nextcloud/aio-imaginary
 
     curl http://localhost:8200/api/services -d "@test/services/test-image-service/service.json" --header "Content-Type: application/json"
 
-This create a consumer for topic "md-imaginary". 
+This creates a consumer for topic "md-imaginary". 
 
 
 
