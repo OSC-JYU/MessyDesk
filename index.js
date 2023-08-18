@@ -188,6 +188,13 @@ router.get('/api/thumbnails/(.*)', async function (ctx) {
    ctx.body = src
 })
 
+router.get('/api/process/(.*)', async function (ctx) {
+
+    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/process/','/'), 'params.json'));
+	ctx.set('Content-Type', 'application/json');
+   ctx.body = src
+})
+
 // project
 
 router.post('/api/projects', async function (ctx) {

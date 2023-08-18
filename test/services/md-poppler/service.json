@@ -21,8 +21,14 @@
         "pdf2images": {
             "params": {"task": "pdf2images"},
             "output": "store",
-            "name": "Extract images from PDF",
-            "description": "Creates separate image files from images in PDF file in any resolution."           
+            "name": "Render PDF as images",
+            "description": "Renders pages as image files in any resolution."           
+        },
+        "pdfimages": {
+            "params": {"task": "pdfimages"},
+            "output": "store",
+            "name": "Extract images from PDF (png)",
+            "description": "Extract images from PDF as png files."           
         }
     }
 
