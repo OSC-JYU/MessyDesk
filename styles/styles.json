@@ -1,6 +1,17 @@
 [
 
 	{
+		"selector": "edge",
+		"style": {
+
+			"color": "#99cc00",
+			"font-size":5,
+			"curve-style": "taxi"
+
+		}
+	},
+
+	{
 		"selector": "node[type='empty']",
 		"style": {
 			"content": "ei tuloksia",
@@ -230,16 +241,6 @@
 		"style": {
 
 			"background-color": "#99cc00"
-
-		}
-	},
-
-	{
-		"selector": "edge",
-		"style": {
-
-			"color": "#99cc00",
-			"font-size":5
 
 		}
 	}

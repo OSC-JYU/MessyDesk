@@ -11,25 +11,68 @@
 
     "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
 
+
+
     "tasks": {
         "pdf2text": {
-            "params": {"task": "pdf2text"},
+            "params": {
+                "firstPageToConvert": 0,
+                "lastPageToConvert": 0,
+                "task": "pdf2text"
+            },
             "output": "store",
             "name": "Extract text from PDF",
-            "description": "Creates a txt file from PDF."
+            "description": "Creates a txt file from PDF.",
+            "params_help": {
+                "firstPageToConvert": {
+                    "name": "first page to convert",
+                    "help": ""
+                },
+                "lastPageToConvert": {
+                    "name": "last page to convert",
+                    "help": ""
+                }
+            }
         },
         "pdf2images": {
-            "params": {"task": "pdf2images"},
+            "params": {
+                "firstPageToConvert": 0,
+                "lastPageToConvert": 0,
+                "task": "pdf2images"
+            },
             "output": "store",
             "name": "Render PDF as images",
-            "description": "Renders pages as image files in any resolution."           
+            "description": "Renders pages as image files in any resolution.",
+            "params_help": {
+                "firstPageToConvert": {
+                    "name": "first page to convert",
+                    "help": ""
+                },
+                "lastPageToConvert": {
+                    "name": "last page to convert",
+                    "help": ""
+                }
+            }           
         },
         "pdfimages": {
-            "params": {"task": "pdfimages"},
+            "params": {
+                "firstPageToConvert": 0,
+                "lastPageToConvert": 0,
+                "task": "pdfimages"
+            },
             "output": "store",
             "name": "Extract images from PDF (png)",
-            "description": "Extract images from PDF as png files."           
+            "description": "Extract images from PDF as png files.",
+            "params_help": {
+                "firstPageToConvert": {
+                    "name": "first page to convert",
+                    "help": ""
+                },
+                "lastPageToConvert": {
+                    "name": "last page to convert",
+                    "help": ""
+                }
+            }            
         }
     }
-
 }

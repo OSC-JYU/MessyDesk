@@ -1,4 +1,22 @@
 
+How to run:
+
+ docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.5.1
+
+cd test/kafka
+docker-compose up
+
+ MODE=development DB_PASSWORD=node_master nodemon index.js 
+
+
+start thumbnailer service:
+docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary
+
+Register thumbnailer queue:
+curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
+
+
+
 
 
   GREMLIN
@@ -12,3 +30,19 @@ g.V('#105:7')
   .has('id', 'ari.hayrinen@jyu.fi')
   .select('f')
 
+
+
+graph alternative:
+https://github.com/jagenjo/litegraph.js/
+
+
+line removal: 
+https://stackoverflow.com/questions/33949831/how-to-remove-all-lines-and-borders-in-an-image-while-keeping-text-programmatica
+
+convert input.jpg                           \
+-type Grayscale                             \
+-negate                                     \
+-define morphology:compose=darken           \
+-morphology Thinning 'Rectangle:1x30+0+0<'  \
+-negate                                     \
+converted_image.jpg
