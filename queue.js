@@ -36,9 +36,11 @@ queue.init = async function() {
         console.log('connecting kafka: ' + KAFKA_URL)
 
     
-        queue.producer = kafka.producer();
+        queue.producer = kafka.producer()
+        queue.admin = kafka.admin()
 
-        await queue.producer.connect();
+        await queue.producer.connect()
+        
         console.log(`connected to Kafka at ${KAFKA_URL}!`)
 
       } catch (error) {
@@ -51,16 +53,26 @@ queue.init = async function() {
 
 
 
-queue.add = async function(ctx) {
+queue.checkService = async function(data) {
+  // test that service is alive before creating the topic
+  console.log(data)
 
-    console.log('adding to queue...')
-
-
+  // test if topic exists and if not, then create it
+  await queue.admin.connect()
+  var topics = await queue.admin.listTopics()
+  if(!topics.includes(data.id)) {
+    await queue.admin.createTopics({topics:[
+      {topic: data.id}
+    ]})
+  }
 }
 
 queue.registerService = async function(data) {
 
     if(data.id && data.url && data.api && data.supported_formats && data.supported_types && data.name && data.api_type) {
+
+        await this.checkService(data)
+
         queue.services[data.id] = data
         queue.services[data.id].consumer = await kafka.consumer({ groupId: data.id})
 
