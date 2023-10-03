@@ -143,11 +143,12 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx, filegraph)
+	var data = {file: filegraph.result[0]}
 
 	const topic = 'thumbnailer' 
 	const message = {
 		key: "md",
-		value: JSON.stringify(filegraph.result[0])
+		value: JSON.stringify(data)
 	};
 
 	await queue.producer.send({

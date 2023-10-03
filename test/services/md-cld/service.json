@@ -1,26 +1,27 @@
+{
 
-"url": "http://localhost:8301",
-"id": "md-cld",
-"type": "text",
-"api_type": "elg",
-"api": "/process",
-"name" :"Compact Language Detector (CLD2)",
+    "url": "http://localhost:8301",
+    "id": "md-cld",
+    "type": "text",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"Compact Language Detector (CLD2)",
 
-"supported_types": ["text"],
-"supported_formats": ["txt"],
+    "supported_types": ["text"],
+    "supported_formats": ["txt"],
 
-"description": "Fast language detection by Google: https://github.com/CLD2Owners/cld2",
+    "description": "Fast language detection by Google: https://github.com/CLD2Owners/cld2",
 
-"params": {
+    "params": {
 
-},
+    },
 
 
-"tasks": {
-    "language_detection_doc": {
-        "name": "Detect language per document",
-        "output": "json",
-        "description": "Detect language of the text."
+    "tasks": {
+        "language_detection_doc": {
+            "name": "Detect language per document",
+            "output": "json",
+            "description": "Detect language of the text."
+        }
     }
-}
 }

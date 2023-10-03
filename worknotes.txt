@@ -46,3 +46,30 @@ convert input.jpg                           \
 -morphology Thinning 'Rectangle:1x30+0+0<'  \
 -negate                                     \
 converted_image.jpg
+
+
+
+https://deepdoctection.readthedocs.io/en/latest/tutorials/get_started_notebook/
+
+OCR:
+https://github.com/mindee/doctr
+
+
+Layout analysis:
+https://dhlab-epfl.github.io/dhSegment/
+https://pypi.org/project/doc-ufcn/
+
+
+Image annotation:
+https://www.robots.ox.ac.uk/~vgg/software/via/via.html
+
+
+
+pytorch container:
+docker run --rm -ti --ipc=host pytorch/pytorch:latest
+
+from transformers import pipeline
+
+pipe = pipeline("token-classification", model="Kansallisarkisto/finbert-ner")
+tulos = pipe('Kyllösen vanhempi poika Erkki oli kova mies')
+print(tulos)

@@ -1,7 +1,7 @@
 
 const util			  = require('util');
 const path 			  = require('path');
-const {pipeline} 	= require('stream');
+const {pipeline} 	= require('stream/promises');
 const fs 			    = require('fs-extra');
 const { Kafka }   = require('kafkajs');
 var FormData      = require('form-data');
@@ -108,7 +108,8 @@ queue.callFileService = async function(message, service) {
         } else if(service.api_type.toLowerCase() == 'thumbnail') {
           await this.thumbnailer_api(message_json, service)
         } else if(service.api_type.toLowerCase() == 'imaginary') {
-          await this.imaginary_api(message_json, service)
+          const fileNode = await this.imaginary_api(message_json, service)
+          await this.thumbnailer_api(message_json, service, fileNode)
         } 
 
       } catch (error) {
@@ -135,15 +136,22 @@ queue.callFileService = async function(message, service) {
 }
 
 
-queue.thumbnailer_api = async function(message, service) {
+
+queue.thumbnailer_api = async function(message, service, filenode) {
 
   //create preview and thumbnails images
 
   try {
     console.log('**************** THUMBNAILER api ***************')
     console.log(message)
+
+    var filepath = message.file.path
+    if(filenode) {
+      filepath = filenode.result[0].path
+    } 
+
     const got = await import('got');
-    const filepath = message.path
+
     const readStream = fs.createReadStream(filepath);
     const formData = new FormData();
     formData.append('file', readStream);
@@ -153,9 +161,9 @@ queue.thumbnailer_api = async function(message, service) {
     var thumb_path = ''
     var preview_path = ''
     try {
-      await fs.ensureDir(path.dirname(message.path))
-      thumb_path = path.join(path.dirname(message.path), "thumbnail.jpg")
-      preview_path = path.join(path.dirname(message.path), "preview.jpg")
+      await fs.ensureDir(path.dirname(filepath))
+      thumb_path = path.join(path.dirname(filepath), "thumbnail.jpg")
+      preview_path = path.join(path.dirname(filepath), "preview.jpg")
     } catch(e) {
       throw('Could not create file directory!' + e.message)
     }
@@ -168,15 +176,8 @@ queue.thumbnailer_api = async function(message, service) {
     });
     
     const previewStream = fs.createWriteStream(preview_path);
-    
-    pipeline(postStream, previewStream, (error) => {
-      if (error) {
-        console.error('Error sending or saving the image:', error);
-      } else {
-        console.log('Image sent and saved successfully.');
-      }
-    });
-    
+    await pipeline(postStream, previewStream)
+
     // thumbnail
     const readStream2 = fs.createReadStream(filepath);
     const formData2 = new FormData();
@@ -189,19 +190,14 @@ queue.thumbnailer_api = async function(message, service) {
     });
 
     const thumbStream = fs.createWriteStream(thumb_path);
+    await pipeline(postStream2, thumbStream)
 
-    pipeline(postStream2, thumbStream, (error) => {
-      if (error) {
-        console.error('Error sending or saving the image:', error);
-      } else {
-        console.log('Image sent and saved successfully.');
-      }
-    });
-
-    } catch (error) {
-      console.error('Error reading, sending, or saving the image:', error.message);
-    }
+  } catch (error) {
+    console.error('Error reading, sending, or saving the image:', error.message);
+  }
 }
+
+
 
 queue.imaginary_api = async function(message, service) {
 
@@ -230,8 +226,6 @@ queue.imaginary_api = async function(message, service) {
     }
       const url_params = objectToURLParams(message.params)
       var url = service.url + service.api +  message.task + '?' + url_params
-      console.log('**********************************')
-      console.log(url)
       const postStream = queue.got.stream.post(url, {
         body: formData,
         headers: formData.getHeaders(),
@@ -239,14 +233,10 @@ queue.imaginary_api = async function(message, service) {
       
       console.log(writepath)
       const writeStream = fs.createWriteStream(writepath);
+ 
+      await pipeline(postStream, writeStream)
+      return fileNode
       
-      pipeline(postStream, writeStream, (error) => {
-        if (error) {
-          console.error('Error sending or saving the image:', error);
-        } else {
-          console.log('Image sent and saved successfully.');
-        }
-      });
     } catch (error) {
       console.error('Error reading, sending, or saving the image:', error.message);
     }
@@ -397,24 +387,25 @@ queue.downLoadFile = async function(message, uri, service) {
   const downloadStream = this.got.stream(url);
   const fileWriterStream = fs.createWriteStream(filepath);
 
-  downloadStream
-  .on("downloadProgress", ({ transferred, total, percent }) => {
-    const percentage = Math.round(percent * 100);
-    console.error(`progress: ${transferred}/${total} (${percentage}%)`);
-  })
-  .on("error", (error) => {
-    console.error(`Download failed: ${error.message}`);
-  });
+  try {
+    await pipeline(downloadStream, fileWriterStream)
 
-  fileWriterStream
-  .on("error", (error) => {
-    console.error(`Could not write file to system: ${error.message}`);
-  })
-  .on("finish", () => {
-    console.log(`File downloaded to ${filepath}`);
-  });
+    const topic = 'thumbnailer' 
+    const k_message = {
+      key: "md",
+      value: JSON.stringify({file: fileNode.result[0]})
+    };
+  
+    await this.producer.send({
+      topic,
+      messages: [k_message],
+    });
+  } catch(e) {
+    console.log(e)
+    console.log('File download failed!')
+  }
 
-  downloadStream.pipe(fileWriterStream);
+
 }
 
 

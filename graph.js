@@ -182,7 +182,7 @@ graph.createProcessGraph = async function(topic, params, filegraph, me_email) {
 
 graph.createProjectFileGraph = async function(project_rid, ctx, file_type) {
 	
-	var extension = path.extname(ctx.file.originalname).replace('.','')
+	var extension = path.extname(ctx.file.originalname).replace('.','').toLowerCase()
 	const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
 		CREATE (file:File 
 			{
