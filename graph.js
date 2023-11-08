@@ -11,7 +11,7 @@ const media = require("./media.js")
 const timers = require('timers-promises')
 
 // some layouts are same for all users
-const COMMON_LAYOUTS = ['schema', 'navigation', 'about']
+const COMMON_LAYOUTS = ['projects', 'schema', 'navigation', 'about']
 const MAX_STR_LENGTH = 2048
 
 

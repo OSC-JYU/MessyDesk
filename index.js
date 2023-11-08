@@ -184,7 +184,7 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/thumbnails/','/'), 'thumbnail.jpg'));
+    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
 	ctx.set('Content-Type', 'image/jpeg');
    ctx.body = src
 })

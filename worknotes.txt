@@ -51,8 +51,16 @@ converted_image.jpg
 
 https://deepdoctection.readthedocs.io/en/latest/tutorials/get_started_notebook/
 
+NER:
+https://medium.com/quantrium-tech/top-3-packages-for-named-entity-recognition-e9e14f6f0a2a
+
+
 OCR:
 https://github.com/mindee/doctr
+mitä kieliä tukee?
+https://github.com/mindee/doctr/discussions/837
+
+https://medium.com/quantrium-tech/text-extraction-using-doctr-ocr-471e417764d5
 
 
 Layout analysis:
@@ -60,10 +68,28 @@ https://dhlab-epfl.github.io/dhSegment/
 https://pypi.org/project/doc-ufcn/
 
 
+dewarp:
+https://github.com/lmmx/page-dewarp
+
+deskew:
+https://github.com/sbrunner/deskew
+https://github.com/kakul/Alyn
+
+denoising:
+https://stackoverflow.com/questions/49318622/denoising-binary-image-in-python
+
+https://github.com/Leedeng/SauvolaNet
+
+https://stackoverflow.com/questions/62042172/how-to-remove-noise-in-image-opencv-python
+
+
 Image annotation:
 https://www.robots.ox.ac.uk/~vgg/software/via/via.html
 
-
+Image duplicates or similar:
+https://github.com/dsys/match
+https://github.com/rhsimplex/image-match
+http://www.phash.org/
 
 pytorch container:
 docker run --rm -ti --ipc=host pytorch/pytorch:latest
@@ -73,3 +99,6 @@ from transformers import pipeline
 pipe = pipeline("token-classification", model="Kansallisarkisto/finbert-ner")
 tulos = pipe('Kyllösen vanhempi poika Erkki oli kova mies')
 print(tulos)
+
+
+KAFKAN KORVAAJA? https://zeromq.org/

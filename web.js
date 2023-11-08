@@ -230,6 +230,7 @@ async function convert2CytoScapeJs(data, options) {
 							type_label: options.labels[v.t],
 							active: v.p._active,
 							width: 100,
+							description: v.p.description,
 							idc: v.r.replace(':','_')
 						 }
 					}
@@ -239,7 +240,7 @@ async function convert2CytoScapeJs(data, options) {
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
-				if(node.data._type == 'image') {
+				if(['image', 'pdf'].includes(node.data._type)) {
 					const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
 					const exists = await fs.pathExists(img_path)
 					if(exists) {
