@@ -82,12 +82,21 @@ upload:
 
 ## SERVICES
 
-### start Kafka
+### start Kafka, Arcadedb and thumbnailer
 
     cd test/kafka
     docker-compose up
 
-### test image processig service
+
+### register thumbnnailer service:
+
+    curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
+
+This creates a consumer for topic "thumbnailer". 
+
+
+
+### start image processig service
 
 https://hub.docker.com/r/nextcloud/aio-imaginary
 
@@ -96,15 +105,6 @@ https://hub.docker.com/r/nextcloud/aio-imaginary
 
     cd test/services/test-image-service
     make start
-
-
-### registering service:
-
-    curl http://localhost:8200/api/services -d "@test/services/test-image-service/service.json" --header "Content-Type: application/json"
-
-This creates a consumer for topic "md-imaginary". 
-
-
 
 
 

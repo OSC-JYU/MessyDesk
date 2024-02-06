@@ -9,8 +9,7 @@
     "supported_types": ["text"],
     "supported_formats": ["txt"],
 
-    "description": "The HeLI-OTS language identifier is equipped with language models for 200 languages and licensed for academic as
-    well as commercial use. https://zenodo.org/record/7066611#.ZHb2FkhBzmE",
+    "description": "The HeLI-OTS language identifier is equipped with language models for 200 languages and licensed for academic as well as commercial use. https://zenodo.org/record/7066611#.ZHb2FkhBzmE",
 
     "params": {
         "nbest": 1,

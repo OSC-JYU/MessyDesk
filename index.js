@@ -7,12 +7,15 @@ const multer 		= require('@koa/multer');
 const winston 		= require('winston');
 const path 			= require('path')
 const fs 			= require('fs')
+const websockify 			= require('koa-websocket');
 const { Index, Document, Worker } = require("flexsearch");
+
 const Graph 		= require('./graph.js');
 const queue 		= require('./queue.js');
 const media 		= require('./media.js');
 const schema 		= require('./schema.js');
 const styles 		= require('./styles.js');
+const services 		= require('./services.js');
 
 
 
@@ -64,8 +67,17 @@ logger.info('MessyDesk started');
 // LOGGING ENDS
 var visitors = []
 
-var app				= new Koa();
+//var app				= new Koa();
+const app = websockify(new Koa());
 var router			= new Router();
+
+app.ws.use(async (ctx, next) => {
+	// Do something with the WebSocket connection
+	console.log('WebSocket connection established');
+	await next();
+  });
+
+
 
 app.use(json({ pretty: true, param: 'pretty' }))
 app.use(bodyParser());
@@ -112,7 +124,8 @@ app.use(async function handleError(context, next) {
 
 
 router.get('/api', function (ctx) {
-	ctx.body = 'MessyDesk API'
+	ctx.ws.send('Echo: ' + message);
+	//ctx.body = 'MessyDesk API'
 })
 
 router.get('/api/me', async function (ctx) {
@@ -236,7 +249,8 @@ router.post('/api/services', async function (ctx) {
 })
 
 router.get('/api/services', async function (ctx) {
-	ctx.body = queue.services
+
+	ctx.body = await services.getServiceAdapters(queue.services)
 
 })
 
@@ -302,14 +316,14 @@ router.get('/api/groups', async function (ctx) {
 })
 
 router.post('/api/layouts', async function (ctx) {
-	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await Graph.setLayout(ctx.request.body, me)
+	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.setLayout(ctx.request.body)
 	ctx.body = n
 })
 
 router.get('/api/layouts/:rid', async function (ctx) {
-	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await Graph.getLayoutByTarget(ctx.request.params.rid, me)
+	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getLayoutByTarget(ctx.request.params.rid)
 	ctx.body = n
 })
 

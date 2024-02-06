@@ -780,7 +780,7 @@ graph.getFileList = async function(dir) {
 }
 
 
-graph.setLayout = async function(body, me) {
+graph.setLayout = async function(body) {
 	
 	var query = ''
 	var filename = ''
@@ -798,7 +798,7 @@ graph.setLayout = async function(body, me) {
 		
 	} else {
 		if(!body.target.match(/^#/)) body.target = '#' + body.target
-		filename = `layout_${body.target}-${me.rid}.json`
+		filename = `layout_${body.target}.json`
 	}
 
 	const filePath = path.resolve('./layouts', filename)
@@ -807,7 +807,7 @@ graph.setLayout = async function(body, me) {
 }
 
 
-graph.getLayoutByTarget = async function(rid, me) {
+graph.getLayoutByTarget = async function(rid) {
 
 	var filename = ''
 	if(COMMON_LAYOUTS .includes(rid)) {
@@ -815,7 +815,7 @@ graph.getLayoutByTarget = async function(rid, me) {
 
 	} else {
 		if(!rid.match(/^#/)) rid = '#' + rid
-		filename = `layout_${rid}-${me.rid}.json`
+		filename = `layout_${rid}.json`
 	}
 	try {
 		const filePath = path.resolve('./layouts', filename)

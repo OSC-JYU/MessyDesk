@@ -20,6 +20,7 @@
     "koa-json": "^2.0.2",
     "koa-router": "^10.1.1",
     "koa-static": "^5.0.0",
+    "koa-websocket": "^7.0.0",
     "timers-promises": "^1.0.1",
     "uuidv4": "^6.2.13",
     "winston": "^3.5.0",
