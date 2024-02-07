@@ -7,7 +7,7 @@ const multer 		= require('@koa/multer');
 const winston 		= require('winston');
 const path 			= require('path')
 const fs 			= require('fs')
-const websockify 			= require('koa-websocket');
+const websocket 	= require('koa-easy-ws')
 const { Index, Document, Worker } = require("flexsearch");
 
 const Graph 		= require('./graph.js');
@@ -17,18 +17,16 @@ const schema 		= require('./schema.js');
 const styles 		= require('./styles.js');
 const services 		= require('./services.js');
 
-
+const connections = new Map();
 
 (async () => {
 	console.log('initing...')
-	await queue.init()
+	await queue.init(connections)
 	// import schema
 	await Graph.initDB()
 	await schema.importSystemSchema()
 	await styles.importSystemStyle()
 })();
-
-
 
 const docIndex = new Document( {
 	tokenize: "full",
@@ -67,18 +65,13 @@ logger.info('MessyDesk started');
 // LOGGING ENDS
 var visitors = []
 
+
 //var app				= new Koa();
-const app = websockify(new Koa());
+//const app = websockify(new Koa());
+const app = new Koa();
 var router			= new Router();
 
-app.ws.use(async (ctx, next) => {
-	// Do something with the WebSocket connection
-	console.log('WebSocket connection established');
-	await next();
-  });
-
-
-
+app.use(websocket())
 app.use(json({ pretty: true, param: 'pretty' }))
 app.use(bodyParser());
 app.use(serve(path.join(__dirname, '/public')))
@@ -123,13 +116,27 @@ app.use(async function handleError(context, next) {
 
 
 
+router.all('/ws', async (ctx, next) => {
+	if (ctx.ws) {
+	  const ws = await ctx.ws()
+	  const userId = ctx.headers[AUTH_HEADER]; 
+  
+	  // Store WebSocket connection with user ID
+	  connections.set(userId, ws);
+	  ws.on('message', function message(data) {
+		console.log('received: %s', data);
+		ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
+	  });
+	  return ws.send('chancellor palpatine is evil')
+	}
+  })
+
 router.get('/api', function (ctx) {
-	ctx.ws.send('Echo: ' + message);
-	//ctx.body = 'MessyDesk API'
+	ctx.body = 'MessyDesk API'
 })
 
 router.get('/api/me', async function (ctx) {
-	if(process.env.CREATE_USERS_ON_THE_FLY = 1) {
+	if(process.env.CREATE_USERS_ON_THE_FLY) {
 		// keep list of visitors so that we do not create double users on sequential requests
 		if(!visitors.includes(ctx.request.headers[AUTH_HEADER])) {
 			visitors.push(ctx.request.headers[AUTH_HEADER])
@@ -157,7 +164,9 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx, filegraph)
 	var data = {file: filegraph.result[0]}
+	data.userId = ctx.headers[AUTH_HEADER]
 
+	// send to thumbnailer queu
 	const topic = 'thumbnailer' 
 	const message = {
 		key: "md",
@@ -168,6 +177,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 		topic,
 		messages: [message],
 	});
+
 	ctx.body = filegraph
 
 })
@@ -454,6 +464,8 @@ var set_port = process.env.PORT || 8200
 var server = app.listen(set_port, function () {
    var host = server.address().address
    var port = server.address().port
+   server.requestTimeout = 0 // https://github.com/b3nsn0w/koa-easy-ws/issues/36
+   server.headersTimeout = 0
 
    console.log('MessyDesk running at http://%s:%s', host, port)
 })

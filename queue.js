@@ -27,10 +27,11 @@ const kafka = new Kafka({
 
 
 
-queue.init = async function() {
+queue.init = async function(connections) {
 
     const { default: got } = await import('got');
     this.got = got
+    this.connections = connections
 
     try {
         console.log('connecting kafka: ' + KAFKA_URL)
@@ -87,6 +88,7 @@ queue.registerService = async function(data) {
         await queue.services[data.id].consumer.run({
           eachMessage: async ({ topic, partition, message,  heartbeat, pause }) => {
             // do actual processing
+            console.log(this.connections)
             await this.callFileService(message, queue.services[data.id])
           },
         })
@@ -158,12 +160,13 @@ queue.thumbnailer_api = async function(message, service, filenode) {
     
     console.log('Sending image via POST request...');
 
+    const base_path = path.join(path.dirname(filepath))
     var thumb_path = ''
     var preview_path = ''
     try {
       await fs.ensureDir(path.dirname(filepath))
-      thumb_path = path.join(path.dirname(filepath), "thumbnail.jpg")
-      preview_path = path.join(path.dirname(filepath), "preview.jpg")
+      thumb_path = path.join(base_path, "thumbnail.jpg")
+      preview_path = path.join(base_path, "preview.jpg")
     } catch(e) {
       throw('Could not create file directory!' + e.message)
     }
@@ -191,6 +194,12 @@ queue.thumbnailer_api = async function(message, service, filenode) {
 
     const thumbStream = fs.createWriteStream(thumb_path);
     await pipeline(postStream2, thumbStream)
+
+    // update node image in UI via websocket
+    const ws = this.connections.get(message.userId)
+    var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
+    ws.send(JSON.stringify(wsdata))
+
 
   } catch (error) {
     console.error('Error reading, sending, or saving the image:', error.message);
