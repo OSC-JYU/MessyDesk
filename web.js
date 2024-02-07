@@ -15,6 +15,17 @@ console.log(URL)
 
 let web = {}
 
+web.checkService = async function(url) {
+	try {
+		console.log(url)
+		await axios.get(url)
+		return true
+	} catch(e) {
+		return false
+	}
+
+}
+
 web.getURL = function() {
 	return URL
 }

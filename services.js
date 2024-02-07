@@ -1,5 +1,6 @@
 const fs 			= require('fs').promises;
 const path 			= require('path');
+const web 		= require('./web.js');
 
 let services = {}
 
@@ -28,11 +29,11 @@ services.getServiceAdapters = async function (enabledServices) {
 			// Add the data to the result object with the subdirectory name as the key
 			resultObject[subdirectory] = jsonData;
 			} catch (error) {
-			console.error(`Error reading or parsing JSON file in ${subdirectory}: ${error.message}`);
+				console.error(`Error reading or parsing JSON file in ${subdirectory}: ${error.message}`);
 			}
 		}
 
-		const services = markRegisteredAdapter(resultObject, enabledServices)
+		const services = await markRegisteredAdapter(resultObject, enabledServices)
 		return services
 
 	} catch (error) {
@@ -41,13 +42,17 @@ services.getServiceAdapters = async function (enabledServices) {
 	}
 }
 
-function markRegisteredAdapter(services, enabledServices) {
+async function markRegisteredAdapter(services, enabledServices) {
 	// check registered services
 	if(enabledServices) {
 		console.log(enabledServices)
 		for(var key in services) {
-			if(key in enabledServices)
+			// check if service responds
+			services[key].online = await web.checkService(services[key].url)
+			if(key in enabledServices) {
 				services[key].enabled = true
+
+			}
 		}
 	}
 
