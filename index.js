@@ -79,7 +79,7 @@ app.use(serve(path.join(__dirname, '/public')))
 
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
-	context.request.headers.mail = "ari.hayrinen@jyu.fi" // dummy shibboleth
+	context.request.headers.mail = "local.user@localhost" // dummy shibboleth
 	await next()
 });
 
@@ -251,17 +251,18 @@ router.get('/api/projects/:rid/files', async function (ctx) {
 // services
 
 // register service
-router.post('/api/services', async function (ctx) {
+router.post('/api/services/:name', async function (ctx) {
+	var response = await services.getServiceAdapterByName(ctx.request.params.name, queue.services)
+	ctx.body = response
+})
 
+router.post('/api/services', async function (ctx) {
 	await queue.registerService(ctx.request.body)
 	ctx.body = ctx.request.body
-
 })
 
 router.get('/api/services', async function (ctx) {
-
 	ctx.body = await services.getServiceAdapters(queue.services)
-
 })
 
 // get services for certain file
@@ -289,6 +290,7 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 			ctx.request.body.process = process
 			ctx.request.body.file = file_metadata
 			ctx.request.body.target = ctx.request.params.file_rid
+			ctx.request.body.userId = ctx.headers[AUTH_HEADER]
 			const message = {
 				key: "md",
 				value: JSON.stringify(ctx.request.body),

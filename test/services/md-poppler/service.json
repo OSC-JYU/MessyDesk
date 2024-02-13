@@ -41,6 +41,7 @@
                 "task": "pdf2images"
             },
             "output": "store",
+            "output_node": "Set",
             "name": "Render PDF as images",
             "description": "Renders pages as image files in any resolution.",
             "params_help": {

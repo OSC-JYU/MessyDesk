@@ -68,6 +68,8 @@ queue.checkService = async function(data) {
   }
 }
 
+
+
 queue.registerService = async function(data) {
 
     if(data.id && data.url && data.api && data.supported_formats && data.supported_types && data.name && data.api_type) {
@@ -196,11 +198,13 @@ queue.thumbnailer_api = async function(message, service, filenode) {
     await pipeline(postStream2, thumbStream)
 
     // update node image in UI via websocket
-    const ws = this.connections.get(message.userId)
-    var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
-    ws.send(JSON.stringify(wsdata))
-
-
+    if(message.userId) {
+      console.log('sending thumnailer WS')
+      const ws = this.connections.get(message.userId)
+      var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
+      if(filenode) wsdata.target = filenode.result[0]['@rid']
+      ws.send(JSON.stringify(wsdata))
+    }
   } catch (error) {
     console.error('Error reading, sending, or saving the image:', error.message);
   }
@@ -294,6 +298,14 @@ queue.ELG_api_text = async function(message, service) {
           filepath = fileNode.result[0].path
           await fs.ensureDir(path.dirname(filepath))
           await media.writeJSON(response, path.basename(filepath), path.dirname(filepath))
+
+          // update UI via websocket
+          if(message.userId) {
+            console.log('sending text WS')
+            const ws = this.connections.get(message.userId)
+            var wsdata = {target: process_rid, node:{rid: fileNode.result[0]['@rid']}}
+            ws.send(JSON.stringify(wsdata))
+          }
         } catch(e) {
           throw('Could not create file directory!' + e.message)
         }
@@ -391,6 +403,16 @@ queue.downLoadFile = async function(message, uri, service) {
     throw('Could not create file directory!' + e.message)
   }
 
+  // Add node to UI via websocket
+  if(message.userId) {
+    console.log('sending "add node" WS')
+    const ws = this.connections.get(message.userId)
+    if(ws) {
+      var wsdata = {target: message.process['@rid'], node:{rid: fileNode.result[0]['@rid']}}
+      ws.send(JSON.stringify(wsdata))
+    }
+  }
+
   const url = service.url + uri
   console.log(url)
   const downloadStream = this.got.stream(url);
@@ -402,7 +424,10 @@ queue.downLoadFile = async function(message, uri, service) {
     const topic = 'thumbnailer' 
     const k_message = {
       key: "md",
-      value: JSON.stringify({file: fileNode.result[0]})
+      value: JSON.stringify({
+        file: fileNode.result[0],
+        userId: message.userId
+      })
     };
   
     await this.producer.send({

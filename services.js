@@ -37,9 +37,19 @@ services.getServiceAdapters = async function (enabledServices) {
 		return services
 
 	} catch (error) {
-	console.error(`Error reading subdirectories: ${error.message}`);
-	throw error;
+		console.error(`Error reading subdirectories: ${error.message}`);
+		throw error;
 	}
+}
+
+services.getServiceAdapterByName = async function(name, enabledServices) {
+	const adapters = await this.getServiceAdapters(enabledServices) 
+	for(var adapter in adapters) {
+		if(adapters[adapter].id == name) {
+			return adapters[adapter]
+		}
+	}
+	return {}
 }
 
 async function markRegisteredAdapter(services, enabledServices) {

@@ -237,7 +237,7 @@ graph.getUserFileMetadata = async function(file_rid, me_email) {
 
 
 graph.getServicesForFile = async function (services, rid) {
-	const query = `MATCH (file:File) WHERE id(file) = "#${rid}" RETURN file`
+	const query = `MATCH (file) WHERE id(file) = "#${rid}" RETURN file`
 	var response = await web.cypher(query)
 	if(response.result.length == 1) {
 		const matches = {for_type: [], for_format: []}

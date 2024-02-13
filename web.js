@@ -31,6 +31,11 @@ web.getURL = function() {
 }
 
 web.createDB = async function() {
+	if(!password) {
+		console.log('ERROR: DB_PASSWORD not set! Exiting...')
+		process.exit(1)
+	}
+
 	url = URL.replace(`/command/${DB}`, '/server')
 	var config = {
 		auth: {
@@ -82,6 +87,7 @@ web.cypher = async function(query, options) {
 		command:query,
 		language:'cypher'
 	}
+
 	if(options.serializer) query_data.serializer = options.serializer
 	if(process.env.MODE == 'development') console.log(query)
 
@@ -252,10 +258,12 @@ async function convert2CytoScapeJs(data, options) {
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
 				if(['image', 'pdf'].includes(node.data._type)) {
-					const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
-					const exists = await fs.pathExists(img_path)
-					if(exists) {
-						node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
+					if(v.p.path) {
+						const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
+						const exists = await fs.pathExists(img_path)
+						if(exists) {
+							node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
+						}
 					}
 				}
 				nodes.push(node)
