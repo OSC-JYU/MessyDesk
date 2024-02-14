@@ -1,0 +1,61 @@
+{
+    "url": "http://localhost:8400",
+    "id": "md-tesseract",
+    "type": "image",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"Tesseract",
+    
+    "supported_types": ["image"],
+    "supported_formats": ["png", "jpg"],
+
+    "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
+
+
+    "tasks": {
+        "image2text": {
+            "name": "Image to text",
+            "output": "text",
+            "description": "Recognices text from images and outputs a text file",
+            "params": {
+                "lang": "en"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text"
+                }
+            }
+        },
+
+        "searchable_pdf": {
+            "name": "Image to searchable PDF",
+            "output": "pdf",
+            "description": "Create a PDF file from image",
+            "params": {
+                "lang": "en"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text"
+                }
+            }
+        },
+
+        "image2alto": {
+            "name": "Image to ALTO format",
+            "output": "xml",
+            "description": "Create an ALTO file from image",
+            "params": {
+                "lang": "en"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text"
+                }
+            }
+        }
+    }
+}

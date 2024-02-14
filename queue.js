@@ -199,11 +199,13 @@ queue.thumbnailer_api = async function(message, service, filenode) {
 
     // update node image in UI via websocket
     if(message.userId) {
-      console.log('sending thumnailer WS')
+      console.log('sending thumbnailer WS to user:' , message.userId)
       const ws = this.connections.get(message.userId)
-      var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
-      if(filenode) wsdata.target = filenode.result[0]['@rid']
-      ws.send(JSON.stringify(wsdata))
+      if(ws) {
+        var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
+        if(filenode) wsdata.target = filenode.result[0]['@rid']
+        ws.send(JSON.stringify(wsdata))
+      }
     }
   } catch (error) {
     console.error('Error reading, sending, or saving the image:', error.message);
@@ -389,7 +391,8 @@ queue.downLoadFile = async function(message, uri, service) {
   var ext = path.extname(uri).replace('.', '')
   var filename = uri.split('/').pop()
   var type = 'text'
-  if(['png','jpg'].includes(ext)) type = 'image'
+  if(['png','jpg','jpeg'].includes(ext)) type = 'image'
+  if(['pdf'].includes(ext)) type = 'pdf'
 
 
   const fileNode = await Graph.createProcessFileNode(message.process['@rid'], type, ext, filename)

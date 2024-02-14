@@ -79,7 +79,11 @@ app.use(serve(path.join(__dirname, '/public')))
 
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
-	context.request.headers.mail = "local.user@localhost" // dummy shibboleth
+	if(process.env.MODE === 'development') {
+		context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
+		if(process.env.DEV_USER) 
+			context.request.headers[AUTH_HEADER] = process.env.DEV_USER
+	}
 	await next()
 });
 
@@ -119,7 +123,7 @@ app.use(async function handleError(context, next) {
 router.all('/ws', async (ctx, next) => {
 	if (ctx.ws) {
 	  const ws = await ctx.ws()
-	  const userId = ctx.headers[AUTH_HEADER]; 
+	  const userId = ctx.headers[AUTH_HEADER] 
   
 	  // Store WebSocket connection with user ID
 	  connections.set(userId, ws);
@@ -190,7 +194,6 @@ router.get('/api/files/:file_rid', async function (ctx) {
 		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 		ctx.set('Content-Type', 'application/pdf');
 	} else if(file_metadata.type =='image') {
-		//ctx.body = `<h2>Image display not implemented yet</h2> <img src="">`
 		ctx.set('Content-Type', 'image/png');
 	} else if(file_metadata.type =='text') {
 		ctx.set('Content-Type', 'text/plain; charset=utf-8');
@@ -199,7 +202,6 @@ router.get('/api/files/:file_rid', async function (ctx) {
 	} else {
 		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
 	}
-	//ctx.type = 'application/octet-stream';
 
    ctx.body = src
 })
