@@ -90,6 +90,19 @@ media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
 }
 
+media.getTextDescription = async function (filePath) {
+	const maxCharacters = 100;
+	try {
+		const data = await fs.promises.readFile(filePath, 'utf8');
+		const first = data.substring(0, maxCharacters);
+		console.log(first);
+		return first
+	  } catch (error) {
+		console.error('Error reading file:', error);
+		return ''
+	  }
+}
+
 async function checkFileExists(filePath) {
 	try {
 		console.log(filePath)

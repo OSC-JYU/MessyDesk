@@ -33,13 +33,39 @@
 
     "tasks": {
         "resize": {
-            "name": "Resize image",
+            "name": "Resize",
             "output": "image",
             "description": "Resize image."
         },
 
+        "rotate": {
+            "name": "Rotate",
+            "output": "image",
+            "description": "Rotate image by angle given by user.",
+            "params": {
+                "rotate": 90
+            },
+            "params_help": {
+                "rotate": {
+                    "name": "rotate angle",
+                    "help": "How much image is rotated."
+                }
+            }
+        },
+
+        "rotate_osd": {
+            "name": "Auto-rotate (OSD)",
+            "output": "image",
+            "description": "Rotate image by angle given by orientation detection.",
+            "supported_types": ["text"],
+            "supported_formats": ["osd"],
+            "params": {
+                "rotate": 90
+            }
+        },
+
         "blur": {
-            "name": "Blur image",
+            "name": "Blur",
             "output": "image",
             "description": "Blur image",
             "params": {
@@ -53,5 +79,4 @@
             }
         }
     }
-
 }

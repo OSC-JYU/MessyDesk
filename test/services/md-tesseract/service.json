@@ -9,7 +9,7 @@
     "supported_types": ["image"],
     "supported_formats": ["png", "jpg"],
 
-    "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
+    "description": "Tesseract is an open source text recognition (OCR) Engine, available under the Apache 2.0 license.",
 
 
     "tasks": {
@@ -55,6 +55,15 @@
                     "name": "language",
                     "help": "Define the language of the text"
                 }
+            }
+        },
+
+        "orientation_detection": {
+            "name": "Detect page orientation",
+            "output": "text",
+            "description": "Detect orientation of text image",
+            "params": {
+                "psm": 0
             }
         }
     }

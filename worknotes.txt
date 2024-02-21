@@ -1,4 +1,12 @@
 
+TODO
+
+- text file description from text content
+- virtual crunchers (tesseract orientation detection + imaginary rotate = fix orientation)
+
+
+
+
 How to run:
 
  docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.5.1

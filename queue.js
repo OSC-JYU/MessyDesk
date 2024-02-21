@@ -9,6 +9,7 @@ const { uuid }    = require('uuidv4');
 
 const Graph 		= require('./graph.js');
 const media 		= require('./media.js');
+const graph = require('./graph.js');
 
 
 process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
@@ -83,14 +84,13 @@ queue.registerService = async function(data) {
         await queue.services[data.id].consumer.subscribe({ topic: data.id, fromBeginning: false })
 
         // listen to heartbeat 
-        queue.services[data.id].consumer.on('consumer.heartbeat', () => {
-            console.log('heartbeat ' + queue.services[data.id].id)
-        })
+        // queue.services[data.id].consumer.on('consumer.heartbeat', () => {
+        //     console.log('heartbeat ' + queue.services[data.id].id)
+        // })
 
         await queue.services[data.id].consumer.run({
           eachMessage: async ({ topic, partition, message,  heartbeat, pause }) => {
             // do actual processing
-            console.log(this.connections)
             await this.callFileService(message, queue.services[data.id])
           },
         })
@@ -107,7 +107,7 @@ queue.callFileService = async function(message, service) {
           if(service.type == 'text') {
             await this.ELG_api_text(message_json, service)
           } else {
-           await this.ELG_api_binary(message_json, service)
+            await this.ELG_api_binary(message_json, service)
           }
         } else if(service.api_type.toLowerCase() == 'thumbnail') {
           await this.thumbnailer_api(message_json, service)
@@ -143,7 +143,7 @@ queue.callFileService = async function(message, service) {
 
 queue.thumbnailer_api = async function(message, service, filenode) {
 
-  //create preview and thumbnails images
+  //create preview texts and thumbnail images
 
   try {
     console.log('**************** THUMBNAILER api ***************')
@@ -153,56 +153,72 @@ queue.thumbnailer_api = async function(message, service, filenode) {
     if(filenode) {
       filepath = filenode.result[0].path
     } 
-
-    const got = await import('got');
-
-    const readStream = fs.createReadStream(filepath);
-    const formData = new FormData();
-    formData.append('file', readStream);
-    
-    console.log('Sending image via POST request...');
-
     const base_path = path.join(path.dirname(filepath))
-    var thumb_path = ''
-    var preview_path = ''
-    try {
-      await fs.ensureDir(path.dirname(filepath))
-      thumb_path = path.join(base_path, "thumbnail.jpg")
-      preview_path = path.join(base_path, "preview.jpg")
-    } catch(e) {
-      throw('Could not create file directory!' + e.message)
+    var wsdata = {target: message.file['@rid']}
+
+    if(!message.file.description) message.file.description = ''
+
+    // previews and thumbnails for images
+    if(message.file.type == 'image' || message.file.type == 'pdf') {
+      const got = await import('got');
+
+      const readStream = fs.createReadStream(filepath);
+      const formData = new FormData();
+      formData.append('file', readStream);
+      
+      console.log('Sending image via POST request...');
+      var thumb_path = ''
+      var preview_path = ''
+      try {
+        await fs.ensureDir(path.dirname(filepath))
+        thumb_path = path.join(base_path, "thumbnail.jpg")
+        preview_path = path.join(base_path, "preview.jpg")
+      } catch(e) {
+        throw('Could not create file directory!' + e.message)
+      }
+  
+      // preview
+      var url = service.url + service.api +  'thumbnail?width=800&type=jpeg' 
+      const postStream = queue.got.stream.post(url, {
+        body: formData,
+        headers: formData.getHeaders(),
+      });
+      
+      const previewStream = fs.createWriteStream(preview_path);
+      await pipeline(postStream, previewStream)
+  
+      // thumbnail
+      const readStream2 = fs.createReadStream(filepath);
+      const formData2 = new FormData();
+      formData2.append('file', readStream2);
+      
+      url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
+      const postStream2 = queue.got.stream.post(url, {
+        body: formData2,
+        headers: formData2.getHeaders(),
+      });
+  
+      const thumbStream = fs.createWriteStream(thumb_path);
+      await pipeline(postStream2, thumbStream)
+
+      wsdata.image = base_path.replace('data/', 'api/thumbnails/')
+
+    // text preview as description for texts
+    } else if(message.file.type == 'text') {
+      //var description = "tässä on vähänt ekstiä"
+      console.log('reading text file...')
+      var description = await media.getTextDescription(filepath)
+      await graph.setNodeAttribute(message.file['@rid'], {key: 'description', value: description})
+      wsdata.description =  description
     }
 
-    // preview
-    var url = service.url + service.api +  'thumbnail?width=800&type=jpeg' 
-    const postStream = queue.got.stream.post(url, {
-      body: formData,
-      headers: formData.getHeaders(),
-    });
-    
-    const previewStream = fs.createWriteStream(preview_path);
-    await pipeline(postStream, previewStream)
 
-    // thumbnail
-    const readStream2 = fs.createReadStream(filepath);
-    const formData2 = new FormData();
-    formData2.append('file', readStream2);
-    
-    url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
-    const postStream2 = queue.got.stream.post(url, {
-      body: formData2,
-      headers: formData2.getHeaders(),
-    });
-
-    const thumbStream = fs.createWriteStream(thumb_path);
-    await pipeline(postStream2, thumbStream)
 
     // update node image in UI via websocket
     if(message.userId) {
       console.log('sending thumbnailer WS to user:' , message.userId)
       const ws = this.connections.get(message.userId)
       if(ws) {
-        var wsdata = {target: message.file['@rid'], image: base_path.replace('data/', 'api/thumbnails/')}
         if(filenode) wsdata.target = filenode.result[0]['@rid']
         ws.send(JSON.stringify(wsdata))
       }
@@ -411,7 +427,7 @@ queue.downLoadFile = async function(message, uri, service) {
     console.log('sending "add node" WS')
     const ws = this.connections.get(message.userId)
     if(ws) {
-      var wsdata = {target: message.process['@rid'], node:{rid: fileNode.result[0]['@rid']}}
+      var wsdata = {target: message.process['@rid'], node:{rid: fileNode.result[0]['@rid'], label: filename, type: type}}
       ws.send(JSON.stringify(wsdata))
     }
   }
@@ -437,6 +453,7 @@ queue.downLoadFile = async function(message, uri, service) {
       topic,
       messages: [k_message],
     });
+
   } catch(e) {
     console.log(e)
     console.log('File download failed!')

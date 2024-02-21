@@ -223,6 +223,7 @@ graph.createProcessFileNode = async function(process_rid, file_type, extension, 
 	var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
+
 	return update_response
 }
 
