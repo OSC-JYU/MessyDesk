@@ -144,9 +144,16 @@ graph.getProject = async function(rid, me_email) {
 
 
 graph.getProjects = async function(me_email) {
-	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" RETURN pr`
-	var result = await web.cypher(query)
-	return result
+	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
+	var response = await web.cypher(query)
+	const data = response.result.map(item => {
+		const { pr, ...rest } = item;
+		return {
+		  ...rest,
+		  ...pr, // Copy all attributes from "pr" object
+		};
+	  });
+	return data
 }
 
 
@@ -167,16 +174,27 @@ graph.createProcessGraph = async function(topic, params, filegraph, me_email) {
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[*]->(file:File) WHERE p.id = "${me_email}" AND id(file) = "${file_rid}" RETURN pr`
 	var response = await web.cypher(query)
 	console.log(response.result[0])
+	if(response.result[0]) {
+		const project_rid = response.result[0]['@rid']
+		process = await this.create('Process', {label: topic})
+		var process_rid = process.result[0]['@rid']
+		var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+		var update_response = await web.cypher(update)
+		await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+		await setLayout(project_rid, file_rid, process_rid)
+	
+		return update_response.result[0]
+	}
+}
 
-	process = await this.create('Process', {label: topic})
-	var process_rid = process.result[0]['@rid']
-	var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
-	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
-	var update_response = await web.cypher(update)
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 
-	return update_response.result[0]
-
+async function setLayout(project_rid, parent_rid, new_rid) {
+	const fileContents = await fsPromises.readFile(`layouts/layout_${project_rid}.json`, 'utf8');
+    const parsedData = JSON.parse(fileContents);
+	parsedData[new_rid] = {x:parsedData[parent_rid].x + 400, y: parsedData[parent_rid].y}
+	const stringifiedData = JSON.stringify(parsedData);
+	await fsPromises.writeFile(`layouts/layout_${project_rid}.json`, stringifiedData, 'utf8');
 }
 
 
