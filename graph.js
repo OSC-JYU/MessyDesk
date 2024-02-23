@@ -146,16 +146,38 @@ graph.getProject = async function(rid, me_email) {
 graph.getProjects = async function(me_email) {
 	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await web.cypher(query)
-	const data = response.result.map(item => {
+	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
 		return {
 		  ...rest,
 		  ...pr, // Copy all attributes from "pr" object
 		};
 	  });
+	data = await getProjectThumbnails(me_email, data)
 	return data
 }
 
+
+async function getProjectThumbnails(me_email, data) {
+	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
+	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
+	var response = await web.cypher(query)
+
+	for (var project of data) {
+		for(var thumbs of response.result) {
+			if(project['@rid'] === thumbs.project) {
+				project.paths = []
+				thumbs.paths.forEach(function(part, index) {
+					if(index < 2) {
+						const filename = path.basename(part)
+						project.paths.push(part.replace('data', '/api/thumbnails').replace(filename, ''))
+					}
+				  });
+			}
+		}
+	}
+	return data
+}
 
 graph.getProjectFiles = async function(rid, me_email) {
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
