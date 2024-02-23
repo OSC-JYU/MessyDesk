@@ -110,3 +110,8 @@ print(tulos)
 
 
 KAFKAN KORVAAJA? https://zeromq.org/
+
+
+SQL:
+MATCH {type: Project, as: project}-HAS_FILE->
+{type:File, as: file, where:(set IS NULL)} RETURN project,file

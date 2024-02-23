@@ -242,8 +242,8 @@ router.get('/api/projects', async function (ctx) {
 
 router.get('/api/projects/:rid', async function (ctx) {
 	var n = await Graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
-	console.log(n.result)
-	ctx.body = n.result
+	console.log(n)
+	ctx.body = n
 })
 
 router.get('/api/projects/:rid/files', async function (ctx) {

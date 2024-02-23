@@ -135,12 +135,27 @@ graph.createProject = async function(data, me_rid) {
 
 
 
-graph.getProject = async function(rid, me_email) {
+graph.getProject_old = async function(rid, me_email) {
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
 	var result = await web.cypher(query)
 	return result
 }
 
+
+graph.getProject = async function(rid, me_email) {
+	schema_relations = await this.getSchemaRelations()
+	//const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project)-[r]->(child) WHERE  child.set IS NULL AND id(project) = "#${rid}"  AND p.id = "${me_email}"  
+	//OPTIONAL MATCH (child)-[r2*]->(child2) RETURN  child, r2, child2`
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
+		OPTIONAL MATCH (project)-[r2*]->(child2) WHERE child2.set is NULL RETURN  r2, child2`
+	const options = {
+		serializer: 'graph',
+		format: 'cytoscape',
+		schemas: schema_relations
+	}
+	var result = await web.cypher(query, options)
+	return result
+}
 
 
 graph.getProjects = async function(me_email) {

@@ -133,90 +133,10 @@ function setParent(vertices, child, parent) {
 	}
 }
 
-// not really clustering, more like auto-compound
-function cluster(nodes, edges) {
-	var unique_links = {}
-	var cluster_types = {}
-	var cluster_nodes = []
-	var cluster_edges = []
-
-	var clustered_links = []
-	var clustered_edges = []
-	var clustered_nodes = []
-
-	clustered_nodes = nodes
-
-
-	for(var edge of edges) {
-		var cluster_id = edge.data.source + '__' + edge.data.type
-		if(unique_links[cluster_id]) {
-			unique_links[cluster_id].push(edge.data.target)
-		} else {
-			unique_links[cluster_id] = [edge.data.target]
-		}
-	}
-
-	for(var cluster_id in unique_links) {
-		if(unique_links[cluster_id].length > 10) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			clustered_links.push(cluster_id)
-
-			cluster_nodes.push({data: {name: cluster_id, type_label: 'Cluster', id: cluster_id, type:'Cluster', width:100, active:true}})
-			cluster_edges.push({data: {label: rel, source: source, target: cluster_id, active: true}})
-		}
-	}
-
-	clustered_edges = edges.filter(edge => {
-		// filter out clustered links
-		var found = false
-		for(var cluster_id of clustered_links) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			if(edge.data.source == source) {
-				if(unique_links[cluster_id].includes(edge.data.target) && edge.data.type === rel)
-					found = true
-			}
-		}
-		if(!found) return edge
-	})
-
-	// add parent to Cluster node to all clustered notes
-	clustered_nodes = nodes.filter(node => {
-		for(var cluster_id of clustered_links) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			if(unique_links[cluster_id].includes(node.data.id)) {
-				console.log(cluster_id)
-				node.data.parent = cluster_id
-			}
-		}
-		return node
-	})
-
-	// add cluster nodes and edges to output
-	clustered_nodes = clustered_nodes.concat(cluster_nodes)
-	clustered_edges = clustered_edges.concat(cluster_edges)
-
-	if(clustered_links.length === 0) {
-		clustered_nodes = nodes
-		clustered_edges = edges
-	}
-
-
-	// console.log('Edges to be clustered:')
-	// console.log(clustered_links)
-	// console.log('clustered edge count: ' + edges.length)
-	// console.log(cluster_nodes)
-	return {edges: clustered_edges, nodes: clustered_nodes}
-
-}
 
 
 async function convert2CytoScapeJs(data, options) {
+	console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []
@@ -273,6 +193,7 @@ async function convert2CytoScapeJs(data, options) {
 		}
 	}
 
+	console.log(nodes)
 	var edges = []
 	var ids = []
 	if(data.result.edges) {
@@ -298,15 +219,9 @@ async function convert2CytoScapeJs(data, options) {
 						} else {
 							edge.data.label = edge.data.label
 						}
-						if(options.schemas[v.t].compound === true) {
-							console.log('***************** COMPoUND ***************\n\n')
-							if(options.current == v.o)
-								edges.push(edge)
-							else
-								setParent(nodes, v.o, v.i)
-						} else {
-							edges.push(edge)
-						}
+
+						edges.push(edge)
+						
 					} else {
 						edges.push(edge)
 					}
@@ -316,13 +231,9 @@ async function convert2CytoScapeJs(data, options) {
 			}
 		}
 	}
-	if(options.current) {
-		//return {nodes:nodes, edges: edges}
-		var clustered = cluster(nodes, edges)
-		return {nodes:clustered.nodes, edges: clustered.edges}
-	} else {
-		return {nodes:nodes, edges: edges}
-	}
+
+	return {nodes:nodes, edges: edges}
+	
 }
 
 
