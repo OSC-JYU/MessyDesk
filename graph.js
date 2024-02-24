@@ -200,6 +200,14 @@ graph.getProjectFiles = async function(rid, me_email) {
 	return result
 }
 
+graph.getSetFiles = async function(set_rid, me_email) {
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[r*]->(file:File) WHERE p.id = "${me_email}" AND file.set = "#${set_rid}" RETURN file`
+	var response = await web.cypher(query)
+	for(var file of response.result) {
+		file.thumb = file.path.replace('data','/api/thumbnails').split('/').slice(0, -1).join('/');
+	}
+	return response.result
+}
 
 graph.createProcessGraph = async function(topic, params, filegraph, me_email) {
 	

@@ -160,7 +160,7 @@ router.get('/api/stall', async function (ctx) {
 
 router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
 
-	var response = await Graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	var response = await Graph.getProject_old(ctx.request.params.rid, ctx.request.headers.mail)
 	if (response.result.length == 0) throw('Project not found')
 
 	project_rid = response.result[0]["@rid"]
@@ -341,6 +341,13 @@ router.get('/api/layouts/:rid', async function (ctx) {
 	var n = await Graph.getLayoutByTarget(ctx.request.params.rid)
 	ctx.body = n
 })
+
+
+router.get('/api/sets/:rid/files', async function (ctx) {
+	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
 
 
 router.get('/api/styles', async function (ctx) {
