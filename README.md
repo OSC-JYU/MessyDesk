@@ -31,7 +31,11 @@ Start services:
 
     docker-compose up
 
-This will start Kafka, Arcadedb and Imaginary (thumbnailer)
+This will start Kafka and Arcadedb 
+
+Start Nomad locally:
+
+    sudo nomad agent -dev   -bind 0.0.0.0   -network-interface='{{ GetDefaultInterfaces | attr "name" }}'
 
 Start back end:
 

@@ -136,7 +136,7 @@ function setParent(vertices, child, parent) {
 
 
 async function convert2CytoScapeJs(data, options) {
-	console.log(data.result)
+	//console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []
@@ -193,7 +193,6 @@ async function convert2CytoScapeJs(data, options) {
 		}
 	}
 
-	console.log(nodes)
 	var edges = []
 	var ids = []
 	if(data.result.edges) {

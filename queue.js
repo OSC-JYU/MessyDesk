@@ -9,93 +9,74 @@ const { uuid }    = require('uuidv4');
 
 const Graph 		= require('./graph.js');
 const media 		= require('./media.js');
-const graph = require('./graph.js');
-
-
-process.env.KAFKAJS_NO_PARTITIONER_WARNING=1
-
-const KAFKA_URL = "localhost:9094"
+const graph     = require('./graph.js');
+const nomad     = require('./nomad.js');
+const services 	= require('./services.js');
+const Queue		  = require('./Queue.js');
 
 
 let queue = {}
-queue.services = {}
-
-const kafka = new Kafka({
-    clientId: "messydesk",
-    brokers: [KAFKA_URL], // Replace with your Kafka broker address
-});
 
 
-
-
-queue.init = async function(connections) {
+queue.init = async function(connections, services) {
 
     const { default: got } = await import('got');
     this.got = got
     this.connections = connections
-
+    console.log('initing queues...')
     try {
-        console.log('connecting kafka: ' + KAFKA_URL)
-
-    
-        queue.producer = kafka.producer()
-        queue.admin = kafka.admin()
-
-        await queue.producer.connect()
-        
-        console.log(`connected to Kafka at ${KAFKA_URL}!`)
-
-      } catch (error) {
-        console.error("\nERROR: Kafka connection failed!\n")
-        console.log(error.message);
-        process.exit(1)
+      for(var s in services) {
+        // add callbacks for queue processing
+				const callback = queue.getFileCallback(services[s])
+				services[s]['queue'] = new Queue(callback)
       }
-    
+
+    } catch (error) {
+      console.log(error.message);
+      process.exit(1)
+    }
 }
 
 
 
 queue.checkService = async function(data) {
-  // test that service is alive before creating the topic
-  console.log(data)
+  // get service url from nomad
+  const service = await nomad.getServiceURL(data)
+  return service
+}
 
-  // test if topic exists and if not, then create it
-  await queue.admin.connect()
-  var topics = await queue.admin.listTopics()
-  if(!topics.includes(data.id)) {
-    await queue.admin.createTopics({topics:[
-      {topic: data.id}
-    ]})
+
+queue.add = async function(topic, data, filenode) {
+  console.log(topic)
+  var service = await services.getServiceAdapterByName(topic)
+  try {
+    var s = await this.checkService(topic)
+    if(!s) {
+      await nomad.createService(service)
+    }
+    const service_url = await nomad.getServiceURL(topic)
+    service.url = service_url
+    service.queue.add(service, data, filenode)
+  } catch(e) {
+    console.log('Could not add to queue!', e)
   }
 }
 
 
 
-queue.registerService = async function(data) {
+queue.getFileCallback = function(service) {
 
-    if(data.id && data.url && data.api && data.supported_formats && data.supported_types && data.name && data.api_type) {
-
-        await this.checkService(data)
-
-        queue.services[data.id] = data
-        queue.services[data.id].consumer = await kafka.consumer({ groupId: data.id})
-
-        await queue.services[data.id].consumer.connect()
-        await queue.services[data.id].consumer.subscribe({ topic: data.id, fromBeginning: false })
-
-        // listen to heartbeat 
-        // queue.services[data.id].consumer.on('consumer.heartbeat', () => {
-        //     console.log('heartbeat ' + queue.services[data.id].id)
-        // })
-
-        await queue.services[data.id].consumer.run({
-          eachMessage: async ({ topic, partition, message,  heartbeat, pause }) => {
-            // do actual processing
-            await this.callFileService(message, queue.services[data.id])
-          },
-        })
-
+  if(service.api_type.toLowerCase() == 'elg') {
+    if(service.type == 'text') {
+      return this.ELG_api_text
+    } else {
+      return this.ELG_api_binary
     }
+  } else if(service.api_type.toLowerCase() == 'thumbnail') {
+    return this.thumbnailer_api
+  } else if(service.api_type.toLowerCase() == 'imaginary') {
+    return this.imaginary_api
+  } 
 
 }
 
@@ -141,25 +122,25 @@ queue.callFileService = async function(message, service) {
 
 
 
-queue.thumbnailer_api = async function(message, service, filenode) {
+queue.thumbnailer_api = async function(item) {
 
   //create preview texts and thumbnail images
 
   try {
     console.log('**************** THUMBNAILER api ***************')
-    console.log(message)
+    console.log(item.data)
 
-    var filepath = message.file.path
-    if(filenode) {
-      filepath = filenode.result[0].path
+    var filepath = item.data.file.path
+    if(item.filenode) {
+      filepath = item.filenode.result[0].path
     } 
     const base_path = path.join(path.dirname(filepath))
-    var wsdata = {target: message.file['@rid']}
+    var wsdata = {target: item.data.file['@rid']}
 
-    if(!message.file.description) message.file.description = ''
+    if(!item.data.file.description) item.data.file.description = ''
 
     // previews and thumbnails for images
-    if(message.file.type == 'image' || message.file.type == 'pdf') {
+    if(item.data.file.type == 'image' || item.data.file.type == 'pdf') {
       const got = await import('got');
 
       const readStream = fs.createReadStream(filepath);
@@ -178,7 +159,8 @@ queue.thumbnailer_api = async function(message, service, filenode) {
       }
   
       // preview
-      var url = service.url + service.api +  'thumbnail?width=800&type=jpeg' 
+      var url = 'http://' + item.service.url + item.service.api +  'thumbnail?width=800&type=jpeg' 
+      console.log(url)
       const postStream = queue.got.stream.post(url, {
         body: formData,
         headers: formData.getHeaders(),
@@ -192,7 +174,7 @@ queue.thumbnailer_api = async function(message, service, filenode) {
       const formData2 = new FormData();
       formData2.append('file', readStream2);
       
-      url = service.url + service.api +  'thumbnail?width=200&type=jpeg' 
+      url = 'http://' + item.service.url + item.service.api +  'thumbnail?width=200&type=jpeg' 
       const postStream2 = queue.got.stream.post(url, {
         body: formData2,
         headers: formData2.getHeaders(),
@@ -204,41 +186,44 @@ queue.thumbnailer_api = async function(message, service, filenode) {
       wsdata.image = base_path.replace('data/', 'api/thumbnails/')
 
     // text preview as description for texts
-    } else if(message.file.type == 'text') {
+    } else if(item.data.file.type == 'text') {
       //var description = "tässä on vähänt ekstiä"
       console.log('reading text file...')
       var description = await media.getTextDescription(filepath)
-      await graph.setNodeAttribute(message.file['@rid'], {key: 'description', value: description})
+      await graph.setNodeAttribute(item.data.file['@rid'], {key: 'description', value: description})
       wsdata.description =  description
     }
 
 
 
     // update node image in UI via websocket
-    if(message.userId) {
-      console.log('sending thumbnailer WS to user:' , message.userId)
-      const ws = this.connections.get(message.userId)
+    if(item.data.userId) {
+      console.log('sending thumbnailer WS to user:' , item.data.userId)
+      console.log(typeof  queue.connections)
+      console.log(item.filenode.result[0]['@rid'])
+      const ws = queue.connections.get(item.data.userId)
       if(ws) {
-        if(filenode) wsdata.target = filenode.result[0]['@rid']
+        if(item.filenode) wsdata.target = item.filenode.result[0]['@rid']
+        console.log(wsdata)
         ws.send(JSON.stringify(wsdata))
       }
     }
   } catch (error) {
-    console.error('Error reading, sending, or saving the image:', error.message);
+    console.error('thumbnailer_api: Error reading, sending, or saving the image:', error.message);
   }
 }
 
 
 
-queue.imaginary_api = async function(message, service) {
+queue.imaginary_api = async function(item) {
 
   //const imageDestinationUrl = 'http://localhost:9000/blur?sigma=20';
 
   try {
     console.log('**************** IMAGINARY api ***************')
-    console.log(message)
+    console.log(item.data)
       const got = await import('got');
-      const filepath = message.file.path
+      const filepath = item.data.file.path
       const readStream = fs.createReadStream(filepath);
       const formData = new FormData();
       formData.append('file', readStream);
@@ -246,7 +231,7 @@ queue.imaginary_api = async function(message, service) {
       console.log('Sending image via POST request...');
       // first, create file object to graph
     // process_rid, file_type, extension, label
-    const fileNode = await Graph.createProcessFileNode(message.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
+    const fileNode = await Graph.createProcessFileNode(item.data.process['@rid'], 'image', path.extname(filepath).replace('.',''), path.basename(filepath))
     console.log(fileNode)
     var writepath = ''
     try {
@@ -255,8 +240,9 @@ queue.imaginary_api = async function(message, service) {
     } catch(e) {
       throw('Could not create file directory!' + e.message)
     }
-      const url_params = objectToURLParams(message.params)
-      var url = service.url + service.api +  message.task + '?' + url_params
+      const url_params = objectToURLParams(item.data.params)
+      var url = 'http://' + item.service.url + item.service.api +  item.data.task + '?' + url_params
+      console.log(url)
       const postStream = queue.got.stream.post(url, {
         body: formData,
         headers: formData.getHeaders(),
@@ -266,10 +252,17 @@ queue.imaginary_api = async function(message, service) {
       const writeStream = fs.createWriteStream(writepath);
  
       await pipeline(postStream, writeStream)
+      console.log('********************** CALLING THUBNAILER ************')
+      var service = await services.getServiceAdapterByName('thumbnailer')
+      const service_url = await nomad.getServiceURL('thumbnailer')
+      service.url = service_url
+      service.queue.add(service, item.data, fileNode)
+      //this.add("thumbnailer", item.data, fileNode)
       return fileNode
       
     } catch (error) {
-      console.error('Error reading, sending, or saving the image:', error.message);
+      console.error('imaginary_api: Error reading, sending, or saving the image:', error.message);
+      throw('imaginary api failed', error.message)
     }
 }
 

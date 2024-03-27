@@ -9,7 +9,7 @@ TODO
 
 How to run:
 
- docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.5.1
+ docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.7.1
 
 cd test/kafka
 docker-compose up
@@ -22,6 +22,19 @@ docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary
 
 Register thumbnailer queue:
 curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
+
+
+
+NATS:
+
+start with monitoring and jetstreams enabled:
+
+  docker run -d --name nats-main -p 4222:4222 -p 6222:6222 -p 8222:8222 nats -js -m 8222
+
+
+monitoring:
+http://localhost:8222/jsz?consumers=true
+
 
 
 
@@ -61,6 +74,15 @@ https://deepdoctection.readthedocs.io/en/latest/tutorials/get_started_notebook/
 
 NER:
 https://medium.com/quantrium-tech/top-3-packages-for-named-entity-recognition-e9e14f6f0a2a
+
+Kansalliskirjasto: nimientiteettien tunnistus:
+https://www.doria.fi/bitstream/handle/10024/187816/Nimientiteettien%20tunnistus.20230830.pdf?sequence=1&isAllowed=y
+
+https://github.com/DALAI-project/NER_API
+
+
+GREY LITERATURE METADATA EXTRACTION:
+https://www.doria.fi/bitstream/handle/10024/188075/Tekoa%cc%88lykahvit_%20Extracting%20metadata%20using%20LLMs.pdf?sequence=1&isAllowed=y
 
 
 OCR:

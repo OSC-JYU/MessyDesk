@@ -17,10 +17,9 @@ const MAX_STR_LENGTH = 2048
 
 let graph = {}
 
-graph.initDB = async function(docIndex) {
+graph.initDB = async function() {
 		console.log(`ArcadeDB: ${web.getURL()}`)
 		console.log(`Checking database...`)
-		//this.docIndex = docIndex
 		var query = 'MATCH (n:Schema) return n'
 		try {
 			var result = await web.cypher(query)
@@ -90,31 +89,6 @@ graph.createSystemGraph = async function() {
 	}
 
 
-graph.createIndex = async function() {
-		console.log('Starting to index...')
-		var query = 'MATCH (n) return id(n) as id, n.label as label, n.description as description'
-		try {
-			var result = await web.cypher( query)
-			try {
-				for (var node of result.result) {
-					this.docIndex.add(node)
-				}
-				console.log('Indexing done')
-			} catch(e) {
-				// if indexing fails, then we have a problem and we quit
-				console.log('Indexing failed, exiting...')
-				console.log(e)
-				process.exit(1)
-			}
-
-		} catch(e) {
-			console.log(`Could not find database. \nIs Arcadedb running at ${URL}?`)
-			process.exit(1)
-		}
-
-	}
-
-
 graph.createProject = async function(data, me_rid) {
 		
 		var project = {}
@@ -147,7 +121,8 @@ graph.getProject = async function(rid, me_email) {
 	//const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project)-[r]->(child) WHERE  child.set IS NULL AND id(project) = "#${rid}"  AND p.id = "${me_email}"  
 	//OPTIONAL MATCH (child)-[r2*]->(child2) RETURN  child, r2, child2`
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-		OPTIONAL MATCH (project)-[r2*]->(child2) WHERE child2.set is NULL RETURN  r2, child2`
+		MATCH (project)-[rr]->(file:File)
+		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, r2, child2`
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
@@ -304,6 +279,7 @@ graph.getServicesForFile = async function (services, rid) {
 	const query = `MATCH (file) WHERE id(file) = "#${rid}" RETURN file`
 	var response = await web.cypher(query)
 	if(response.result.length == 1) {
+		console.log(response.result)
 		const matches = {for_type: [], for_format: []}
 		var file = response.result[0]
 		for(var service in services) {
@@ -399,7 +375,6 @@ graph.merge = async function(type, node) {
 		try {
 			var response = await web.cypher( insert)
 			console.log(response)
-			this.docIndex.add({id: response.result[0]['@rid'],label:node.label})
 			return response.data
 
 		} catch (e) {
@@ -407,7 +382,6 @@ graph.merge = async function(type, node) {
 				await web.createVertexType(type)
 				var response = await web.cypher( insert)
 				console.log(response)
-				this.docIndex.add({id: response.result[0]['@rid'],label:node.label})
 				return response.data
 			} catch(e) {
 				console.log(e)

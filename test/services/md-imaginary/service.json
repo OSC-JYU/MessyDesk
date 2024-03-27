@@ -8,7 +8,7 @@
     "source_url": "https://github.com/h2non/node-imaginary",
     
     "supported_types": ["image"],
-    "supported_formats": ["png", "jpg"],
+    "supported_formats": ["png", "jpg","jpeg"],
 
 
     "params": {
