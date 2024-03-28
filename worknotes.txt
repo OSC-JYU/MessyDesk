@@ -1,9 +1,11 @@
 
 TODO
 
-- text file description from text content
 - virtual crunchers (tesseract orientation detection + imaginary rotate = fix orientation)
 
+ 
+DONE
+- text file description from text content OK
 
 
 
@@ -38,8 +40,6 @@ http://localhost:8222/jsz?consumers=true
 
 
 
-
-
   GREMLIN
 
 g.V('#105:7')
@@ -53,8 +53,19 @@ g.V('#105:7')
 
 
 
+
 graph alternative:
 https://github.com/jagenjo/litegraph.js/
+
+
+
+CRUNCHES suggestions
+
+
+
+img2table: https://github.com/xavctn/img2table
+  - html export: https://github.com/xavctn/img2table/issues/92
+
 
 
 line removal: 
