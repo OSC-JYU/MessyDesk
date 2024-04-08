@@ -31,7 +31,7 @@ Start services:
 
     docker-compose up
 
-This will start Kafka and Arcadedb 
+This will start NATS and Arcadedb 
 
 Start Nomad locally:
 

@@ -47,7 +47,12 @@ nomad.createService = async function(service) {
 	} else {
 		throw(`nomad.hcl not found for "${service.id}"!`)
 	}
+}
 
+nomad.getService = async function(service) {
+	const url = URL + `/service/${service}`
+	var response = await axios.get(url)
+	if(response.data.length > 0) return response.data
 }
 
 nomad.getServiceURL = async function(service) {
@@ -60,6 +65,15 @@ nomad.getServiceURL = async function(service) {
 		service_url = `${response.data[0].Address}:${response.data[0].Port}`
 	}
 	return service_url
+}
+
+nomad.stopService = async function(service) {
+	if(service) {
+		var response_stop = await axios.delete(URL + '/job/' + service)
+		return response_stop.data
+	} else {
+		throw(`nomad.hcl not found for "${service.id}"!`)
+	}
 }
 
 module.exports = nomad

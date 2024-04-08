@@ -10,21 +10,25 @@ const fs 			= require('fs')
 const websocket 	= require('koa-easy-ws')
 
 const Graph 		= require('./graph.js');
-const queue 		= require('./queue.js');
+
 const media 		= require('./media.js');
 const schema 		= require('./schema.js');
 const styles 		= require('./styles.js');
 const services 		= require('./services.js');
 const nomad 		= require('./nomad.js');
+let nats
 
 const connections = new Map();
 
 (async () => {
 	console.log('initing...')
+	// migration to ES6 in progress...
+	const {queue} 		= await import('./queue.mjs');
+	nats = queue
 	await nomad.getStatus()
 	await services.loadServiceAdapters()
-	await queue.init(connections, services.getServices())
-	//await queue.init(services.getServices())
+	// create main stream and all consumers in NATS
+	await nats.init(services.getServices())
 	// start thumbnailer and Poppler services
 	var thumb = await services.getServiceAdapterByName('thumbnailer')
 	await nomad.createService(thumb)
@@ -35,6 +39,14 @@ const connections = new Map();
 	await schema.importSystemSchema()
 	await styles.importSystemStyle()
 })();
+
+process.on( 'SIGINT', async function() {
+	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
+	// we may want to shutdown nomad jobs if we are developing locally
+	await nomad.stopService('MD-thumbnailer')
+	await nomad.stopService('MD-imaginary')
+	process.exit( );
+  })
 
 
 const AUTH_HEADER = 'mail'
@@ -125,7 +137,7 @@ router.all('/ws', async (ctx, next) => {
 	  const userId = ctx.headers[AUTH_HEADER] 
   
 	  // Store WebSocket connection with user ID
-	  queue.connections.set(userId, ws);
+	  connections.set(userId, ws);
 	  ws.on('message', function message(data) {
 		console.log('received: %s', data);
 		ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
@@ -139,7 +151,7 @@ router.get('/api', function (ctx) {
 })
 
 router.get('/connections', function (ctx) {
-	const itr = queue.connections.keys()
+	const itr = connections.keys()
 	var arr = []
 	for (const value of itr) {
 		arr.push(value);
@@ -148,13 +160,13 @@ router.get('/connections', function (ctx) {
 })
 
 router.get('/api/me', async function (ctx) {
-	if(process.env.CREATE_USERS_ON_THE_FLY) {
-		// keep list of visitors so that we do not create double users on sequential requests
-		if(!visitors.includes(ctx.request.headers[AUTH_HEADER])) {
-			visitors.push(ctx.request.headers[AUTH_HEADER])
-			await Graph.checkMe(ctx.request.headers[AUTH_HEADER])
-		}
-	}
+	// if(process.env.CREATE_USERS_ON_THE_FLY) {
+	// 	// keep list of visitors so that we do not create double users on sequential requests
+	// 	if(!visitors.includes(ctx.request.headers[AUTH_HEADER])) {
+	// 		visitors.push(ctx.request.headers[AUTH_HEADER])
+	// 		await Graph.checkMe(ctx.request.headers[AUTH_HEADER])
+	// 	}
+	// }
 	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
@@ -179,7 +191,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	data.userId = ctx.headers[AUTH_HEADER]
 
 	// send to thumbnailer queue 
-	queue.add('thumbnailer', data)
+	nats.publish('thumbnailer', JSON.stringify(data))
 
 	ctx.body = filegraph
 
@@ -201,7 +213,6 @@ router.get('/api/files/:file_rid', async function (ctx) {
 	} else {
 		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
 	}
-
    ctx.body = src
 })
 
@@ -252,15 +263,15 @@ router.get('/api/projects/:rid/files', async function (ctx) {
 // services
 
 // register service
-router.post('/api/services/:name', async function (ctx) {
-	var response = await services.getServiceAdapterByName(ctx.request.params.name, queue.services)
-	ctx.body = response
-})
+// router.post('/api/services/:name', async function (ctx) {
+// 	var response = await services.getServiceAdapterByName(ctx.request.params.name, queue.services)
+// 	ctx.body = response
+// })
 
-router.post('/api/services', async function (ctx) {
-	await queue.registerService(ctx.request.body)
-	ctx.body = ctx.request.body
-})
+// router.post('/api/services', async function (ctx) {
+// 	await queue.registerService(ctx.request.body)
+// 	ctx.body = ctx.request.body
+// })
 
 router.get('/api/services', async function (ctx) {
 	ctx.body = await services.getServices(queue.services)
@@ -294,94 +305,60 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
 
-		queue.add(topic, ctx.request.body)
+		nats.publish(topic, ctx.request.body)
 		ctx.body = ctx.request.params.file_rid
 
 	} catch(e) {
 		console.log('Queue failed!', e)
 	}
-
-
-
-
-	
-	// if(topic in queue.services) {
-	// 	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-	// 	if(file_metadata.path) {
-	// 		// add process to graph
-	// 		var task_name = queue.services[topic].tasks[ctx.request.body.task].name
-	// 		var process = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
-	// 		await media.createProcessDir(process.path) 
-	// 		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(process.path))
-
-	// 		ctx.request.body.process = process
-	// 		ctx.request.body.file = file_metadata
-	// 		ctx.request.body.target = ctx.request.params.file_rid
-	// 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
-	// 		const message = {
-	// 			key: "md",
-	// 			value: JSON.stringify(ctx.request.body),
-	// 		};
-
-	// 		await queue.producer.send({
-	// 			topic,
-	// 			messages: [message],
-	// 		});
-		
-	// 		ctx.body = ctx.request.params.file_rid
-	// 	} else {
-	// 		throw('File not found!')
-	// 	}
-	// } else {
-	// 	ctx.body = 'ERROR: service not available'
-	// }
 })
 
 
 
-// router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 
-// 	const topic = ctx.request.params.topic 
-// 	if(topic in queue.services) {
-// 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-// 		if(file_metadata.path) {
-// 			// add process to graph
-// 			var task_name = queue.services[topic].tasks[ctx.request.body.task].name
-// 			var process = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
-// 			await media.createProcessDir(process.path) 
-// 			await media.writeJSON(ctx.request.body, 'params.json', path.dirname(process.path))
-
-// 			ctx.request.body.process = process
-// 			ctx.request.body.file = file_metadata
-// 			ctx.request.body.target = ctx.request.params.file_rid
-// 			ctx.request.body.userId = ctx.headers[AUTH_HEADER]
-// 			const message = {
-// 				key: "md",
-// 				value: JSON.stringify(ctx.request.body),
-// 			};
-
-// 			await queue.producer.send({
-// 				topic,
-// 				messages: [message],
-// 			});
-		
-// 			ctx.body = ctx.request.params.file_rid
-// 		} else {
-// 			throw('File not found!')
-// 		}
-// 	} else {
-// 		ctx.body = 'ERROR: service not available'
-// 	}
-// })
-
-
-
+// NOMAD
+// nomad endpoints has different authorisation (auth header)
 
 router.get('/api/nomad/status', async function (ctx) {
 	ctx.body = await nomad.getStatus()
 
 })
 
+// endpoint for consumer apps for starting their work horses
+router.post('/api/nomad/service/:name/create', async function (ctx) {
+	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
+	var service = await nomad.createService(adapter)
+	ctx.body = service
+})
+
+// endpoint for consumer apps to get file to be processed
+router.get('/api/nomad/files/:file_rid', async function (ctx) {
+	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+    const src = fs.createReadStream(file_metadata.path);
+	if(file_metadata.type =='pdf') {
+		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
+		ctx.set('Content-Type', 'application/pdf');
+	} else if(file_metadata.type =='image') {
+		ctx.set('Content-Type', 'image/png');
+	} else if(file_metadata.type =='text') {
+		ctx.set('Content-Type', 'text/plain; charset=utf-8');
+	} else if(file_metadata.type =='data') {
+		ctx.set('Content-Type', 'text/plain; charset=utf-8');
+	} else {
+		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+	}
+   ctx.body = src
+})
+
+// endpoint for consumer apps to submit processing result
+router.post('/api/nomad/process/:rid/files', async function (ctx) {
+
+	// create graph item
+
+	// save file
+
+	// send ws message to user
+})
 
 
 
