@@ -7,6 +7,8 @@ const multer 		= require('@koa/multer');
 const winston 		= require('winston');
 const path 			= require('path')
 const fs 			= require('fs')
+const fse 			= require('fs-extra')
+const { pipeline }  = require('stream');
 const websocket 	= require('koa-easy-ws')
 
 const Graph 		= require('./graph.js');
@@ -274,7 +276,7 @@ router.get('/api/projects/:rid/files', async function (ctx) {
 // })
 
 router.get('/api/services', async function (ctx) {
-	ctx.body = await services.getServices(queue.services)
+	ctx.body = await services.getServices()
 })
 
 // get services for certain file
@@ -283,8 +285,6 @@ router.get('/api/services/files/:rid', async function (ctx) {
 	ctx.body = service_list
 })
 
-
-// un-register
 
 // add to queue
 
@@ -350,16 +350,78 @@ router.get('/api/nomad/files/:file_rid', async function (ctx) {
    ctx.body = src
 })
 
-// endpoint for consumer apps to submit processing result
-router.post('/api/nomad/process/:rid/files', async function (ctx) {
+// endpoint for consumer apps to submit processing result files
+router.post('/api/nomad/process/files', upload.fields([
+    { name: 'request', maxCount: 1 },
+    { name: 'content', maxCount: 1 }
+]), async function (ctx) {
+
+	console.log('nomad call...')
+	console.log(ctx.request.files)
+	let infoFilepath, contentFilepath = null
+	let message = {}
+	try {
+		if(ctx.request.files['request']) {
+			infoFilepath = ctx.request.files['request'][0].path
+	
+			var info = await fse.readFile(infoFilepath)
+			message = JSON.parse(info)
+			console.log(message)
+		}
+	
+		// const infoFilepath = ctx.request.files['info'][0].path
+		if(ctx.request.files['content']) {
+			contentFilepath = ctx.request.files['content'][0].path
+	
+		}
+	
+		if(infoFilepath && contentFilepath) {
+			const process_rid = message.process['@rid']
+			//var fileNode = await Graph.createProcessFileNode()
+			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label)
+			console.log(fileNode)
+			if(message.userId) {
+				console.log('sending text WS')
+				const ws = connections.get(message.userId)
+				if(ws) {
+					var wsdata = {target: process_rid, node:{rid: fileNode.result[0]['@rid']}}
+					ws.send(JSON.stringify(wsdata))
+				}
+			}
+		}
+	} catch(e) {
+		console.log(e.message)
+	}
+
+
 
 	// create graph item
+	//var file_metadata = await Graph.getUserFileMetadata(ctx.request.body.rid, ctx.request.bodu.userId)
+	//var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 
 	// save file
 
 	// send ws message to user
+	ctx.body = 's'
 })
 
+// endpoint for consumer apps to submit processing result success (or failure)
+router.post('/api/nomad/process/success', async function (ctx) {
+	console.log('nomad call...')
+	console.log(ctx.request.body)
+
+
+
+	//createProcessFileNode = async function(ctx.request.body.process['@rid'], file_type, extension, label)
+	// create graph item
+	//var file_metadata = await Graph.getUserFileMetadata(ctx.request.body.rid, ctx.request.bodu.userId)
+	//var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
+
+	// save file
+
+	// send ws message to user
+	ctx.body = 's'
+})
 
 
 

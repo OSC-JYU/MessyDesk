@@ -27,11 +27,10 @@ Clone this repo:
    git clone https://github.com/OSC-JYU/MessyDesk.git
    cd MessyDesk
 
-Start services:
+Start NATS and Arcadedb 
 
     docker-compose up
 
-This will start NATS and Arcadedb 
 
 Start Nomad locally:
 
@@ -40,12 +39,6 @@ Start Nomad locally:
 Start back end:
 
     MODE=development DB_PASSWORD=node_master node index.js
-
-Then we must create queues for thumbnailer and imaginary (both using the same Imaginary service). 
-
-    curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
-
-    curl http://localhost:8200/api/services -d "@test/services/imaginary/service.json" --header "Content-Type: application/json"
 
 
 Now we should have backend running!

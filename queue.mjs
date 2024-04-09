@@ -26,8 +26,8 @@ queue.init = async function(services) {
     servers: [servers],
   });
   this.js = this.nc.jetstream();
-  const jsm = await this.js.jetstreamManager();
-  await jsm.streams.add({
+  this.jsm = await this.js.jetstreamManager();
+  await this.jsm.streams.add({
     name: "PROCESS",
     retention: RetentionPolicy.Workqueue,
     subjects: ["process.>"],
@@ -39,7 +39,7 @@ queue.init = async function(services) {
   for(var key in services) {
     console.log(key)
     try {
-      await jsm.consumers.add("PROCESS", {
+      await this.jsm.consumers.add("PROCESS", {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
         filter_subject: `process.${key}`,
@@ -63,7 +63,7 @@ queue.checkService = async function(data) {
 
 queue.publish = async function(topic, data, filenode) {
   console.log(topic)
-  var service = await services.getServiceAdapterByName(topic)
+  //var service = await services.getServiceAdapterByName(topic)
   try {
     //var s = await this.checkService(topic)
     //if(!s) {
@@ -79,7 +79,14 @@ queue.publish = async function(topic, data, filenode) {
 }
 
 
-
+queue.listConsumers = async function() {
+  var consumers = []
+  var lister = await this.jsm.consumers.list("PROCESS")
+  for await (const item of lister) {
+      consumers.push(item);
+  }
+  return consumers
+}
 
 
 

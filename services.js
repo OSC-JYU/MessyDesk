@@ -7,7 +7,7 @@ const nomad 		= require('./nomad.js');
 let services = {service_list: {}}
 
 services.loadServiceAdapters = async function () {
-	const directoryPath = 'test/services'
+	const directoryPath = 'services'
 	try {
 		// Create an object to store the results
 		const servicesObject = {};
