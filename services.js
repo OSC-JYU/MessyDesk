@@ -28,6 +28,7 @@ services.loadServiceAdapters = async function () {
 				// Parse the JSON content
 				const jsonData = JSON.parse(fileContent);
 				jsonData['path'] = filePath
+				jsonData['consumers'] = []
 
 				// mark nomad services
 				try {
@@ -59,23 +60,60 @@ services.loadServiceAdapters = async function () {
 }
 
 
-services.hidas = async function(item) {
-	console.log('processing item:', item)
-	await sleep(10000);
-	
-}
-
 function sleep(ms) {
 	return new Promise((resolve) => {
 	  setTimeout(resolve, ms);
 	});
   } 
 
-services.getServices = function () {
+services.getServices = async function () {
+	this.service_list = await markRegisteredAdapter(this.service_list)
 	return this.service_list
 }
 
 
+services.getServicesForFile = async function(file) {
+
+	const matches = {for_type: [], for_format: []}
+	if(!file) return matches
+	
+	for(var service in this.service_list) {
+		if(this.service_list[service].supported_types.includes(file.type)) {
+			// we take only services that has consumer app listening
+			if(this.service_list[service].consumers.length > 0) {
+				if(this.service_list[service].supported_formats.includes(file.extension)) {
+					matches.for_format.push(this.service_list[service])
+				} else {
+					matches.for_type.push(this.service_list[service])
+				}
+			}
+			
+
+		}
+	}
+	return matches
+}
+
+// note: consumer here means consumer application, not NATS consumers
+services.addConsumer = async function(service, id) {
+
+	if(this.service_list[service]) {
+		this.service_list[service].consumers.push(id)
+		return this.service_list[service]
+	}
+	return {error: 'service not found', name: service}
+}
+
+// note: consumer here means consumer application, not NATS consumers
+services.removeConsumer = async function(service, id) {
+
+	if(this.service_list[service]) {
+		let arr = this.service_list[service].consumers.filter(item => item !== id)
+		this.service_list[service].consumers = arr 
+		return this.service_list[service]
+	}
+	return {error: 'service not found', name: service}
+}
 
 services.getServiceAdapterByName = function(name) {
 	if (this.service_list[name]) {
@@ -92,7 +130,10 @@ async function markRegisteredAdapter(services) {
 		const service_url = await nomad.getServiceURL(key)
 		if(service_url) {
 			services[key].url = service_url
-			services[key].online = true
+			services[key].nomad = true
+		} else {
+			services[key].url = ''
+			services[key].nomad = false
 		}
 	}
 

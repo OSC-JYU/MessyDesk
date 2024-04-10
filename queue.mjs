@@ -47,7 +47,9 @@ queue.init = async function(services) {
       });
     } catch(e) {
       console.log('NATS ERROR: could not create consumer', key)
-      console.log(e)
+      console.log(e.message)
+      console.log('HINT: remove all consumers from NATS and try again.')
+      process.exit(1)
     }
   }
 }

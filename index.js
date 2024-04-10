@@ -188,7 +188,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
-	await media.uploadFile(ctx, filegraph)
+	await media.uploadFile(ctx.file.path, filegraph)
 	var data = {file: filegraph.result[0]}
 	data.userId = ctx.headers[AUTH_HEADER]
 
@@ -264,11 +264,17 @@ router.get('/api/projects/:rid/files', async function (ctx) {
 
 // services
 
-// register service
-// router.post('/api/services/:name', async function (ctx) {
-// 	var response = await services.getServiceAdapterByName(ctx.request.params.name, queue.services)
-// 	ctx.body = response
-// })
+// register consumer
+router.post('/api/services/:service/consumer/:id', async function (ctx) {
+	var response = await services.addConsumer(ctx.request.params.service, ctx.request.params.id)
+	ctx.body = response
+})
+
+// unregister consumer
+router.delete('/api/services/:service/consumer/:id', async function (ctx) {
+	var response = await services.removeConsumer(ctx.request.params.service, ctx.request.params.id)
+	ctx.body = response
+})
 
 // router.post('/api/services', async function (ctx) {
 // 	await queue.registerService(ctx.request.body)
@@ -281,7 +287,8 @@ router.get('/api/services', async function (ctx) {
 
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
-	var service_list = await Graph.getServicesForFile(services.getServices(), ctx.request.params.rid)
+	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
+	var service_list = await services.getServicesForFile(file)
 	ctx.body = service_list
 })
 
@@ -377,9 +384,9 @@ router.post('/api/nomad/process/files', upload.fields([
 	
 		if(infoFilepath && contentFilepath) {
 			const process_rid = message.process['@rid']
-			//var fileNode = await Graph.createProcessFileNode()
 			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label)
 			console.log(fileNode)
+			await media.uploadFile(contentFilepath, fileNode)
 			if(message.userId) {
 				console.log('sending text WS')
 				const ws = connections.get(message.userId)
@@ -395,24 +402,6 @@ router.post('/api/nomad/process/files', upload.fields([
 
 
 
-	// create graph item
-	//var file_metadata = await Graph.getUserFileMetadata(ctx.request.body.rid, ctx.request.bodu.userId)
-	//var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
-
-	// save file
-
-	// send ws message to user
-	ctx.body = 's'
-})
-
-// endpoint for consumer apps to submit processing result success (or failure)
-router.post('/api/nomad/process/success', async function (ctx) {
-	console.log('nomad call...')
-	console.log(ctx.request.body)
-
-
-
-	//createProcessFileNode = async function(ctx.request.body.process['@rid'], file_type, extension, label)
 	// create graph item
 	//var file_metadata = await Graph.getUserFileMetadata(ctx.request.body.rid, ctx.request.bodu.userId)
 	//var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)

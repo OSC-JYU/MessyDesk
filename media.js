@@ -27,7 +27,7 @@ media.createProcessDir = async function(process_path) {
 	}
 }
 
-media.uploadFile = async function(ctx, filegraph) {
+media.uploadFile = async function(uploadpath, filegraph) {
 
 	console.log(filegraph)
 	var file_rid = filegraph.result[0]['@rid']
@@ -40,11 +40,11 @@ media.uploadFile = async function(ctx, filegraph) {
 		filedata.filepath = path.join(filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.result[0].path)
 		if(!exists) {
-			await fs.rename(ctx.file.path, filegraph.result[0].path);
+			await fs.rename(uploadpath, filegraph.result[0].path);
 			console.log('File moved successfully!')
 			ctx.body = 'done';
 		} else {
-			await fs.unlink(ctx.file.path)
+			await fs.unlink(uploadpath)
 			throw('file exists!')
 		}
 

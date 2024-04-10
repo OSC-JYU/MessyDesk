@@ -274,36 +274,6 @@ graph.getUserFileMetadata = async function(file_rid, me_email) {
 }
 
 
-
-graph.getServicesForFile = async function (services, rid) {
-	const query = `MATCH (file) WHERE id(file) = "#${rid}" RETURN file`
-	var response = await web.cypher(query)
-	if(response.result.length == 1) {
-		console.log(response.result)
-		const matches = {for_type: [], for_format: []}
-		var file = response.result[0]
-		for(var service in services) {
-			if(services[service].supported_types.includes(file.type)) {
-				
-				if(services[service].supported_formats.includes(file.extension)) {
-					matches.for_format.push(services[service])
-				} else {
-					matches.for_type.push(services[service])
-				}
-			}
-		}
-		return matches
-	}
-	else
-		return []
-}
-
-
-
-
-
-
-
 graph.query = async function(body) {
 	return web.cypher( body.query)
 }

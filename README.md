@@ -20,7 +20,7 @@ Things you can do:
 
 Hardly anything works yet :)
 
-## Getting started
+## Running locally
 
 Clone this repo:
 
