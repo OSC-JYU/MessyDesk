@@ -193,7 +193,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	data.userId = ctx.headers[AUTH_HEADER]
 
 	// send to thumbnailer queue 
-	nats.publish('thumbnailer', JSON.stringify(data))
+	//nats.publish('thumbnailer', JSON.stringify(data))
 
 	ctx.body = filegraph
 
@@ -357,6 +357,8 @@ router.get('/api/nomad/files/:file_rid', async function (ctx) {
    ctx.body = src
 })
 
+
+
 // endpoint for consumer apps to submit processing result files
 router.post('/api/nomad/process/files', upload.fields([
     { name: 'request', maxCount: 1 },
@@ -382,7 +384,19 @@ router.post('/api/nomad/process/files', upload.fields([
 	
 		}
 	
-		if(infoFilepath && contentFilepath) {
+		// check if this is thumbnail
+		if(message.id === 'thumbnailer') {
+
+			var filepath = message.file.path
+			const base_path = path.join(path.dirname(filepath))
+
+			try {
+				await media.saveThumbnail(contentFilepath, base_path, 'preview.jpg')
+			} catch(e) {
+				throw('Could not move file!' + e.message)
+			}
+
+		} else if(infoFilepath && contentFilepath) {
 			const process_rid = message.process['@rid']
 			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label)
 			console.log(fileNode)
@@ -399,16 +413,6 @@ router.post('/api/nomad/process/files', upload.fields([
 	} catch(e) {
 		console.log(e.message)
 	}
-
-
-
-	// create graph item
-	//var file_metadata = await Graph.getUserFileMetadata(ctx.request.body.rid, ctx.request.bodu.userId)
-	//var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
-
-	// save file
-
-	// send ws message to user
 	ctx.body = 's'
 })
 

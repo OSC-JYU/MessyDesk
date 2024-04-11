@@ -44,17 +44,41 @@ media.uploadFile = async function(uploadpath, filegraph) {
 			console.log('File moved successfully!')
 			ctx.body = 'done';
 		} else {
-			await fs.unlink(uploadpath)
+
+			//await fs.unlink(uploadpath)
 			throw('file exists!')
 		}
 
 		return filedata
 
 	} catch (e) {
-		console.log('File upload failed')
 		console.log(e.message)
+		await fs.unlink(uploadpath)
+		throw('file saving failed')
 	}
 }
+
+media.saveThumbnail = async function(uploadpath, basepath, filename) {
+	console.log(filename)
+	const filedata = {}
+	try {
+		await fs.ensureDir(path.join(basepath))
+		const filepath = path.join(basepath, filename)
+
+		await fs.rename(uploadpath, filepath);
+		console.log('File moved successfully!')
+		ctx.body = 'done';
+		
+
+		return filedata
+
+	} catch (e) {
+		await fs.unlink(uploadpath)
+		console.log(e.message)
+		throw('thumbnail saving failed')
+	}
+}
+
 
 media.writeJSON =  async function(data, filename, fpath) {
 
