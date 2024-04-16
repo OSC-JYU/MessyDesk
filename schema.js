@@ -12,9 +12,9 @@ let schema = {}
 schema.getSchema = async function(label) {
 	var query = ''
 	if(label)
-		query = `MATCH (s:Schema {_type:"${label}"}) -[rel]- (t:Schema) RETURN s, rel ,t, COALESCE(t.label, t._type) as label ORDER by rel.display DESC`
+		query = `MATCH (s:Schema_ {_type:"${label}"}) -[rel]- (t:Schema_) RETURN s, rel ,t, COALESCE(t.label, t._type) as label ORDER by rel.display DESC`
 	else
-		query = `MATCH (s:Schema ) -[rel]-(t:Schema) RETURN s, rel, t`
+		query = `MATCH (s:Schema_ ) -[rel]-(t:Schema_) RETURN s, rel, t`
 	var result = await web.cypher(query)
 	var out = []
 	for(var schema of result.result) {
@@ -46,12 +46,12 @@ schema.getSchema = async function(label) {
 }
 
 schema.getSchemaTypes = async function() {
-	var query = 'MATCH (schema:Schema) RETURN id(schema) as rid, COALESCE(schema.label, schema._type) as label, schema._type as type, schema ORDER by label'
+	var query = 'MATCH (schema:Schema_) RETURN id(schema) as rid, COALESCE(schema.label, schema._type) as label, schema._type as type, schema ORDER by label'
 	return await web.cypher( query)
 }
 
 schema.getSchemaAttributes = async function(schema, data_obj) {
-	var query = `MATCH (s:Schema) WHERE s._type = "${schema}" RETURN s`
+	var query = `MATCH (s:Schema_) WHERE s._type = "${schema}" RETURN s`
 	var response = await web.cypher( query)
 	if(response.result && response.result.length) {
 		for(var key in response.result[0]) {
@@ -66,7 +66,7 @@ schema.exportSchemaYAML = async function(filename) {
 	if(!filename) throw('You need to give a file name! ')
 	var vertex_ids = {}
 	var edge_ids = {}
-	var query = 'MATCH (schema:Schema) OPTIONAL MATCH (schema)-[r]-(schema2:Schema) RETURN schema, r, schema2 '
+	var query = 'MATCH (schema:Schema_) OPTIONAL MATCH (schema)-[r]-(schema2:Schema_) RETURN schema, r, schema2 '
 	var schemas = await web.cypher( query, {serializer: 'graph'})
 	var output = {nodes: [], edges: []}
 	for(var vertex of schemas.result.vertices) {
@@ -150,7 +150,7 @@ async function writeSchemaToDB(schema) {
 		for(var edge of schema.edges) {
 			const type = Object.keys(edge)[0]
 			var edge_parts = type.split(':')
-			var link_query = `MATCH (from:Schema {_type: "${edge_parts[0]}"}), (to: Schema {_type:"${edge_parts[2]}"}) MERGE (from)-[r:${edge_parts[1]}]->(to) SET r.label ="${edge[type].label}", r.label_rev = "${edge[type].label_rev}"`
+			var link_query = `MATCH (from:Schema_ {_type: "${edge_parts[0]}"}), (to: Schema_ {_type:"${edge_parts[2]}"}) MERGE (from)-[r:${edge_parts[1]}]->(to) SET r.label ="${edge[type].label}", r.label_rev = "${edge[type].label_rev}"`
 			var reponse = await web.cypher( link_query)
 		}
 	} catch (e) {

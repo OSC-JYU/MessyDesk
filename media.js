@@ -42,7 +42,7 @@ media.uploadFile = async function(uploadpath, filegraph) {
 		if(!exists) {
 			await fs.rename(uploadpath, filegraph.result[0].path);
 			console.log('File moved successfully!')
-			ctx.body = 'done';
+			//ctx.body = 'done';
 		} else {
 
 			//await fs.unlink(uploadpath)
@@ -64,11 +64,11 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	try {
 		await fs.ensureDir(path.join(basepath))
 		const filepath = path.join(basepath, filename)
+		console.log(uploadpath)
+		console.log(filepath)
 
 		await fs.rename(uploadpath, filepath);
 		console.log('File moved successfully!')
-		ctx.body = 'done';
-		
 
 		return filedata
 

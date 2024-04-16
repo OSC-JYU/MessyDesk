@@ -74,7 +74,7 @@ queue.publish = async function(topic, data, filenode) {
     //const service_url = await nomad.getServiceURL(topic)
     //service.url = service_url
     //service.queue.add(service, data, filenode)
-    await this.js.publish("process.md-imaginary", JSON.stringify(data))
+    await this.js.publish(`process.${topic}`, JSON.stringify(data))
   } catch(e) {
     console.log('Could not add to queue!', e)
   }

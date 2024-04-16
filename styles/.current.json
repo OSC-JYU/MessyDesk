@@ -30,7 +30,7 @@
 	},
 
 	{
-		"selector": "node[type='Schema']",
+		"selector": "node[type='Schema_']",
 		"style": {
 			"color":"white",
 			"background-color": "#1C86AA"

@@ -20,10 +20,17 @@ let graph = {}
 graph.initDB = async function() {
 		console.log(`ArcadeDB: ${web.getURL()}`)
 		console.log(`Checking database...`)
-		var query = 'MATCH (n:Schema) return n'
+		var query = 'MATCH (n:Schema_) return n'
+		let db_exists = false
 		try {
-			var result = await web.cypher(query)
+			db_exists = await web.checkDB()
+			if(db_exists) 
+				console.log('Database found!')
+			else
+				throw('Database not found!')
+
 		} catch (e) {
+			
 			try {
 				console.log('Database not found, creating...')
 				await web.createDB()
@@ -37,58 +44,14 @@ graph.initDB = async function() {
 					throw('Could not init database. exiting...')
 				}
 			}
+			console.log('Database created!')
 		}
-		await this.setSystemNodes()
+
+		//await this.setSystemNodes()
 	}
 
 
-graph.setSystemNodes = async function() {
-		try {
-			// database exist, make sure that some base types are present
-			await web.createVertexType('Schema')
-			await web.createVertexType('Person')
-			await web.createVertexType('UserGroup')
-			await web.createVertexType('Menu')
-			await web.createVertexType('Query')
-			await web.createVertexType('Tag')
-			await web.createVertexType('NodeGroup')
-			await schema.importSystemSchema()
-			await this.createSystemGraph()
-			// Make sure that base system graph exists
-
-
-		} catch(e) {
-			console.log(e)
-			console.log(`Could not init system, exiting...`)
-			process.exit(1)
-		}
-
-	}
-
-
-graph.createSystemGraph = async function() {
-		try {
-			// Menu "Me"
-			var query = 'MERGE (m:Menu {id:"me"}) SET m.label = "Me", m._active = true RETURN m'
-			var menu = await web.cypher( query, null, 1)
-			// Usergroup "Basic"
-			query = 'MERGE (m:UserGroup {id:"user"}) SET m.label = "User", m._active = true RETURN m'
-			var group = await web.cypher( query, null, 1)
-
-			// Make sure that "Me" menu is linked to the "User" group
-			query = `MATCH (m:Menu), (g:UserGroup) WHERE id(m) = "${menu.result[0]['@rid']}" AND id(g) = "${group.result[0]['@rid']}" MERGE (m)-[:VISIBLE_FOR_GROUP]->(g)`
-			await web.cypher( query, null, 1)
-
-			// default local user
-			query = `MERGE (p:Person {id:"local.user@localhost"}) SET p._group = "user", p._access = "admin", p._active = true, p.label = "Local You", p.description = "It's really You!" RETURN p`
-			await web.cypher( query, null, 1)
-		} catch (e) {
-			console.log(query)
-			throw('System graph creation failed')
-		}
-	}
-
-
+	
 graph.createProject = async function(data, me_rid) {
 		
 		var project = {}
@@ -473,7 +436,7 @@ graph.getGraph = async function(body, ctx) {
 
 graph.getSchemaRelations = async function() {
 	var schema_relations = {}
-	var schemas = await web.cypher( 'MATCH (s:Schema)-[r]->(s2:Schema) return type(r) as type, r.label as label, r.label_rev as label_rev, COALESCE(r.label_inactive, r.label) as label_inactive, s._type as from, s2._type as to, r.tags as tags, r.compound as compound')
+	var schemas = await web.cypher( 'MATCH (s:Schema_)-[r]->(s2:Schema_) return type(r) as type, r.label as label, r.label_rev as label_rev, COALESCE(r.label_inactive, r.label) as label_inactive, s._type as from, s2._type as to, r.tags as tags, r.compound as compound')
 	schemas.result.forEach(x => {
 		schema_relations[x.type] = x
 	})
@@ -484,7 +447,7 @@ graph.getSchemaRelations = async function() {
 graph.getSearchData = async function(search) {
 	if(search[0]) {
 		var arr = search[0].result.map(x => '"' + x + '"')
-		var query = `MATCH (n) WHERE id(n) in [${arr.join(',')}] AND NOT n:Schema return id(n) as id, n.label as label, labels(n) as type LIMIT 10`
+		var query = `MATCH (n) WHERE id(n) in [${arr.join(',')}] AND NOT n:Schema_ return id(n) as id, n.label as label, labels(n) as type LIMIT 10`
 		return web.cypher( query)
 	} else {
 		return {result:[]}
@@ -630,15 +593,12 @@ graph.importGraphYAML = async function(filename, mode) {
 		const data = await fsPromises.readFile(file_path, 'utf8')
 		const graph_data = yaml.load(data)
 		if(mode == 'clear') {
-			var query = 'MATCH (s) WHERE NOT s:Schema DETACH DELETE s'
+			var query = 'MATCH (s) WHERE NOT s:Schema_ DETACH DELETE s'
 			var result = await web.cypher( query)
 			await this.setSystemNodes()
 			await this.createSystemGraph()
 			await this.writeGraphToDB(graph_data)
-		} else {
-			// otherwise we merge
-			await this.mergeGraphToDB(graph_data)
-		}
+		} 
 		this.createIndex()
 		// const filePath = path.resolve('./schemas', filename)
 		// const data = await fsPromises.readFile(filePath, 'utf8')
@@ -648,20 +608,6 @@ graph.importGraphYAML = async function(filename, mode) {
 		throw(e)
 	}
 	console.log('Done import')
-}
-
-
-graph.mergeGraphToDB = async function(graph) {
-	try {
-		for(var node of graph.nodes) {
-			console.log(node)
-			const type = Object.keys(node)[0]
-			await this.merge(type, node)
-
-		}
-	} catch (e) {
-		throw(e)
-	}
 }
 
 
@@ -696,67 +642,6 @@ graph.writeGraphToDB = async function(graph) {
 }
 
 
-graph.exportGraphYAML = async function(filename) {
-	if(!filename) throw('You need to give a file name! ')
-	var vertex_ids = {}
-	var edge_ids = {}
-	var query = 'MATCH (n) WHERE NOT n:Schema OPTIONAL MATCH (n)-[r]-() RETURN n, r '
-	var schemas = await web.cypher( query, {serializer: 'graph'})
-	var output = {nodes: [], edges: []}
-	for(var vertex of schemas.result.vertices) {
-		if(!vertex_ids[vertex.r]) {
-				var node_obj = {}
-				console.log(vertex)
-				var type = vertex.p['@type']
-				// old serializer backup
-				if(vertex.t) type = vertex.t
-				
-				node_obj[type] = {...vertex.p}
-				// make sure there is label property
-				if(!node_obj[type].label) node_obj[type].label = type
-
-				delete(node_obj[type]['@cat'])
-				if(!node_obj[type].id) {
-				if(node_obj[type]['@rid'])
-					node_obj[type].id = node_obj[type]['@rid'].replace('#','')
-				else if(vertex.r)
-					node_obj[type].id = vertex.r.replace('#','')
-				else 
-					console.log('WARNING: id not found')
-					console.log(vertex)
-				}
-				output.nodes.push(node_obj)
-				vertex_ids[vertex.r] = type + ':' + node_obj[type].id
-		}
-	}
-
-	for(var edge of schemas.result.edges) {
-		
-		var to = vertex_ids[edge.i]
-		var from = vertex_ids[edge.o]
-		var edge_name = from + '->' + edge.t + '->' + to
-		if(!edge_ids[edge_name]) {
-			var edge_obj = {}
-			edge_obj[edge_name] = {attr: edge.p.attr}
-			output.edges.push(edge_obj)
-			edge_ids[edge_name] = edge_obj
-		}
-	}
-	const filePath = path.resolve('./graph', filename)
-	await fsPromises.writeFile(filePath, yaml.dump(output), 'utf8')
-	return {file: filePath}
-}
-
-
-graph.mergeFIX = async function(type, schema_type) {
-	const c_query = `MATCH (n:${type}) return count(n) as count`
-	var count = await web.cypher( c_query)
-	if(count.result[0].count === 0) {
-		var query = `CREATE (c:${type})
-			set c._type = "${schema_type}"`
-		await web.cypher( query)
-	}
-}
 
 
 graph.getTags = async function() {
@@ -772,7 +657,7 @@ graph.getQueries = async function() {
 
 
 graph.getStyles = async function() {
-	var query = 'MATCH (s:Schema) return COALESCE(s._style,"") as style, s._type as type'
+	var query = 'MATCH (s:Schema_) return COALESCE(s._style,"") as style, s._type as type'
 	return await web.cypher( query)
 }
 

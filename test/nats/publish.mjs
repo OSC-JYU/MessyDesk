@@ -15,9 +15,19 @@ import {
   
   const js = nc.jetstream();  
 
-  for (var i=0; i<30; i++) {
-    await js.publish("process.thumbnailer", jc.encode({id:i}))
+  var data = {
+    '@rid': '#270:202',
+    '@type': 'File',
+    type: 'image',
+    extension: 'jpg',
+    label: 'ari_h.jpg',
+    _active: true,
+    path: 'data/projects/217_6/files/270_202/270_202.jpg'
   }
+
+
+  await js.publish("process.thumbnailer", jc.encode(data))
+ 
   
   await js.publish("process.md-imaginary")
 

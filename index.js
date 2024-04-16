@@ -25,7 +25,7 @@ const connections = new Map();
 (async () => {
 	console.log('initing...')
 	// migration to ES6 in progress...
-	const {queue} 		= await import('./queue.mjs');
+	const {queue} = await import('./queue.mjs');
 	nats = queue
 	await nomad.getStatus()
 	await services.loadServiceAdapters()
@@ -36,10 +36,8 @@ const connections = new Map();
 	await nomad.createService(thumb)
 	var ima = await services.getServiceAdapterByName('md-imaginary')
 	await nomad.createService(ima)
-	// import schema
 	await Graph.initDB()
-	await schema.importSystemSchema()
-	await styles.importSystemStyle()
+
 })();
 
 process.on( 'SIGINT', async function() {
@@ -191,9 +189,13 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	await media.uploadFile(ctx.file.path, filegraph)
 	var data = {file: filegraph.result[0]}
 	data.userId = ctx.headers[AUTH_HEADER]
+	data.target = filegraph.result[0]['@rid']
+	data.task = 'thumbnail'
+	data.params = {width: 800, type: 'jpeg'}
+	data.id = 'thumbnailer'
 
 	// send to thumbnailer queue 
-	//nats.publish('thumbnailer', JSON.stringify(data))
+	nats.publish(data.id, JSON.stringify(data))
 
 	ctx.body = filegraph
 
@@ -312,7 +314,7 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
 
-		nats.publish(topic, ctx.request.body)
+		nats.publish(topic, JSON.stringify(ctx.request.body))
 		ctx.body = ctx.request.params.file_rid
 
 	} catch(e) {
@@ -389,9 +391,10 @@ router.post('/api/nomad/process/files', upload.fields([
 
 			var filepath = message.file.path
 			const base_path = path.join(path.dirname(filepath))
+			const filename = message.thumb_name || 'preview.jpg'
 
 			try {
-				await media.saveThumbnail(contentFilepath, base_path, 'preview.jpg')
+				await media.saveThumbnail(contentFilepath, base_path, filename)
 			} catch(e) {
 				throw('Could not move file!' + e.message)
 			}

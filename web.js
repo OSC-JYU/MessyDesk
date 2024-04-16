@@ -30,24 +30,66 @@ web.getURL = function() {
 	return URL
 }
 
+web.checkDB = async function() {
+	const {got} = await import('got')
+	var url = URL.replace(`/command/`, '/exists/')
+	var data = {
+		username: username,
+		password: password
+	};
+
+	try {
+		var response = await got.get(url, data).json()
+		return response.result
+		
+	} catch(e) {
+		console.log(e.message)
+		throw({message: "Error on database check"})
+	}
+}
+
+
 web.createDB = async function() {
 	if(!password) {
 		console.log('ERROR: DB_PASSWORD not set! Exiting...')
 		process.exit(1)
 	}
 
-	url = URL.replace(`/command/${DB}`, '/server')
+	var url = URL.replace(`/command/${DB}`, '/server')
 	var config = {
 		auth: {
 			username: username,
 			password: password
 		}
 	};
-	return axios.post(url, {command: `create database ${DB}`}, config)
+	try {
+		await axios.post(url, {command: `create database ${DB}`}, config)
+		await this.createVertexType('Person')
+		await this.createVertexType('File')
+		await this.createVertexType('Process')
+		await this.createVertexType('Project')
+
+		await this.sql("CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
+		// const commands = [
+		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
+		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
+		// 	"CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
+
+		// 	"CREATE INDEX IF NOT EXISTS ON Person (id) UNIQUE",
+
+		// 	"CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}"
+		// ]
+		// for(var query of commands) {
+		// 	await this.sql(query, 'sql')
+		// }
+	} catch(e) {
+		console.log('Database init failed', e.message)
+		throw(e)
+	}
 }
 
 web.createVertexType = async function(type) {
-	var query = `CREATE vertex type ${type}`
+	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`
 	try {
 		await this.sql(query)
 	} catch (e) {
@@ -67,7 +109,6 @@ web.sql = async function(query, options) {
 		command:query,
 		language:'sql'
 	}
-	console.log(config.auth)
 	var response = await axios.post(URL, query_data, config)
 	return response.data
 }
@@ -108,7 +149,7 @@ web.cypher = async function(query, options) {
 }
 
 async function getSchemaLabels(config) {
-	const query = "MATCH (s:Schema)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
+	const query = "MATCH (s:Schema_)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
 	const query_data = {
 		command:query,
 		language:'cypher'

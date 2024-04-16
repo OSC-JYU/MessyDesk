@@ -20,7 +20,20 @@ Things you can do:
 
 Hardly anything works yet :)
 
-## Running locally
+## Local development
+
+This guide helps you to set up local development setup. You need Docker and docker-compose installed (or podman), Node version => 20.
+
+Check Docker:
+
+    docker ps
+
+Check node
+
+    node -v
+    -> v20.12.2
+
+### Backend
 
 Clone this repo:
 
@@ -41,9 +54,33 @@ Start back end:
     MODE=development DB_PASSWORD=node_master node index.js
 
 
-Now we should have backend running!
+Now we should have backend running with two nomad jobs: one for thumbnails and one for image operations.
 
-Let's launch frontend:
+
+### Concsmers apps (service adapters)
+
+We have now backend running and couple of services. We are still missing the link between those, namely consumer applications (or service adapters).
+
+One more repository is needed:
+
+    cd ..
+    git clone https://github.com/OSC-JYU/MD-consumers.git
+    cd MD-consumers/MDc-imaginary
+
+We need to start two instances:
+
+    NAME=md-imaginary node index.mjs
+
+And then in another terminal:
+
+    NAME=thumbnailer node index.mjs
+
+Now we have also two consumer application that works between MessyDesk, NATS and nomad jobs.
+
+
+### Frontend:
+
+UI is it its own repository:
 
     cd ..
     git clone https://github.com/OSC-JYU/MessyDesk-UI.git
@@ -79,29 +116,6 @@ upload:
 
 ## SERVICES
 
-### start Kafka, Arcadedb and thumbnailer
-
-    cd test/kafka
-    docker-compose up
-
-
-### register thumbnnailer service:
-
-    curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
-
-This creates a consumer for topic "thumbnailer". 
-
-
-
-### start image processig service
-
-https://hub.docker.com/r/nextcloud/aio-imaginary
-
-    docker pull nextcloud/aio-imaginary
-    docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary 
-
-    cd test/services/test-image-service
-    make start
 
 
 
@@ -129,9 +143,7 @@ Call service:
 
     curl -X POST http://localhost:8200/api/queue/md-heli-ots/files/108:3 -d "@test/services/heli-ots/heli-ots_sample.json" --header "Content-Type: application/json"
 
-## Tech stuff
 
-MessyDesk is a web application. UI is written with Vue.js and backend is Nodejs. Apache Kafka is used for event queue handling and database is ArcadeDB.
 
 
 ### ELG API
