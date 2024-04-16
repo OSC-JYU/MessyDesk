@@ -130,7 +130,7 @@ web.cypher = async function(query, options) {
 	}
 
 	if(options.serializer) query_data.serializer = options.serializer
-	if(process.env.MODE == 'development') console.log(query)
+	//if(process.env.MODE == 'development') console.log(query)
 
 	try {
 		var response = await axios.post(URL, query_data, config)

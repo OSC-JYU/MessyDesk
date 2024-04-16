@@ -142,7 +142,7 @@ router.all('/ws', async (ctx, next) => {
 		console.log('received: %s', data);
 		ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
 	  });
-	  return ws.send('chancellor palpatine is evil')
+	  //return ws.send('chancellor palpatine is evil')
 	}
   })
 
@@ -158,6 +158,14 @@ router.get('/connections', function (ctx) {
 	  }
 	ctx.body = arr
 })
+
+router.get('/connections/test', async function (ctx) {
+	await sendWS(ctx.headers[AUTH_HEADER], {msg: 'test'})
+	ctx.body = 'message send'
+
+})
+
+
 
 router.get('/api/me', async function (ctx) {
 	// if(process.env.CREATE_USERS_ON_THE_FLY) {
@@ -367,8 +375,7 @@ router.post('/api/nomad/process/files', upload.fields([
     { name: 'content', maxCount: 1 }
 ]), async function (ctx) {
 
-	console.log('nomad call...')
-	console.log(ctx.request.files)
+	console.log('save process file call...')
 	let infoFilepath, contentFilepath = null
 	let message = {}
 	try {
@@ -380,7 +387,6 @@ router.post('/api/nomad/process/files', upload.fields([
 			console.log(message)
 		}
 	
-		// const infoFilepath = ctx.request.files['info'][0].path
 		if(ctx.request.files['content']) {
 			contentFilepath = ctx.request.files['content'][0].path
 	
@@ -395,6 +401,12 @@ router.post('/api/nomad/process/files', upload.fields([
 
 			try {
 				await media.saveThumbnail(contentFilepath, base_path, filename)
+				console.log('sending thumbnail WS')
+				if(filename == 'thumbnail.jpg') {
+					var wsdata = {target: message.file['@rid']}
+					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
+					await sendWS(message.userId, wsdata)
+				}
 			} catch(e) {
 				throw('Could not move file!' + e.message)
 			}
@@ -404,6 +416,7 @@ router.post('/api/nomad/process/files', upload.fields([
 			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label)
 			console.log(fileNode)
 			await media.uploadFile(contentFilepath, fileNode)
+
 			if(message.userId) {
 				console.log('sending text WS')
 				const ws = connections.get(message.userId)
@@ -412,14 +425,24 @@ router.post('/api/nomad/process/files', upload.fields([
 					ws.send(JSON.stringify(wsdata))
 				}
 			}
+
+		// something went wrong in file processing	
+		} else {
+			console.log('PROCESS FAILED!')
+			console.log(ctx.request.body)
 		}
 	} catch(e) {
-		console.log(e.message)
+		console.log(e)
 	}
 	ctx.body = 's'
 })
 
 
+router.post('/api/nomad/process/files/error', async function (ctx) {
+	console.log(ctx.request.body)
+	ctx.body = []
+
+})
 
 
 
@@ -569,7 +592,14 @@ router.get('/api/documents/:rid', async function (ctx) {
 	ctx.body = n
 })
 
+async function sendWS(userId, data) {
+	const ws = connections.get(userId)
+	if(ws)
+		await ws.send(JSON.stringify(data))
+	else
+		console.log('WS connection not found!', userId)
 
+}
 
 
 app.use(router.routes());
