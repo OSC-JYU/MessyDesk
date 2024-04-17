@@ -19,6 +19,7 @@ const styles 		= require('./styles.js');
 const services 		= require('./services.js');
 const nomad 		= require('./nomad.js');
 let nats
+let positions
 
 const connections = new Map();
 
@@ -26,16 +27,18 @@ const connections = new Map();
 	console.log('initing...')
 	// migration to ES6 in progress...
 	const {queue} = await import('./queue.mjs');
+	const {layout} = await import('./layouts.mjs');
 	nats = queue
+	positions = layout
 	await nomad.getStatus()
 	await services.loadServiceAdapters()
 	// create main stream and all consumers in NATS
 	await nats.init(services.getServices())
 	// start thumbnailer and Poppler services
-	var thumb = await services.getServiceAdapterByName('thumbnailer')
-	await nomad.createService(thumb)
-	var ima = await services.getServiceAdapterByName('md-imaginary')
-	await nomad.createService(ima)
+	//var thumb = await services.getServiceAdapterByName('thumbnailer')
+	//await nomad.createService(thumb)
+	//var ima = await services.getServiceAdapterByName('md-imaginary')
+	//await nomad.createService(ima)
 	await Graph.initDB()
 
 })();
@@ -43,8 +46,8 @@ const connections = new Map();
 process.on( 'SIGINT', async function() {
 	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
 	// we may want to shutdown nomad jobs if we are developing locally
-	await nomad.stopService('MD-thumbnailer')
-	await nomad.stopService('MD-imaginary')
+	//await nomad.stopService('MD-thumbnailer')
+	//await nomad.stopService('MD-imaginary')
 	process.exit( );
   })
 
@@ -139,10 +142,11 @@ router.all('/ws', async (ctx, next) => {
 	  // Store WebSocket connection with user ID
 	  connections.set(userId, ws);
 	  ws.on('message', function message(data) {
-		console.log('received: %s', data);
-		ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
+		//console.log('received: %s', data);
+		positions.updateProjectNodePosition(JSON.parse(data))
+		//ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
+		
 	  });
-	  //return ws.send('chancellor palpatine is evil')
 	}
   })
 
@@ -449,13 +453,11 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 
 router.get('/api/queries', async function (ctx) {
 	ctx.body = []
-
 })
 
 
 router.get('/api/menus', async function (ctx) {
 	ctx.body = []
-
 })
 
 
@@ -466,13 +468,13 @@ router.get('/api/groups', async function (ctx) {
 
 router.post('/api/layouts', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await Graph.setLayout(ctx.request.body)
+	var n = await positions.setLayout(ctx.request.body)
 	ctx.body = n
 })
 
 router.get('/api/layouts/:rid', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await Graph.getLayoutByTarget(ctx.request.params.rid)
+	var n = await positions.getLayoutByTarget(ctx.request.params.rid)
 	ctx.body = n
 })
 
