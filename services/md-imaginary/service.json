@@ -33,9 +33,36 @@
 
     "tasks": {
         "resize": {
+            "name": "Resize by width",
+            "output": "image",
+            "description": "Resize image.",
+            "params": {"width": 400},
+            "params_help": {
+                "width": {
+                    "name": "Image width in pixels",
+                    "help": "How much image is resized."
+                }
+            }
+        },
+        "fit": {
             "name": "Resize",
             "output": "image",
             "description": "Resize image."
+        },
+
+        "flip": {
+            "name": "Flip",
+            "output": "image",
+            "description": "Flip image.",
+            "params": {},
+            "params_help": {}
+        },
+
+        "smartcrop": {
+            "name": "Smart crop",
+            "output": "image",
+            "description": "Remove boring parts",
+            "params": {}
         },
 
         "rotate": {

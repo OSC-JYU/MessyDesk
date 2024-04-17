@@ -164,7 +164,7 @@ router.get('/connections', function (ctx) {
 })
 
 router.get('/connections/test', async function (ctx) {
-	await sendWS(ctx.headers[AUTH_HEADER], {msg: 'test'})
+	await send2UI(ctx.headers[AUTH_HEADER], {command: 'add', target:'#43:10', node:{'@rid':'#'+Math.random(),type:'process'}})
 	ctx.body = 'message send'
 
 })
@@ -172,20 +172,11 @@ router.get('/connections/test', async function (ctx) {
 
 
 router.get('/api/me', async function (ctx) {
-	// if(process.env.CREATE_USERS_ON_THE_FLY) {
-	// 	// keep list of visitors so that we do not create double users on sequential requests
-	// 	if(!visitors.includes(ctx.request.headers[AUTH_HEADER])) {
-	// 		visitors.push(ctx.request.headers[AUTH_HEADER])
-	// 		await Graph.checkMe(ctx.request.headers[AUTH_HEADER])
-	// 	}
-	// }
+
 	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
 
-router.get('/api/stall', async function (ctx) {
-
-})
 
 
 // upload
@@ -199,9 +190,9 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx.file.path, filegraph)
-	var data = {file: filegraph.result[0]}
+	var data = {file: filegraph}
 	data.userId = ctx.headers[AUTH_HEADER]
-	data.target = filegraph.result[0]['@rid']
+	data.target = filegraph['@rid']
 	data.task = 'thumbnail'
 	data.params = {width: 800, type: 'jpeg'}
 	data.id = 'thumbnailer'
@@ -312,6 +303,7 @@ router.get('/api/services/files/:rid', async function (ctx) {
 router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
+	const file_rid = ctx.request.params.file_rid
 	try {
 		const service = services.getServiceAdapterByName(topic)
 		console.log(service)
@@ -321,6 +313,10 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		var process = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
 		await media.createProcessDir(process.path)
 		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(process.path))
+		// add node to UI
+		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:process}
+		send2UI(ctx.request.headers.mail, wsdata)
+
 		ctx.request.body.process = process
 		ctx.request.body.file = file_metadata
 		ctx.request.body.target = ctx.request.params.file_rid
@@ -405,11 +401,15 @@ router.post('/api/nomad/process/files', upload.fields([
 
 			try {
 				await media.saveThumbnail(contentFilepath, base_path, filename)
-				console.log('sending thumbnail WS')
+				console.log('sending thumbnail WS', filename)
 				if(filename == 'thumbnail.jpg') {
-					var wsdata = {target: message.file['@rid']}
+					var wsdata = {
+						command: 'update', 
+						type: 'image',
+						target: message.file['@rid']
+					}
 					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
-					await sendWS(message.userId, wsdata)
+					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {
 				throw('Could not move file!' + e.message)
@@ -421,13 +421,29 @@ router.post('/api/nomad/process/files', upload.fields([
 			console.log(fileNode)
 			await media.uploadFile(contentFilepath, fileNode)
 
-			if(message.userId) {
-				console.log('sending text WS')
-				const ws = connections.get(message.userId)
-				if(ws) {
-					var wsdata = {target: process_rid, node:{rid: fileNode.result[0]['@rid']}}
-					ws.send(JSON.stringify(wsdata))
+			// send to thumbnailer queue if this is an image
+			if(message.file.type == 'image') {
+				var th = {
+					id:'thumbnailer', 
+					task: 'thumbnail', 
+					file: fileNode, 
+					userId: message.userId, 
+					target: fileNode['@rid']
 				}
+				th.params = {width: 800, type: 'jpeg'}
+				nats.publish(th.id, JSON.stringify(th))
+			}
+
+			if(message.userId) {
+				console.log('add file node to visual graph')
+				var wsdata = {
+					command: 'add', 
+					type: message.file.type, 
+					target: process_rid, 
+					node:fileNode
+				}
+				console.log(wsdata)
+				send2UI(message.userId, wsdata)
 			}
 
 		// something went wrong in file processing	
@@ -440,6 +456,7 @@ router.post('/api/nomad/process/files', upload.fields([
 	}
 	ctx.body = 's'
 })
+
 
 
 router.post('/api/nomad/process/files/error', async function (ctx) {
@@ -594,7 +611,7 @@ router.get('/api/documents/:rid', async function (ctx) {
 	ctx.body = n
 })
 
-async function sendWS(userId, data) {
+async function send2UI(userId, data) {
 	const ws = connections.get(userId)
 	if(ws)
 		await ws.send(JSON.stringify(data))

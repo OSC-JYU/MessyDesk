@@ -104,6 +104,21 @@ graph.getProjects = async function (me_email) {
 			...pr, // Copy all attributes from "pr" object
 		};
 	});
+	// sort data
+	data.sort((a, b) => {
+		const nameA = a.label.toUpperCase(); // ignore upper and lowercase
+		const nameB = b.label.toUpperCase(); // ignore upper and lowercase
+		if (nameA < nameB) {
+			return -1;
+		}
+		if (nameA > nameB) {
+			return 1;
+		}
+
+		// names must be equal
+		return 0;
+	});
+
 	data = await getProjectThumbnails(me_email, data)
 	return data
 }
@@ -147,6 +162,7 @@ graph.getSetFiles = async function (set_rid, me_email) {
 
 graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
 
+	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
 	var file_rid = filegraph['@rid']
 	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
@@ -160,7 +176,7 @@ graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
 		process = await this.create('Process', { label: topic })
 		var process_rid = process.result[0]['@rid']
 		var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
-		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path} RETURN p`
 		var update_response = await web.cypher(update)
 		await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 		//await setLayout(project_rid, file_rid, process_rid)
@@ -199,7 +215,7 @@ graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
 	var file_path = path.join('data', 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
-	return update_response
+	return update_response.result[0]
 }
 
 
@@ -223,7 +239,7 @@ graph.createProcessFileNode = async function (process_rid, file_type, extension,
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
 
-	return update_response
+	return update_response.result[0]
 }
 
 
