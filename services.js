@@ -66,8 +66,8 @@ function sleep(ms) {
 	});
   } 
 
-services.getServices = async function () {
-	this.service_list = await markRegisteredAdapter(this.service_list)
+services.getServices = function () {
+	//this.service_list = await markRegisteredAdapter(this.service_list)
 	return this.service_list
 }
 
