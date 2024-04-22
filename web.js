@@ -194,6 +194,7 @@ async function convert2CytoScapeJs(data, options) {
 							name:options.labels[v.p._type],
 							type: v.p._type,
 							type_label: v.p._type,
+							info: 'dd',
 							active: true,
 							width: 100,
 							idc: v.r.replace(':','_')
@@ -207,6 +208,7 @@ async function convert2CytoScapeJs(data, options) {
 							type: v.t,
 							type_label: options.labels[v.t],
 							active: v.p._active,
+							info: v.p.info,
 							width: 100,
 							description: v.p.description,
 							idc: v.r.replace(':','_')
@@ -215,6 +217,7 @@ async function convert2CytoScapeJs(data, options) {
 					if(!node.data.active) inactive_nodes.push(v.r)
 				}
 
+				//node.data.info = v.p.info
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type

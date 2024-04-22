@@ -63,7 +63,7 @@ queue.checkService = async function(data) {
 }
 
 
-queue.publish = async function(topic, data, filenode) {
+queue.publish = async function(topic, data) {
   console.log(topic)
   //var service = await services.getServiceAdapterByName(topic)
   try {

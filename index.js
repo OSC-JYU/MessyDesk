@@ -206,21 +206,28 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 
 
 router.get('/api/files/:file_rid', async function (ctx) {
-	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-    const src = fs.createReadStream(file_metadata.path);
-	if(file_metadata.type =='pdf') {
-		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
-		ctx.set('Content-Type', 'application/pdf');
-	} else if(file_metadata.type =='image') {
-		ctx.set('Content-Type', 'image/png');
-	} else if(file_metadata.type =='text') {
-		ctx.set('Content-Type', 'text/plain; charset=utf-8');
-	} else if(file_metadata.type =='data') {
-		ctx.set('Content-Type', 'text/plain; charset=utf-8');
-	} else {
-		ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+	try {
+		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+
+		const src = fs.createReadStream(file_metadata.path);
+		if(file_metadata.type =='pdf') {
+			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
+			ctx.set('Content-Type', 'application/pdf');
+		} else if(file_metadata.type =='image') {
+			ctx.set('Content-Type', 'image/png');
+		} else if(file_metadata.type =='text') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else if(file_metadata.type =='data') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else {
+			ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+		}
+	   ctx.body = src
+	} catch(e) {
+		ctx.status = 403
+		ctx.body = {}
 	}
-   ctx.body = src
+
 })
 
 
@@ -306,18 +313,18 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 	const file_rid = ctx.request.params.file_rid
 	try {
 		const service = services.getServiceAdapterByName(topic)
-		console.log(service)
 		var task_name = service.tasks[ctx.request.body.task].name
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-		console.log(file_metadata)
-		var process = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
-		await media.createProcessDir(process.path)
-		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(process.path))
+
+		var processNode = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
+
+		await media.createProcessDir(processNode.path)
+		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(processNode.path))
 		// add node to UI
-		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:process}
+		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode}
 		send2UI(ctx.request.headers.mail, wsdata)
 
-		ctx.request.body.process = process
+		ctx.request.body.process = processNode
 		ctx.request.body.file = file_metadata
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]

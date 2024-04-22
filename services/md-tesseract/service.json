@@ -7,7 +7,7 @@
     "name" :"Tesseract",
     
     "supported_types": ["image"],
-    "supported_formats": ["png", "jpg"],
+    "supported_formats": ["png", "jpg", "jpeg"],
 
     "description": "Tesseract is an open source text recognition (OCR) Engine, available under the Apache 2.0 license.",
 
@@ -25,7 +25,8 @@
                     "name": "language",
                     "help": "Define the language of the text"
                 }
-            }
+            },
+            "info": "I tried to detect text in image assuming language {{lang}} "
         },
 
         "searchable_pdf": {

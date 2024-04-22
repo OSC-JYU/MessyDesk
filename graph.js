@@ -166,33 +166,26 @@ graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
 	//params.topic = topic
 	var file_rid = filegraph['@rid']
 	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
-	var process = {}
-	// file must be part of project that user owns
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[*]->(file:File) WHERE p.id = "${me_email}" AND id(file) = "${file_rid}" RETURN pr`
-	var response = await web.cypher(query)
-	console.log(response.result[0])
-	if (response.result[0]) {
-		const project_rid = response.result[0]['@rid']
-		process = await this.create('Process', { label: topic })
-		var process_rid = process.result[0]['@rid']
-		var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
-		const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path} RETURN p`
-		var update_response = await web.cypher(update)
-		await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-		//await setLayout(project_rid, file_rid, process_rid)
 
-		return update_response.result[0]
+	// create process node
+	var processNode = {}
+	const process_attrs = { label: topic }
+	if(params.info) {
+		process_attrs.info = params.info
 	}
+	processNode = await this.create('Process', process_attrs)
+	var process_rid = processNode.result[0]['@rid']
+	var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	// update process path to record
+	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+	var update_response = await web.cypher(update)
+	// finally, connect process node to file node
+	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+
+	return update_response.result[0]
+
 }
 
-
-// async function setLayout(project_rid, parent_rid, new_rid) {
-// 	const fileContents = await fsPromises.readFile(`layouts/layout_${project_rid}.json`, 'utf8');
-// 	const parsedData = JSON.parse(fileContents);
-// 	parsedData[new_rid] = { x: parsedData[parent_rid].x + 400, y: parsedData[parent_rid].y }
-// 	const stringifiedData = JSON.stringify(parsedData);
-// 	await fsPromises.writeFile(`layouts/layout_${project_rid}.json`, stringifiedData, 'utf8');
-// }
 
 
 graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
@@ -245,9 +238,18 @@ graph.createProcessFileNode = async function (process_rid, file_type, extension,
 
 graph.getUserFileMetadata = async function (file_rid, me_email) {
 	// file must be somehow related to a project that is owned by user
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[*]->(file:File) WHERE p.id = "${me_email}" AND id(file) = "#${file_rid}" RETURN file`
-	var file_response = await web.cypher(query)
-	return file_response.result[0]
+	var query = `MATCH {
+		type: Person, 
+		as:p, 
+		where:(id = "${me_email}")}
+	-IS_OWNER->
+		{type:Project, as:project}--> 
+		{type:File, as:file, where:(@rid = "#${file_rid}"), while: ($depth < 20)} return file`
+	var file_response = await web.sql(query)
+	if(file_response.result[0] && file_response.result[0].file)
+		return file_response.result[0].file
+	else 
+		throw({message: 'File not owned by user.'})
 }
 
 
