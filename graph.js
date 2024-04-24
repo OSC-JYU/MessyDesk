@@ -212,14 +212,17 @@ graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
 }
 
 
-graph.createProcessFileNode = async function (process_rid, file_type, extension, label) {
+graph.createProcessFileNode = async function (process_rid, file_type, extension, label, description) {
 
+	if(!description) description = label
+	
 	const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
 		CREATE (file:File 
 			{
 				type: "${file_type}",
 				extension: "${extension}",
 				label: "${label}",
+				description: "${description}",
 				_active: true
 			}
 		) <- [r:PRODUCED] - (p) 
@@ -249,7 +252,7 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 	if(file_response.result[0] && file_response.result[0].file)
 		return file_response.result[0].file
 	else 
-		throw({message: 'File not owned by user.'})
+		return null
 }
 
 

@@ -35,14 +35,20 @@ http://localhost:4646/ui/jobs
 
 
 
+NOMAD + podman
+podman's unix socket:
+/run/podman/podman.sock:
+https://github.com/containers/podman/blob/main/docs/tutorials/socket_activation.md
+
+
 graph alternative:
 https://github.com/jagenjo/litegraph.js/
 
 
 
-CRUNCHES suggestions
+CRUNCHES suggestions:
 
-
+https://github.com/mattiasw/ExifReader
 
 img2table: https://github.com/xavctn/img2table
   - html export: https://github.com/xavctn/img2table/issues/92
@@ -123,7 +129,7 @@ tulos = pipe('Kyllösen vanhempi poika Erkki oli kova mies')
 print(tulos)
 
 
-KAFKAN KORVAAJA? https://zeromq.org/
+
 
 
 SQL:

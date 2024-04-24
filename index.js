@@ -300,8 +300,12 @@ router.get('/api/services', async function (ctx) {
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
-	var service_list = await services.getServicesForFile(file)
-	ctx.body = service_list
+	if(file) {
+		var service_list = await services.getServicesForFile(file)
+		ctx.body = service_list
+	} else {
+		ctx.body = []
+	}
 })
 
 
@@ -423,13 +427,18 @@ router.post('/api/nomad/process/files', upload.fields([
 			}
 
 		} else if(infoFilepath && contentFilepath) {
+			var description = 'Detected text should be here'
+			// for text nodes we create a description from the content of the file
+			if (message.file.type == 'text') {
+				description = await media.getTextDescription(contentFilepath)
+			}
 			const process_rid = message.process['@rid']
-			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label)
+			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label, description)
 			console.log(fileNode)
 			await media.uploadFile(contentFilepath, fileNode)
 
-			// send to thumbnailer queue if this is an image
-			if(message.file.type == 'image') {
+			// for images and pdf files we create normal thumbnails
+			if(message.file.type == 'image' || message.file.type == 'pdf') {
 				var th = {
 					id:'thumbnailer', 
 					task: 'thumbnail', 
@@ -439,7 +448,7 @@ router.post('/api/nomad/process/files', upload.fields([
 				}
 				th.params = {width: 800, type: 'jpeg'}
 				nats.publish(th.id, JSON.stringify(th))
-			}
+			} 
 
 			if(message.userId) {
 				console.log('add file node to visual graph')
@@ -455,6 +464,7 @@ router.post('/api/nomad/process/files', upload.fields([
 
 		// something went wrong in file processing	
 		} else {
+			console.log(infoFilepath, contentFilepath)
 			console.log('PROCESS FAILED!')
 			console.log(ctx.request.body)
 		}

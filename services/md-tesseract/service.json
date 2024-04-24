@@ -18,12 +18,13 @@
             "output": "text",
             "description": "Recognices text from images and outputs a text file",
             "params": {
-                "lang": "en"
+                "lang": "eng"
             },
             "params_help": {
                 "lang": {
                     "name": "language",
-                    "help": "Define the language of the text"
+                    "help": "Define the language of the text",
+                    "values": ["eng", "deu", "fin", "swe"]
                 }
             },
             "info": "I tried to detect text in image assuming language {{lang}} "
