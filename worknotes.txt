@@ -36,9 +36,51 @@ http://localhost:4646/ui/jobs
 
 
 NOMAD + podman
-podman's unix socket:
-/run/podman/podman.sock:
+https://support.hashicorp.com/hc/en-us/articles/20752437319955-Configuring-nomad-podman-driver-with-a-Nomad-Cluster-and-Running-a-Nomad-Job-Using-the-Podman-Driver
+
+
+podman unix socket must be activated: /run/podman/podman.sock
 https://github.com/containers/podman/blob/main/docs/tutorials/socket_activation.md
+
+sudo systemctl start podman.socket
+
+
+/etc/nomad.d/nomad.hcl
+
+server {
+  # license_path is required for Nomad Enterprise as of Nomad v1.1.1+
+  #license_path = "/etc/nomad.d/license.hclic"
+  enabled          = true
+  bootstrap_expect = 1
+}
+
+client {
+  enabled = true
+  servers = ["127.0.0.1"]
+  options = {
+    "driver.denylist" = "docker"
+  }
+}
+plugin "nomad-driver-podman" {
+  config {
+    volumes {
+      enabled      = true
+      selinuxlabel = "z"
+    }
+  }
+}
+
+
+
+sudo nomad agent -dev   -bind 0.0.0.0   -network-interface='{{ GetDefaultInterfaces | attr "name" }}' -plugin-dir=/opt/nomad/plugins
+
+
+check podman driver:
+nomad node status
+nomad node status <nomad_client_node_id> | grep -i "Driver status"
+nomad node status -verbose <nomad_client_node_id> | grep -i "podman"
+
+
 
 
 graph alternative:
