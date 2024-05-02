@@ -33,6 +33,9 @@ NOMAD:
 monitoring:
 http://localhost:4646/ui/jobs
 
+docker version for local development:
+https://github.com/multani/docker-nomad
+
 
 
 NOMAD + podman
@@ -90,6 +93,11 @@ https://github.com/mindee/doctr/discussions/837
 
 https://medium.com/quantrium-tech/text-extraction-using-doctr-ocr-471e417764d5
 
+
+https://github.com/rescribe
+
+HOCR:
+https://github.com/ocropus/hocr-tools
 
 Layout analysis:
 https://dhlab-epfl.github.io/dhSegment/

@@ -625,7 +625,12 @@ router.get('/api/documents', async function (ctx) {
 
 router.get('/api/documents/:rid', async function (ctx) {
 	var n = await Graph.getNodeAttributes(ctx.request.params.rid)
-	ctx.body = n
+	if(n.result && n.result.length) {
+		ctx.body = n.result[0]
+	} else {
+		ctx.status = 404; 
+		ctx.body = {}
+	}
 })
 
 async function send2UI(userId, data) {

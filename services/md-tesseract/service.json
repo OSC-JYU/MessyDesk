@@ -45,10 +45,10 @@
             }
         },
 
-        "image2alto": {
-            "name": "Image to ALTO format",
-            "output": "xml",
-            "description": "Create an ALTO file from image",
+        "image2hocr": {
+            "name": "Image to HOCR",
+            "output": "hocr",
+            "description": "Create an HOCR document (recommended)",
             "params": {
                 "lang": "en"
             },

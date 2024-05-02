@@ -481,7 +481,5 @@ queue.downLoadFile = async function(message, uri, service) {
     console.log(e)
     console.log('File download failed!')
   }
-
-
 }
 
