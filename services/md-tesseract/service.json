@@ -5,6 +5,7 @@
     "api_type": "elg",
     "api": "/process",
     "name" :"Tesseract",
+    "source_url": "https://tesseract-ocr.github.io/tessdoc/",
     
     "supported_types": ["image"],
     "supported_formats": ["png", "jpg", "jpeg"],
@@ -57,7 +58,8 @@
                     "name": "language",
                     "help": "Define the language of the text"
                 }
-            }
+            },
+            "info": "I tried to detect text in image assuming language {{lang}}. I created an editable HOCR document."
         },
 
         "orientation_detection": {
@@ -66,7 +68,8 @@
             "description": "Detect orientation of text image",
             "params": {
                 "psm": 0
-            }
+            },
+            "info": "I tried to detect orientation of image."
         }
     }
 }

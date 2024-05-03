@@ -317,6 +317,8 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 	const file_rid = ctx.request.params.file_rid
 	try {
 		const service = services.getServiceAdapterByName(topic)
+		console.log(service)
+		console.log(ctx.request.body.task)
 		var task_name = service.tasks[ctx.request.body.task].name
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 

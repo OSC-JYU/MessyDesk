@@ -7,7 +7,7 @@
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
     "source_url": "https://github.com/h2non/node-imaginary",
     
-    "supported_types": ["image"],
+    "supported_types": ["image","text"],
     "supported_formats": ["png", "jpg","jpeg"],
 
 
@@ -91,6 +91,9 @@
             "supported_formats": ["osd"],
             "params": {
                 "rotate": 90
+            },
+            "params": {},
+            "params_help": {
             }
         },
 

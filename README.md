@@ -7,7 +7,7 @@ This is a VERY early version of MessyDesk, a digital humanities desktop (for hum
 The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
 
 
-![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/test/files/messydesk-ui.png)
+![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/docs/messydesk-ui.png)
 
 Things you can do:
 - extract images and text from PDF
@@ -47,19 +47,19 @@ Start NATS and Arcadedb
 
 Start Nomad locally:
 
-    sudo nomad agent -dev   -bind 0.0.0.0   -network-interface='{{ GetDefaultInterfaces | attr "name" }}'
+    sudo nomad agent -dev 
 
 Start back end:
 
     MODE=development DB_PASSWORD=node_master node index.js
 
 
-Now we should have backend running with two nomad jobs: one for thumbnails and one for image operations.
+Now we should have backend running. We need also some services and UI.
 
 
-### Concsmers apps (service adapters)
+### Consumer apps (service adapters)
 
-We have now backend running and couple of services. We are still missing the link between those, namely consumer applications (or service adapters).
+Consumer apps are links between MessyDesk backend and services..
 
 One more repository is needed:
 
@@ -75,7 +75,7 @@ And then in another terminal:
 
     NAME=thumbnailer node index.mjs
 
-Now we have also two consumer application that works between MessyDesk, NATS and nomad jobs.
+Now we have also two consumer application and two nomad jobs, thumbnailer and imaginary library for image manipulation.
 
 
 ### Frontend:
@@ -89,7 +89,7 @@ UI is it its own repository:
 
 Aim your browser to [http://localhost:3000](http://localhost:3000)
 
-There is not much MessyDesk can do yet, but you should be able to see the idea. Create a project, add few images and blur them :) 
+There is not much MessyDesk can do yet, but you should be able to see the idea. Create a project, add few images and rotate them back and forth :) 
 
 ## API
 
