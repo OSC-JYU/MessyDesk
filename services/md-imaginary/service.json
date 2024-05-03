@@ -1,0 +1,116 @@
+{
+    "url": "http://localhost:9000",
+    "id": "md-imaginary",
+    "api_type": "imaginary",
+    "api": "/",
+    "name" :"Imaginary",
+    "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
+    "source_url": "https://github.com/h2non/node-imaginary",
+    
+    "supported_types": ["image","text"],
+    "supported_formats": ["png", "jpg","jpeg"],
+
+
+    "params": {
+        "width": 200,
+        "height": 200
+    },
+
+    "params_help": {
+        "width": {
+            "name": "width",
+            "default": 200,
+            "help": "Size of the image",
+            "display": "textinput"
+        },
+        "height": {
+            "name": "height",
+            "default": 200,
+            "help": "",
+            "display": "textinput"
+        }
+    },
+
+    "tasks": {
+        "resize": {
+            "name": "Resize by width",
+            "output": "image",
+            "description": "Resize image.",
+            "params": {"width": 400},
+            "params_help": {
+                "width": {
+                    "name": "Image width in pixels",
+                    "help": "How much image is resized."
+                }
+            }
+        },
+        "fit": {
+            "name": "Resize",
+            "output": "image",
+            "description": "Resize image."
+        },
+
+        "flip": {
+            "name": "Flip",
+            "output": "image",
+            "description": "Flip image.",
+            "params": {},
+            "params_help": {},
+            "user_info": "I flipped image"
+        },
+
+        "smartcrop": {
+            "name": "Smart crop",
+            "output": "image",
+            "description": "Remove boring parts",
+            "params": {}
+        },
+
+        "rotate": {
+            "name": "Rotate",
+            "output": "image",
+            "description": "Rotate image by given angle.",
+            "params": {
+                "rotate": 90
+            },
+            "params_help": {
+                "rotate": {
+                    "name": "rotate angle",
+                    "help": "How much image is rotated."
+                }
+            },
+            "info": "I rotated image {{rotate}} degrees"
+           
+        },
+
+        "rotate_osd": {
+            "name": "Auto-rotate (OSD)",
+            "output": "image",
+            "description": "Rotate image by angle given by orientation detection.",
+            "supported_types": ["text"],
+            "supported_formats": ["osd"],
+            "params": {
+                "rotate": 90
+            },
+            "params": {},
+            "params_help": {
+            }
+        },
+
+        "blur": {
+            "name": "Blur",
+            "output": "image",
+            "description": "Blur image",
+            "params": {
+                "sigma": 2
+            },
+            "params_help": {
+                "sigma": {
+                    "name": "sigma",
+                    "help": "How much image is blurred."
+                }
+            },
+            "info": "I blurred image by {{sigma}}. "
+        }
+    }
+}

@@ -1,0 +1,75 @@
+{
+    "url": "http://localhost:8400",
+    "id": "md-tesseract",
+    "type": "image",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"Tesseract",
+    "source_url": "https://tesseract-ocr.github.io/tessdoc/",
+    
+    "supported_types": ["image"],
+    "supported_formats": ["png", "jpg", "jpeg"],
+
+    "description": "Tesseract is an open source text recognition (OCR) Engine, available under the Apache 2.0 license.",
+
+
+    "tasks": {
+        "image2text": {
+            "name": "Image to text",
+            "output": "text",
+            "description": "Recognices text from images and outputs a text file",
+            "params": {
+                "lang": "eng"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text",
+                    "values": ["eng", "deu", "fin", "swe"]
+                }
+            },
+            "info": "I tried to detect text in image assuming language {{lang}} "
+        },
+
+        "searchable_pdf": {
+            "name": "Image to searchable PDF",
+            "output": "pdf",
+            "description": "Create a PDF file from image",
+            "params": {
+                "lang": "en"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text"
+                }
+            }
+        },
+
+        "image2hocr": {
+            "name": "Image to HOCR",
+            "output": "hocr",
+            "description": "Create an HOCR document (recommended)",
+            "params": {
+                "lang": "en"
+            },
+            "params_help": {
+                "lang": {
+                    "name": "language",
+                    "help": "Define the language of the text"
+                }
+            },
+            "info": "I tried to detect text in image assuming language {{lang}}. I created an editable HOCR document."
+        },
+
+        "orientation_detection": {
+            "name": "Detect page orientation",
+            "output": "text",
+            "description": "Detect orientation of text image",
+            "params": {
+                "psm": 0
+            },
+            "info": "I tried to detect orientation of image."
+        }
+    }
+}

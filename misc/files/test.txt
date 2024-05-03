@@ -1,0 +1,4 @@
+Hello, world! And here is some more text for you. This is a VERY early version of MessyDesk, a digital humanities desktop (for humanists). The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
+And we have line breaks too!
+Tämä taas on suomen kieltä. Se on helppoa, kas näin: 
+Mitä mä teen, jos taas juon mustan teen ja kirjoitan taululle huonon teen ja senkin jälkeen tulee tenkkapoo eteen.

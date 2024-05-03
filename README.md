@@ -7,7 +7,7 @@ This is a VERY early version of MessyDesk, a digital humanities desktop (for hum
 The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
 
 
-![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/test/files/messydesk-ui.png)
+![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/docs/messydesk-ui.png)
 
 Things you can do:
 - extract images and text from PDF
@@ -20,33 +20,67 @@ Things you can do:
 
 Hardly anything works yet :)
 
-## Getting started
+## Local development
+
+This guide helps you to set up local development setup. You need Docker and docker-compose installed (or podman), Node version => 20.
+
+Check Docker:
+
+    docker ps
+
+Check node
+
+    node -v
+    -> v20.12.2
+
+### Backend
 
 Clone this repo:
 
    git clone https://github.com/OSC-JYU/MessyDesk.git
    cd MessyDesk
 
-Start services:
+Start NATS and Arcadedb 
 
     docker-compose up
 
-This will start Kafka, Arcadedb and Imaginary (thumbnailer)
+
+Start Nomad locally:
+
+    sudo nomad agent -dev 
 
 Start back end:
 
     MODE=development DB_PASSWORD=node_master node index.js
 
-Then we must create queues for thumbnailer and imaginary (both using the same Imaginary service). 
 
-    curl http://localhost:8200/api/services -d "@test/services/thumbnailer/service.json" --header "Content-Type: application/json"
-
-    curl http://localhost:8200/api/services -d "@test/services/imaginary/service.json" --header "Content-Type: application/json"
+Now we should have backend running. We need also some services and UI.
 
 
-Now we should have backend running!
+### Consumer apps (service adapters)
 
-Let's launch frontend:
+Consumer apps are links between MessyDesk backend and services..
+
+One more repository is needed:
+
+    cd ..
+    git clone https://github.com/OSC-JYU/MD-consumers.git
+    cd MD-consumers/MDc-imaginary
+
+We need to start two instances:
+
+    NAME=md-imaginary node index.mjs
+
+And then in another terminal:
+
+    NAME=thumbnailer node index.mjs
+
+Now we have also two consumer application and two nomad jobs, thumbnailer and imaginary library for image manipulation.
+
+
+### Frontend:
+
+UI is it its own repository:
 
     cd ..
     git clone https://github.com/OSC-JYU/MessyDesk-UI.git
@@ -55,7 +89,7 @@ Let's launch frontend:
 
 Aim your browser to [http://localhost:3000](http://localhost:3000)
 
-There is not much MessyDesk can do yet, but you should be able to see the idea. Create a project, add few images and blur them :) 
+There is not much MessyDesk can do yet, but you should be able to see the idea. Create a project, add few images and rotate them back and forth :) 
 
 ## API
 
@@ -81,29 +115,6 @@ upload:
 
 
 ## SERVICES
-
-### start Kafka
-
-    cd test/kafka
-    docker-compose up
-
-### test image processig service
-
-https://hub.docker.com/r/nextcloud/aio-imaginary
-
-    docker pull nextcloud/aio-imaginary
-    docker run --name md-imaginary -p 9000:9000 nextcloud/aio-imaginary 
-
-    cd test/services/test-image-service
-    make start
-
-
-### registering service:
-
-    curl http://localhost:8200/api/services -d "@test/services/test-image-service/service.json" --header "Content-Type: application/json"
-
-This creates a consumer for topic "md-imaginary". 
-
 
 
 
@@ -132,9 +143,7 @@ Call service:
 
     curl -X POST http://localhost:8200/api/queue/md-heli-ots/files/108:3 -d "@test/services/heli-ots/heli-ots_sample.json" --header "Content-Type: application/json"
 
-## Tech stuff
 
-MessyDesk is a web application. UI is written with Vue.js and backend is Nodejs. Apache Kafka is used for event queue handling and database is ArcadeDB.
 
 
 ### ELG API

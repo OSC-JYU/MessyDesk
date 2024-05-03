@@ -15,23 +15,81 @@ console.log(URL)
 
 let web = {}
 
+web.checkService = async function(url) {
+	try {
+		console.log(url)
+		await axios.get(url)
+		return true
+	} catch(e) {
+		return false
+	}
+
+}
+
 web.getURL = function() {
 	return URL
 }
 
+web.checkDB = async function() {
+	const {got} = await import('got')
+	var url = URL.replace(`/command/`, '/exists/')
+	var data = {
+		username: username,
+		password: password
+	};
+
+	try {
+		var response = await got.get(url, data).json()
+		return response.result
+		
+	} catch(e) {
+		console.log(e.message)
+		throw({message: "Error on database check"})
+	}
+}
+
+
 web.createDB = async function() {
-	url = URL.replace(`/command/${DB}`, '/server')
+	if(!password) {
+		console.log('ERROR: DB_PASSWORD not set! Exiting...')
+		process.exit(1)
+	}
+
+	var url = URL.replace(`/command/${DB}`, '/server')
 	var config = {
 		auth: {
 			username: username,
 			password: password
 		}
 	};
-	return axios.post(url, {command: `create database ${DB}`}, config)
+	try {
+		await axios.post(url, {command: `create database ${DB}`}, config)
+		await this.createVertexType('Person')
+		await this.createVertexType('File')
+		await this.createVertexType('Process')
+		await this.createVertexType('Project')
+
+		await this.sql("CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
+		// const commands = [
+		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
+		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
+		// 	"CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
+
+		// 	"CREATE INDEX IF NOT EXISTS ON Person (id) UNIQUE",
+
+		// 	"CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}"
+		// ]
+		// for(var query of commands) {
+		// 	await this.sql(query, 'sql')
+		// }
+	} catch(e) {
+		console.log('Database init failed', e.message)
+		throw(e)
+	}
 }
 
 web.createVertexType = async function(type) {
-	var query = `CREATE vertex type ${type}`
+	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`
 	try {
 		await this.sql(query)
 	} catch (e) {
@@ -51,7 +109,6 @@ web.sql = async function(query, options) {
 		command:query,
 		language:'sql'
 	}
-	console.log(config.auth)
 	var response = await axios.post(URL, query_data, config)
 	return response.data
 }
@@ -71,8 +128,9 @@ web.cypher = async function(query, options) {
 		command:query,
 		language:'cypher'
 	}
+
 	if(options.serializer) query_data.serializer = options.serializer
-	if(process.env.MODE == 'development') console.log(query)
+	//if(process.env.MODE == 'development') console.log(query)
 
 	try {
 		var response = await axios.post(URL, query_data, config)
@@ -91,7 +149,7 @@ web.cypher = async function(query, options) {
 }
 
 async function getSchemaLabels(config) {
-	const query = "MATCH (s:Schema)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
+	const query = "MATCH (s:Schema_)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
 	const query_data = {
 		command:query,
 		language:'cypher'
@@ -116,90 +174,10 @@ function setParent(vertices, child, parent) {
 	}
 }
 
-// not really clustering, more like auto-compound
-function cluster(nodes, edges) {
-	var unique_links = {}
-	var cluster_types = {}
-	var cluster_nodes = []
-	var cluster_edges = []
-
-	var clustered_links = []
-	var clustered_edges = []
-	var clustered_nodes = []
-
-	clustered_nodes = nodes
-
-
-	for(var edge of edges) {
-		var cluster_id = edge.data.source + '__' + edge.data.type
-		if(unique_links[cluster_id]) {
-			unique_links[cluster_id].push(edge.data.target)
-		} else {
-			unique_links[cluster_id] = [edge.data.target]
-		}
-	}
-
-	for(var cluster_id in unique_links) {
-		if(unique_links[cluster_id].length > 10) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			clustered_links.push(cluster_id)
-
-			cluster_nodes.push({data: {name: cluster_id, type_label: 'Cluster', id: cluster_id, type:'Cluster', width:100, active:true}})
-			cluster_edges.push({data: {label: rel, source: source, target: cluster_id, active: true}})
-		}
-	}
-
-	clustered_edges = edges.filter(edge => {
-		// filter out clustered links
-		var found = false
-		for(var cluster_id of clustered_links) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			if(edge.data.source == source) {
-				if(unique_links[cluster_id].includes(edge.data.target) && edge.data.type === rel)
-					found = true
-			}
-		}
-		if(!found) return edge
-	})
-
-	// add parent to Cluster node to all clustered notes
-	clustered_nodes = nodes.filter(node => {
-		for(var cluster_id of clustered_links) {
-			var splitted = cluster_id.split('__')
-			var source = splitted[0]
-			var rel = splitted[1]
-			if(unique_links[cluster_id].includes(node.data.id)) {
-				console.log(cluster_id)
-				node.data.parent = cluster_id
-			}
-		}
-		return node
-	})
-
-	// add cluster nodes and edges to output
-	clustered_nodes = clustered_nodes.concat(cluster_nodes)
-	clustered_edges = clustered_edges.concat(cluster_edges)
-
-	if(clustered_links.length === 0) {
-		clustered_nodes = nodes
-		clustered_edges = edges
-	}
-
-
-	// console.log('Edges to be clustered:')
-	// console.log(clustered_links)
-	// console.log('clustered edge count: ' + edges.length)
-	// console.log(cluster_nodes)
-	return {edges: clustered_edges, nodes: clustered_nodes}
-
-}
 
 
 async function convert2CytoScapeJs(data, options) {
+	//console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []
@@ -216,6 +194,7 @@ async function convert2CytoScapeJs(data, options) {
 							name:options.labels[v.p._type],
 							type: v.p._type,
 							type_label: v.p._type,
+							info: 'dd',
 							active: true,
 							width: 100,
 							idc: v.r.replace(':','_')
@@ -229,21 +208,26 @@ async function convert2CytoScapeJs(data, options) {
 							type: v.t,
 							type_label: options.labels[v.t],
 							active: v.p._active,
+							info: v.p.info,
 							width: 100,
+							description: v.p.description,
 							idc: v.r.replace(':','_')
 						 }
 					}
 					if(!node.data.active) inactive_nodes.push(v.r)
 				}
 
+				//node.data.info = v.p.info
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
-				if(node.data._type == 'image') {
-					const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
-					const exists = await fs.pathExists(img_path)
-					if(exists) {
-						node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
+				if(['image', 'pdf'].includes(node.data._type)) {
+					if(v.p.path) {
+						const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
+						const exists = await fs.pathExists(img_path)
+						if(exists) {
+							node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
+						}
 					}
 				}
 				nodes.push(node)
@@ -278,15 +262,9 @@ async function convert2CytoScapeJs(data, options) {
 						} else {
 							edge.data.label = edge.data.label
 						}
-						if(options.schemas[v.t].compound === true) {
-							console.log('***************** COMPoUND ***************\n\n')
-							if(options.current == v.o)
-								edges.push(edge)
-							else
-								setParent(nodes, v.o, v.i)
-						} else {
-							edges.push(edge)
-						}
+
+						edges.push(edge)
+						
 					} else {
 						edges.push(edge)
 					}
@@ -296,13 +274,9 @@ async function convert2CytoScapeJs(data, options) {
 			}
 		}
 	}
-	if(options.current) {
-		//return {nodes:nodes, edges: edges}
-		var clustered = cluster(nodes, edges)
-		return {nodes:clustered.nodes, edges: clustered.edges}
-	} else {
-		return {nodes:nodes, edges: edges}
-	}
+
+	return {nodes:nodes, edges: edges}
+	
 }
 
 

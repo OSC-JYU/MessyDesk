@@ -27,34 +27,58 @@ media.createProcessDir = async function(process_path) {
 	}
 }
 
-media.uploadFile = async function(ctx, filegraph) {
+media.uploadFile = async function(uploadpath, filegraph) {
 
 	console.log(filegraph)
-	var file_rid = filegraph.result[0]['@rid']
-	var filepath = filegraph.result[0].path.split('/').slice( 0, -1 ).join('/')
+	var file_rid = filegraph['@rid']
+	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
 	const filedata = {}
 	try {
 		await fs.ensureDir(path.join(filepath, 'process'))
 	
 		filedata.filepath = path.join(filepath, this.rid2path(file_rid) + '.' + filedata.extension)
-		var exists = await checkFileExists(filegraph.result[0].path)
+		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
-			await fs.rename(ctx.file.path, filegraph.result[0].path);
+			await fs.rename(uploadpath, filegraph.path);
 			console.log('File moved successfully!')
-			ctx.body = 'done';
+			//ctx.body = 'done';
 		} else {
-			await fs.unlink(ctx.file.path)
+
+			//await fs.unlink(uploadpath)
 			throw('file exists!')
 		}
 
 		return filedata
 
 	} catch (e) {
-		console.log('File upload failed')
 		console.log(e.message)
+		await fs.unlink(uploadpath)
+		throw('file saving failed')
 	}
 }
+
+media.saveThumbnail = async function(uploadpath, basepath, filename) {
+	console.log(filename)
+	const filedata = {}
+	try {
+		await fs.ensureDir(path.join(basepath))
+		const filepath = path.join(basepath, filename)
+		console.log(uploadpath)
+		console.log(filepath)
+
+		await fs.rename(uploadpath, filepath);
+		console.log('File moved successfully!')
+
+		return filedata
+
+	} catch (e) {
+		await fs.unlink(uploadpath)
+		console.log(e.message)
+		throw('thumbnail saving failed')
+	}
+}
+
 
 media.writeJSON =  async function(data, filename, fpath) {
 
@@ -88,6 +112,19 @@ media.detectType = async function(ctx) {
 
 media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
+}
+
+media.getTextDescription = async function (filePath) {
+	const maxCharacters = 100;
+	try {
+		const data = await fs.promises.readFile(filePath, 'utf8');
+		const first = data.substring(0, maxCharacters);
+		console.log(first);
+		return first.replace(/(?<!^)\s+/g, ' ').trim().replace(/"/g, '') + '...'
+	  } catch (error) {
+		console.error('Error reading file:', error);
+		return ''
+	  }
 }
 
 async function checkFileExists(filePath) {
