@@ -357,8 +357,14 @@ router.get('/api/nomad/status', async function (ctx) {
 // endpoint for consumer apps for starting their work horses
 router.post('/api/nomad/service/:name/create', async function (ctx) {
 	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
-	var service = await nomad.createService(adapter)
-	ctx.body = service
+	try {
+		var service = await nomad.createService(adapter)
+		ctx.body = service
+	} catch(e) {
+		console.log(e)
+		ctx.status = 500
+		ctx.body = {error:e}
+	}
 })
 
 // endpoint for consumer apps to get file to be processed
