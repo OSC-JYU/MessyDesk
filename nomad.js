@@ -41,6 +41,10 @@ nomad.createService = async function(service) {
 	if(service && service.nomad_hcl) {
 		console.log(`NOMAD: creating service: ${service.id}`)
 		try {
+			if(process.env.PODMAN) {
+				service.nomad_hcl = service.nomad_hcl.replace('driver = "docker"','driver = "podman"')
+			}
+			console.log(service.nomad_hcl)
 			var c = service.nomad_hcl.replace(/"/g, '\\"').replace(/\n/g, '\\n')
 			var js = `{"JobHCL":"${c}","Canonicalize":true}'`
 			var response = await axios.post(URL + `/jobs/parse`, js)
