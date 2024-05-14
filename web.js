@@ -6,10 +6,12 @@ const username = 'root'
 const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.ARCADEDB_HOST || 'http://localhost'
-const DB = process.env.ARCADEDB_DB || 'messydesk'
-const PORT = process.env.ARCADEDB_PORT || 2480
+const DB_HOST = process.env.DB_HOST || 'http://localhost'
+const DB = process.env.DB_NAME || 'messydesk'
+const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
+
+const DATA_DIR = process.env.DATA_DIR || './'
 
 console.log(URL)
 
@@ -221,9 +223,11 @@ async function convert2CytoScapeJs(data, options) {
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
+
+				// thumbnail paths
 				if(['image', 'pdf'].includes(node.data._type)) {
 					if(v.p.path) {
-						const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
+						const img_path = path.join(DATA_DIR, path.dirname(v.p.path), 'thumbnail.jpg')
 						const exists = await fs.pathExists(img_path)
 						if(exists) {
 							node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))

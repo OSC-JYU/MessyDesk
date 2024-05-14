@@ -1,0 +1,13 @@
+1/7
+
+Avoimen Tiedon Keskus / JYU
+
+the software is open sourced with a very permissive license. There's nothing
+stopping anyone from picking it up and doing pretty much whatever they'd like with
+it. I don't have time to support development of a GUI ...
+https://github.com/mzucker/noteshrink
+Ari Häyrinen / Avoimen Tiedon Keskus / JYU
+
+2/7
+
+

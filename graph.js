@@ -58,7 +58,7 @@ graph.createProject = async function (data, me_rid) {
 	console.log(response.result[0])
 	if (response.result[0].projects == 0) {
 		project = await this.create('Project', data)
-		var project_rid = project.result[0]['@rid']
+		var project_rid = project['@rid']
 		await this.connect(me_rid, 'IS_OWNER', project_rid)
 	} else {
 		console.log('Project exists')
@@ -147,6 +147,7 @@ async function getProjectThumbnails(me_email, data) {
 
 graph.getProjectFiles = async function (rid, me_email) {
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
+	console.log(query)
 	var result = await web.cypher(query)
 	return result
 }
@@ -160,7 +161,7 @@ graph.getSetFiles = async function (set_rid, me_email) {
 	return response.result
 }
 
-graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
+graph.createProcessNode = async function (topic, params, filegraph, me_email) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -174,7 +175,7 @@ graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
 		process_attrs.info = params.info
 	}
 	processNode = await this.create('Process', process_attrs)
-	var process_rid = processNode.result[0]['@rid']
+	var process_rid = processNode['@rid']
 	var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
 	// update process path to record
 	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
@@ -186,7 +187,15 @@ graph.createProcessGraph = async function (topic, params, filegraph, me_email) {
 
 }
 
+graph.createProcessSetNode = async function (process_rid, options) {
 
+	const setNode = await this.create('Set', options)
+	var set_rid = setNode['@rid']
+	await this.connect(process_rid, 'PRODUCED', set_rid)
+
+	return setNode
+
+}
 
 graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
 
@@ -212,9 +221,14 @@ graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
 }
 
 
-graph.createProcessFileNode = async function (process_rid, file_type, extension, label, description) {
+graph.createProcessFileNode = async function (process_rid, message, description) {
 
+	const file_type = message.file.type
+	const extension = message.file.extension
+	const label = message.file.label
 	if(!description) description = label
+	let setquery = ''
+	if(message.set) setquery = 'set:"' + message.set + '",'
 	
 	const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
 		CREATE (file:File 
@@ -223,6 +237,7 @@ graph.createProcessFileNode = async function (process_rid, file_type, extension,
 				extension: "${extension}",
 				label: "${label}",
 				description: "${description}",
+				${setquery}
 				_active: true
 			}
 		) <- [r:PRODUCED] - (p) 
@@ -238,8 +253,35 @@ graph.createProcessFileNode = async function (process_rid, file_type, extension,
 	return update_response.result[0]
 }
 
+graph.createSetFileNode = async function (set_rid, file_type, extension, label, description, process_path) {
+
+	if(!description) description = label
+	
+	const query = `MATCH (p:Set) WHERE id(p) = "${set_rid}" 
+		CREATE (file:File 
+			{
+				type: "${file_type}",
+				extension: "${extension}",
+				label: "${label}",
+				description: "${description}",
+				_active: true
+			}
+		) <- [r:PRODUCED] - (p) 
+		RETURN file`
+		console.log(query)
+	var response = await web.cypher(query)
+	console.log(response)
+
+	var file_rid = response.result[0].file['@rid']
+	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
+	var update_response = await web.cypher(update)
+
+	return update_response.result[0]
+}
 
 graph.getUserFileMetadata = async function (file_rid, me_email) {
+	file_rid = file_rid.replace('#','')
 	// file must be somehow related to a project that is owned by user
 	var query = `MATCH {
 		type: Person, 
@@ -287,7 +329,8 @@ graph.create = async function (type, data) {
 
 	var query = `CREATE (n:${type} {${data_str_arr.join(',')}}) return n`
 	console.log(query)
-	return web.cypher(query)
+	const response = await web.cypher(query)
+	return response.result[0]
 }
 
 

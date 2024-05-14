@@ -86,6 +86,21 @@ nomad node status -verbose <nomad_client_node_id> | grep -i "podman"
 
 
 
+INTERNAL API:
+
+start backend with different database and data dir:
+MODE=development DB_PASSWORD=node_master DB_NAME=md_test DATA_DIR=test nodemon index.js
+
+modify and and internal.js (in 'test' directory so that data dir is created under 'test'):
+MODE=development DB_PASSWORD=node_master DB_NAME=md_test node internal.js
+
+
+
+
+
+MISC:
+
+
 graph alternative:
 https://github.com/jagenjo/litegraph.js/
 

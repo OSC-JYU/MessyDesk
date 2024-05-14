@@ -62,6 +62,7 @@
                 "task": "pdfimages"
             },
             "output": "store",
+            "output_node": "Set",
             "name": "Extract images from PDF (png)",
             "description": "Extract images from PDF as png files.",
             "params_help": {

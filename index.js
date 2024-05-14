@@ -21,6 +21,8 @@ const nomad 		= require('./nomad.js');
 let nats
 let positions
 
+const DATA_DIR = process.env.DATA_DIR || './'
+
 const connections = new Map();
 
 (async () => {
@@ -189,7 +191,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
-	await media.uploadFile(ctx.file.path, filegraph)
+	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 	var data = {file: filegraph}
 	data.userId = ctx.headers[AUTH_HEADER]
 	data.target = filegraph['@rid']
@@ -209,7 +211,7 @@ router.get('/api/files/:file_rid', async function (ctx) {
 	try {
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
-		const src = fs.createReadStream(file_metadata.path);
+		const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path))
 		if(file_metadata.type =='pdf') {
 			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 			ctx.set('Content-Type', 'application/pdf');
@@ -233,14 +235,14 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
+    const src = fs.createReadStream(path.join(DATA_DIR, 'data',ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
 	ctx.set('Content-Type', 'image/jpeg');
    ctx.body = src
 })
 
 router.get('/api/process/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/process/','/'), 'params.json'));
+    const src = fs.createReadStream(path.join(DATA_DIR, 'data',ctx.request.path.replace('/api/process/','/'), 'params.json'));
 	ctx.set('Content-Type', 'application/json');
    ctx.body = src
 })
@@ -249,7 +251,6 @@ router.get('/api/process/(.*)', async function (ctx) {
 
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
-	console.log(me)
 	console.log('creating project')
 	var n = await Graph.createProject(ctx.request.body, me.rid)
 	console.log('project created')
@@ -322,10 +323,12 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		var task_name = service.tasks[ctx.request.body.task].name
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
-		var processNode = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
+		var processNode = await Graph.createProcessNode(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
 
 		await media.createProcessDir(processNode.path)
-		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(processNode.path))
+		if(service.tasks[ctx.request.body.task].system_params)
+			ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
 		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode}
 		send2UI(ctx.request.headers.mail, wsdata)
@@ -335,6 +338,16 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
 
+		const taskObj = service.tasks[ctx.request.body.task]
+		console.log(taskObj)
+
+		// if output of task is "Set", then create Set node
+		// if(taskObj.output_node && taskObj.output_node == "Set") {
+		// 	var setNode = await Graph.createSetNode(processNode.path, taskObj.output_node)
+		// 	ctx.request.body.process = setNode
+		// 	wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:setNode}
+		// 	send2UI(ctx.request.headers.mail, wsdata)
+		// }
 		nats.publish(topic, JSON.stringify(ctx.request.body))
 		ctx.body = ctx.request.params.file_rid
 
@@ -370,7 +383,7 @@ router.post('/api/nomad/service/:name/create', async function (ctx) {
 // endpoint for consumer apps to get file to be processed
 router.get('/api/nomad/files/:file_rid', async function (ctx) {
 	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-    const src = fs.createReadStream(file_metadata.path);
+    const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path));
 	if(file_metadata.type =='pdf') {
 		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 		ctx.set('Content-Type', 'application/pdf');
@@ -415,10 +428,11 @@ router.post('/api/nomad/process/files', upload.fields([
 		if(message.id === 'thumbnailer') {
 
 			var filepath = message.file.path
-			const base_path = path.join(path.dirname(filepath))
+			const base_path = path.join(DATA_DIR, path.dirname(filepath))
 			const filename = message.thumb_name || 'preview.jpg'
 
 			try {
+				console.log('saving thumbnail to', base_path, filename)
 				await media.saveThumbnail(contentFilepath, base_path, filename)
 				console.log('sending thumbnail WS', filename)
 				if(filename == 'thumbnail.jpg') {
@@ -441,9 +455,13 @@ router.post('/api/nomad/process/files', upload.fields([
 				description = await media.getTextDescription(contentFilepath)
 			}
 			const process_rid = message.process['@rid']
-			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label, description)
-			console.log(fileNode)
-			await media.uploadFile(contentFilepath, fileNode)
+	
+			const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
+
+			
+
+			//fileNode.path = path.join(DATA_DIR, fileNode.path)
+			await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
 
 			// for images and pdf files we create normal thumbnails
 			if(message.file.type == 'image' || message.file.type == 'pdf') {
