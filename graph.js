@@ -18,7 +18,6 @@ let graph = {}
 graph.initDB = async function () {
 	console.log(`ArcadeDB: ${web.getURL()}`)
 	console.log(`Checking database...`)
-	var query = 'MATCH (n:Schema_) return n'
 	let db_exists = false
 	try {
 		db_exists = await web.checkDB()
@@ -44,8 +43,6 @@ graph.initDB = async function () {
 		}
 		console.log('Database created!')
 	}
-
-	//await this.setSystemNodes()
 }
 
 
@@ -197,8 +194,9 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 }
 
-graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
+graph.createProjectFileNode = async function (project_rid, ctx, file_type) {
 
+	if(!ctx.file.description) ctx.file.description = ctx.file.originalname
 	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
 	const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
 		CREATE (file:File 
@@ -206,6 +204,7 @@ graph.createProjectFileGraph = async function (project_rid, ctx, file_type) {
 				type: "${file_type}",
 				extension: "${extension}",
 				label: "${ctx.file.originalname}",
+				description: "${ctx.file.description}",
 				_active: true
 			}
 		) <- [r:HAS_FILE] - (p) 

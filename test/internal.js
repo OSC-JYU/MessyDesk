@@ -38,6 +38,7 @@ async function main() {
 	await nomad.getStatus()
 	await services.loadServiceAdapters('../services')
     await nats.connect() 
+    await Graph.initDB()
 
 
     // we create fake 'uploads' dir
@@ -47,19 +48,23 @@ async function main() {
     const project = await createTestProject()
     console.log('project RID:', project['@rid'])
 
-    //const test_png =await addFileToProject('test.png', 'image', project['@rid'])
+    const test_png =await addFileToProject('2_persons.jpg', 'image', project['@rid'])
     //const jyudig = await addFileToProject('jyudig.pdf', 'pdf', project['@rid'])
     //const face = await addFileToProject('face.jpeg', 'image', project['@rid'])
-    const test_txt = await addFileToProject('test.txt', 'text', project['@rid'])
+    //const test_txt = await addFileToProject('test.txt', 'text', project['@rid'])
+    // const dissertation_text = await addFileToProject('dissertation_AH_text.txt', 'text', project['@rid'])
+    
 
 
-    // await processFile(jyudig, 'md-poppler:pdf2text', {
-    //     info: 'tekstii', 
-    //     params: {firstPageToConvert:1, lastPageToConvert: 2}, 
-    // }, user)
-    await processFile(test_txt, 'md-azure-ai:discpiline_info', {
-        info: 'tekstii', 
+    await processFile(test_png, 'md-replicate-image:alt_text', {
+        info: 'ALT text', 
     }, user)
+    // await processFile(dissertation_text, 'md-azure-ai:discpiline_info', {
+    //     info: 'Eristä data', 
+    // }, user)
+    // await processFile(test_txt, 'md-azure-ai:discpiline_info', {
+    //     info: 'tekstii', 
+    // }, user)
     //await processFile(jyudig, 'md-poppler:pdf2images', {info: 'Rendered images from PDF'}, user)
     //await processFile(jyudig, 'md-poppler:pdfimages', {info: 'images from PDF'}, user)
 
@@ -78,6 +83,9 @@ async function processFile(fileNode, service_task, options, user) {
     if(options.params) options.params.task = task
     else options.params = {task: task}
 
+    if(service.tasks[task].system_params) {
+        options.params = { ...options.params, ...service.tasks[task].system_params};
+    }
 
     // send to queue
     const data = {
@@ -111,7 +119,12 @@ async function addFileToProject(filename, type, project_rid) {
     await fse.copy('files/' + filename, 'uploads/' + filename)
     // create file node
     const ctx = {file: {originalname: filename}}
-    var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, type)
+
+    if(type == 'text') {
+		ctx.file.description = await media.getTextDescription('uploads/' + filename)
+	}
+
+    var filegraph = await Graph.createProjectFileNode(project_rid, ctx, type)
     // move file to data dir
     await media.uploadFile('uploads/' + filename, filegraph)
     console.log(filegraph)

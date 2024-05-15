@@ -190,7 +190,12 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
-	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
+	
+	if(file_type == 'text') {
+		ctx.file.description = await media.getTextDescription(ctx.file.path)
+	}
+
+	var filegraph = await Graph.createProjectFileNode(project_rid, ctx, file_type)
 	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 
 
@@ -203,7 +208,8 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 		data.params = {width: 800, type: 'jpeg'}
 		data.id = 'thumbnailer'
 		nats.publish('thumbnailer', JSON.stringify(data))
-	}
+
+	} 
 
 	ctx.body = filegraph
 
@@ -333,7 +339,7 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 			ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
 		await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
-		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode}
+		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)
 
 		ctx.request.body.process = processNode

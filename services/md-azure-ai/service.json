@@ -25,8 +25,7 @@
 
             "system_params": {
                 "prompts": [
-                    {"role": "system", "content": "Olet yliopiston aineistonhallinnan asiantuntija ja neuvot aineistonhallintasuunnitelman tekemisessä."},
-                    {"role": "user", "content": "Mitä minun pitää ottaa huomioon tehdessäni aineistonhallintasuunnitelmaan psykologian tutkimukselleni?"}
+                    {"role": "system", "content": "Extract following information from text. \n - title\n - author\n - faculty\n - ISBN\n Give result as JSON file in following format: \n { \"title\": \"\", \"author\": \"\", \"faculty\": \"\" }"}
                 ]
             }
         }
