@@ -19,6 +19,12 @@ const connections = new Map();
 const AUTH_HEADER = 'mail'
 const user = 'local.user@localhost'
 
+process.on( 'SIGINT', async function() {
+	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
+    await nats.close()
+	process.exit( );
+  })
+
 
 async function main() {
     
@@ -31,8 +37,8 @@ async function main() {
 	positions = layout
 	await nomad.getStatus()
 	await services.loadServiceAdapters('../services')
-	await nats.init(services.getServices())
-	await Graph.initDB()
+    await nats.connect() 
+
 
     // we create fake 'uploads' dir
     await fse.ensureDir('uploads')
@@ -41,20 +47,23 @@ async function main() {
     const project = await createTestProject()
     console.log('project RID:', project['@rid'])
 
-    const test_png =await addFileToProject('test.png', 'image', project['@rid'])
-    const jyudig = await addFileToProject('jyudig.pdf', 'pdf', project['@rid'])
-    const face = await addFileToProject('face.jpeg', 'image', project['@rid'])
+    //const test_png =await addFileToProject('test.png', 'image', project['@rid'])
+    //const jyudig = await addFileToProject('jyudig.pdf', 'pdf', project['@rid'])
+    //const face = await addFileToProject('face.jpeg', 'image', project['@rid'])
+    const test_txt = await addFileToProject('test.txt', 'text', project['@rid'])
 
-    console.log(jyudig)
 
-    await processFile(jyudig, 'md-poppler:pdf2text', {
+    // await processFile(jyudig, 'md-poppler:pdf2text', {
+    //     info: 'tekstii', 
+    //     params: {firstPageToConvert:1, lastPageToConvert: 2}, 
+    // }, user)
+    await processFile(test_txt, 'md-azure-ai:discpiline_info', {
         info: 'tekstii', 
-        params: {firstPageToConvert:1, lastPageToConvert: 2}, 
     }, user)
-    await processFile(jyudig, 'md-poppler:pdf2images', {info: 'Rendered images from PDF'}, user)
-   await processFile(jyudig, 'md-poppler:pdfimages', {info: 'images from PDF'}, user)
+    //await processFile(jyudig, 'md-poppler:pdf2images', {info: 'Rendered images from PDF'}, user)
+    //await processFile(jyudig, 'md-poppler:pdfimages', {info: 'images from PDF'}, user)
 
-
+    //await nats.close()
 
 }
 
@@ -107,16 +116,19 @@ async function addFileToProject(filename, type, project_rid) {
     await media.uploadFile('uploads/' + filename, filegraph)
     console.log(filegraph)
     // send it to a thumbnail service
-    var data = {
-        file: filegraph,
-        userId: user,
-        target: filegraph['@rid'],
-        task: 'thumbnail',
-        params: {width: 800, type: 'jpeg'},
-        id: 'thumbnailer'   
+    if(type == 'image' || type == 'pdf') {
+        var data = {
+            file: filegraph,
+            userId: user,
+            target: filegraph['@rid'],
+            task: 'thumbnail',
+            params: {width: 800, type: 'jpeg'},
+            id: 'thumbnailer'   
+        }
+        // send to thumbnailer queue 
+        nats.publish(data.id, JSON.stringify(data))
     }
-    // send to thumbnailer queue 
-    nats.publish(data.id, JSON.stringify(data))
+
 
     return filegraph
 }

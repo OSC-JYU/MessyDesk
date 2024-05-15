@@ -54,7 +54,16 @@ queue.init = async function(services) {
   }
 }
 
+queue.connect = async function() {
+  this.nc = await connect({
+    servers: [servers],
+  });
+  this.js = this.nc.jetstream();
+}
 
+queue.close = async function() {
+  await this.nc.close()
+}
 
 queue.checkService = async function(data) {
   // get service url from nomad

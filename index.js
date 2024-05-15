@@ -192,15 +192,18 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 	file_type = await media.detectType(ctx)
 	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
 	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
-	var data = {file: filegraph}
-	data.userId = ctx.headers[AUTH_HEADER]
-	data.target = filegraph['@rid']
-	data.task = 'thumbnail'
-	data.params = {width: 800, type: 'jpeg'}
-	data.id = 'thumbnailer'
+
 
 	// send to thumbnailer queue 
-	nats.publish(data.id, JSON.stringify(data))
+	if(file_type == 'image' || file_type == 'pdf') {
+		var data = {file: filegraph}
+		data.userId = ctx.headers[AUTH_HEADER]
+		data.target = filegraph['@rid']
+		data.task = 'thumbnail'
+		data.params = {width: 800, type: 'jpeg'}
+		data.id = 'thumbnailer'
+		nats.publish('thumbnailer', JSON.stringify(data))
+	}
 
 	ctx.body = filegraph
 
