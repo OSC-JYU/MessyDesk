@@ -337,6 +337,7 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		await media.createProcessDir(processNode.path)
 		if(service.tasks[ctx.request.body.task].system_params)
 			ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		
 		await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
 		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}

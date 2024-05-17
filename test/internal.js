@@ -85,7 +85,9 @@ async function processFile(fileNode, service_task, options, user) {
 
     if(service.tasks[task].system_params) {
         options.params = { ...options.params, ...service.tasks[task].system_params};
-    }
+        if(service.tasks[task].system_params.prompts) { 
+            // TODO: write propmt to processNode info
+        }
 
     // send to queue
     const data = {

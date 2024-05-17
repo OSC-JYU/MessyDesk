@@ -5,6 +5,8 @@
     "type": "text",
     "api_type": "elg",
     "api": "/process",
+    "location": "external",
+    "access": "commercial",
     "name" :"Azure AI",
 
     "supported_types": ["text"],
