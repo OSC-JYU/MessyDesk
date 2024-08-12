@@ -36,20 +36,27 @@ const connections = new Map();
 	await services.loadServiceAdapters()
 	// create main stream and all consumers in NATS
 	await nats.init(services.getServices())
-	// start thumbnailer and Poppler services
-	//var thumb = await services.getServiceAdapterByName('thumbnailer')
-	//await nomad.createService(thumb)
-	//var ima = await services.getServiceAdapterByName('md-imaginary')
-	//await nomad.createService(ima)
+
+	if(process.env.NODE_ENV != 'production') {
+		// start thumbnailer and Poppler services
+		// var thumb = await services.getServiceAdapterByName('thumbnailer')
+		// await nomad.createService(thumb)
+		// var ima = await services.getServiceAdapterByName('md-imaginary')
+		// await nomad.createService(ima)		
+	}
+
 	await Graph.initDB()
 
 })();
 
 process.on( 'SIGINT', async function() {
 	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
-	// we may want to shutdown nomad jobs if we are developing locally
-	//await nomad.stopService('MD-thumbnailer')
-	//await nomad.stopService('MD-imaginary')
+	if(process.env.NODE_ENV != 'production') {
+		// // we may want to shutdown nomad jobs if we are developing locally
+		// await nomad.stopService('MD-thumbnailer')
+		// await nomad.stopService('MD-imaginary')
+	}
+
 	process.exit( );
   })
 
@@ -211,6 +218,17 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 
 	} 
 
+	if(ctx.headers[AUTH_HEADER]) {
+		console.log('add file node to visual graph')
+		var wsdata = {
+			command: 'add', 
+			type: file_type, 
+			node: filegraph
+		}
+		console.log(wsdata)
+		send2UI(ctx.headers[AUTH_HEADER], wsdata)
+	}
+
 	ctx.body = filegraph
 
 })
@@ -307,6 +325,18 @@ router.get('/api/services', async function (ctx) {
 	ctx.body = await services.getServices()
 })
 
+router.post('/api/services/reload', async function (ctx) {
+	// reload all service adapters
+	try {
+		await services.loadServiceAdapters()
+		ctx.body = {status: 'ok', service:services}
+	} catch(e) {
+		console.log(e)
+		ctx.status = 500
+		ctx.body = {error:e}
+	}
+})
+
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
@@ -377,8 +407,11 @@ router.get('/api/nomad/status', async function (ctx) {
 
 })
 
+
 // endpoint for consumer apps for starting their work horses
 router.post('/api/nomad/service/:name/create', async function (ctx) {
+	// reload all service adapters
+	//await services.loadServiceAdapters()
 	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
 	try {
 		var service = await nomad.createService(adapter)
@@ -459,7 +492,7 @@ router.post('/api/nomad/process/files', upload.fields([
 			}
 
 		} else if(infoFilepath && contentFilepath) {
-			var description = 'Detected text should be here'
+			var description = ''
 			// for text nodes we create a description from the content of the file
 			if (message.file.type == 'text') {
 				description = await media.getTextDescription(contentFilepath)
@@ -519,22 +552,6 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 })
 
 
-
-
-router.get('/api/queries', async function (ctx) {
-	ctx.body = []
-})
-
-
-router.get('/api/menus', async function (ctx) {
-	ctx.body = []
-})
-
-
-router.get('/api/groups', async function (ctx) {
-	ctx.body = []
-
-})
 
 router.post('/api/layouts', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
