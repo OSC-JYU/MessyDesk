@@ -1,7 +1,7 @@
-job "MD-tesseract" {
+job "MD-finbert" {
   type = "service"
 
-  group "MD-tesseract" {
+  group "MD-finbert" {
     count = 1
     network {
       port "node" {
@@ -10,15 +10,15 @@ job "MD-tesseract" {
     }
 
     service {
-      name     = "md-tesseract"
+      name     = "md-finbert-ner"
       port     = "node"
       provider = "nomad"
     }
 
-    task "md-tesseract" {
+    task "md-finbert-ner" {
       driver = "docker"
         config {
-            image = "osc.repo.kopla.jyu.fi/messydesk/md-tesseract:0.1"
+            image = "osc.repo.kopla.jyu.fi/messydesk/md-finbert:0.1"
             ports = ["node"]
         }
 
