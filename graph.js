@@ -65,7 +65,24 @@ graph.createProject = async function (data, me_rid) {
 
 }
 
+graph.createSet = async function (project_rid, data, me_rid) {
 
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
+	var response = await web.cypher(query)
+	console.log(response)
+	console.log(response.result[0])
+	if (response.result.length == 1) {
+		var set = await this.create('Set', data)
+		var set_rid = set['@rid']
+		await this.connect(project_rid, 'HAS_SET', set_rid)
+		return set
+	} else {
+		console.log('Project not found')
+		throw ('Set creation failed! Project not found!')
+	}
+	
+
+}
 
 graph.getProject_old = async function (rid, me_email) {
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
@@ -79,8 +96,9 @@ graph.getProject = async function (rid, me_email) {
 	//const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project)-[r]->(child) WHERE  child.set IS NULL AND id(project) = "#${rid}"  AND p.id = "${me_email}"  
 	//OPTIONAL MATCH (child)-[r2*]->(child2) RETURN  child, r2, child2`
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-		MATCH (project)-[rr]->(file:File)
-		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, r2, child2`
+		MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+		OPTIONAL MATCH (project)-[rrr]->(set:Set)
+		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, set, r2, child2`
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
@@ -194,7 +212,7 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 }
 
-graph.createProjectFileNode = async function (project_rid, ctx, file_type) {
+graph.createProjectFileNode = async function (project_rid, ctx, file_type, set_rid) {
 
 	if(!ctx.file.description) ctx.file.description = ctx.file.originalname
 	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
@@ -216,6 +234,10 @@ graph.createProjectFileNode = async function (project_rid, ctx, file_type) {
 	var file_path = path.join('data', 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
+	
+	if(set_rid) {
+		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid} )
+	}
 	return update_response.result[0]
 }
 

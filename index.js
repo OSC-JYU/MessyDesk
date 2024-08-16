@@ -190,7 +190,7 @@ router.get('/api/me', async function (ctx) {
 
 // upload
 
-router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
+router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async function (ctx)  {
 
 	var response = await Graph.getProject_old(ctx.request.params.rid, ctx.request.headers.mail)
 	if (response.result.length == 0) throw('Project not found')
@@ -202,7 +202,7 @@ router.post('/api/projects/:rid/upload', upload.single('file'), async function (
 		ctx.file.description = await media.getTextDescription(ctx.file.path)
 	}
 
-	var filegraph = await Graph.createProjectFileNode(project_rid, ctx, file_type)
+	var filegraph = await Graph.createProjectFileNode(project_rid, ctx, file_type, ctx.params.set)
 	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 
 
@@ -284,6 +284,16 @@ router.post('/api/projects', async function (ctx) {
 	console.log(n)
 	await media.createProjectDir(n)
 	ctx.body = n
+})
+
+
+router.post('/api/projects/:rid/sets', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers.mail)
+	console.log('creating set')
+	var set = await Graph.createSet(ctx.request.params.rid, ctx.request.body, me.rid)
+	console.log('Set created')
+	console.log(set)
+	ctx.body = set
 })
 
 router.get('/api/projects', async function (ctx) {
@@ -685,6 +695,7 @@ router.get('/api/documents/:rid', async function (ctx) {
 		ctx.body = {}
 	}
 })
+
 
 async function send2UI(userId, data) {
 	const ws = connections.get(userId)
