@@ -189,20 +189,7 @@ async function convert2CytoScapeJs(data, options) {
 		for(var v of data.result.vertices) {
 			if(!vertex_ids.includes(v.r)) {
 				var node = {}
-				if(v.p._type) { // schema
-					node = {
-						data:{
-							id:v.r,
-							name:options.labels[v.p._type],
-							type: v.p._type,
-							type_label: v.p._type,
-							info: 'dd',
-							active: true,
-							width: 100,
-							idc: v.r.replace(':','_')
-						}
-					}
-				} else {
+
 					node = {
 						data:{
 							id:v.r,
@@ -213,12 +200,12 @@ async function convert2CytoScapeJs(data, options) {
 							info: v.p.info,
 							width: 100,
 							description: v.p.description,
+							count: v.p.count,
 							idc: v.r.replace(':','_')
 						 }
 					}
 					if(!node.data.active) inactive_nodes.push(v.r)
-				}
-
+				
 				//node.data.info = v.p.info
 				if(v.r == options.current) node.data.current = 'yes'
 				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'

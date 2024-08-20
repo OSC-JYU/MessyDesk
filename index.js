@@ -223,7 +223,8 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		var wsdata = {
 			command: 'add', 
 			type: file_type, 
-			node: filegraph
+			node: filegraph,
+			set: ctx.params.set
 		}
 		console.log(wsdata)
 		send2UI(ctx.headers[AUTH_HEADER], wsdata)

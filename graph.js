@@ -93,12 +93,12 @@ graph.getProject_old = async function (rid, me_email) {
 
 graph.getProject = async function (rid, me_email) {
 	schema_relations = await this.getSchemaRelations()
-	//const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project)-[r]->(child) WHERE  child.set IS NULL AND id(project) = "#${rid}"  AND p.id = "${me_email}"  
-	//OPTIONAL MATCH (child)-[r2*]->(child2) RETURN  child, r2, child2`
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-		MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
-		OPTIONAL MATCH (project)-[rrr]->(set:Set)
-		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, set, r2, child2`
+		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+		OPTIONAL MATCH (project)-[r_set]->(set:Set)
+		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
+		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
+		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild`
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
@@ -168,7 +168,7 @@ graph.getProjectFiles = async function (rid, me_email) {
 }
 
 graph.getSetFiles = async function (set_rid, me_email) {
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[r*]->(file:File) WHERE p.id = "${me_email}" AND file.set = "#${set_rid}" RETURN file`
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_SET]->(s:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(s) = "#${set_rid}" RETURN file`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
 		file.thumb = file.path.replace('data', '/api/thumbnails').split('/').slice(0, -1).join('/');
@@ -235,12 +235,29 @@ graph.createProjectFileNode = async function (project_rid, ctx, file_type, set_r
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
 	
+	// link file to set
 	if(set_rid) {
-		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid} )
+		await this.connect(set_rid, 'HAS_ITEM', file_rid)
+		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid} ) // this attribute is used in project query
+		await this.updateFileCount(set_rid)
 	}
+	
 	return update_response.result[0]
 }
 
+graph.updateFileCount = async function (set_rid) {
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+
+	const count_query = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
+	RETURN count(file) as count`
+	var count_response = await web.sql(count_query)
+
+	var count = count_response.result[0].count
+
+	const query = `UPDATE Set SET count = ${count} WHERE @rid = "${set_rid}" `
+	var response = await web.sql(query)
+	console.log(response)
+}
 
 graph.createProcessFileNode = async function (process_rid, message, description) {
 
