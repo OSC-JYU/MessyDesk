@@ -78,39 +78,46 @@ services.getServicesForFile = async function(file) {
 	if(!file) return matches
 	
 	for(var service in this.service_list) {
-		// check service for supported types
-		if(this.service_list[service].supported_types.includes(file.type)) {
-			// we take only services that has consumer app listening
+		
+		// for Sets we compare only extensions
+		if(file['@type'] == 'Set') {
 			if(this.service_list[service].consumers.length > 0) {
-				//if(this.service_list[service].supported_formats.includes(file.extension)) {
-					var service_with_tasks = pickTasks(this.service_list[service], file)
+				var service_with_tasks = pickTasks(this.service_list[service], file.extensions)
+				matches.for_format.push(service_with_tasks)
+			}			
+		// for Files we compare first type and then extension
+		} else {
+			// check service for supported types
+			if(this.service_list[service].supported_types.includes(file.type)) {
+				// we take only services that has consumer app listening
+				if(this.service_list[service].consumers.length > 0) {
+					var service_with_tasks = pickTasks(this.service_list[service], [file.extension])
 					matches.for_format.push(service_with_tasks)
+				}
+			} 
+		}
 
-					//matches.for_format.push(this.service_list[service])
-				//} //else {
-				//	matches.for_type.push(this.service_list[service])
-			//	}
-			}
-		} 
 
 	}
 	return matches
 }
 
 
-pickTasks = function(service, file) {
+pickTasks = function(service, extensions) {
+	
 	const service_object = JSON.parse(JSON.stringify(service))
 	service_object.tasks = {}
 	for(var task in service.tasks) {
 		// if task has its own supported formats then compare to file extension
 		if(service.tasks[task].supported_formats) {
-			if(service.tasks[task].supported_formats.includes(file.extension)) {
+			if(service.tasks[task].supported_formats.some(value => extensions.includes(value)))
 				service_object.tasks[task] = service.tasks[task]
-			}
+			
 		// otherwise compare file extension to service's supported formats
-		} else if(service.supported_formats.includes(file.extension)) {
-
-			service_object.tasks[task] = service.tasks[task]
+		} else {
+			if(service.supported_formats.some(value => extensions.includes(value)))
+					service_object.tasks[task] = service.tasks[task]
+			
 		}
 	}	
 	return service_object

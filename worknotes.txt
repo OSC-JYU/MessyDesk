@@ -50,7 +50,16 @@ https://support.hashicorp.com/hc/en-us/articles/20752437319955-Configuring-nomad
 podman unix socket must be activated: /run/podman/podman.sock
 https://github.com/containers/podman/blob/main/docs/tutorials/socket_activation.md
 
+It's good idea to change logging level to "warn"
+ sudo vim /usr/lib/systemd/system/podman.service 
+
+[Service]
+Environment=LOGGING="--log-level=warn"
+
+Then start it:
+
 sudo systemctl start podman.socket
+
 
 
 /etc/nomad.d/nomad.hcl
@@ -226,3 +235,11 @@ print(tulos)
 SQL:
 MATCH {type: Project, as: project}-HAS_FILE->
 {type:File, as: file, where:(set IS NULL)} RETURN project,file
+
+
+MISC:
+https://language-data-space.ec.europa.eu/related-initiatives/alt-edic_en
+
+https://github.com/xamkfi/digitalia-aida-pdf-paddleocr
+
+https://huggingface.co/docs/transformers/model_doc/trocr

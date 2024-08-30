@@ -119,8 +119,7 @@ media.getTextDescription = async function (filePath) {
 	try {
 		const data = await fs.promises.readFile(filePath, 'utf8');
 		const first = data.substring(0, maxCharacters);
-		console.log(first);
-		return first.replace(/[^a-zA-Z.,<>\s\/äö-]/g, '') + '...'
+		return first.replace(/[^a-zA-Z.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
 	  } catch (error) {
 		console.error('Error reading file:', error);
 		return ''

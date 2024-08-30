@@ -126,7 +126,7 @@ async function addFileToProject(filename, type, project_rid) {
 		ctx.file.description = await media.getTextDescription('uploads/' + filename)
 	}
 
-    var filegraph = await Graph.createProjectFileNode(project_rid, ctx, type)
+    var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, type)
     // move file to data dir
     await media.uploadFile('uploads/' + filename, filegraph)
     console.log(filegraph)

@@ -94,11 +94,37 @@ graph.getProject_old = async function (rid, me_email) {
 graph.getProject = async function (rid, me_email) {
 	schema_relations = await this.getSchemaRelations()
 	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
+		//original files
+		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+		// original files' children
+		OPTIONAL MATCH (file)-[r_file_child*]->(file_child) WHERE file_child.set is NULL OR file_child.expand = true 
+		// sets
+		OPTIONAL MATCH (project)-[r_set]->(set:Set)
+		OPTIONAL MATCH (set)-[r_set_child*]->(set_child) WHERE set_child.set is NULL OR set_child.expand = true 
+
+		return file, r_file_child, file_child, set, r_set_child, set_child`
+	const options = {
+		serializer: 'graph',
+		format: 'cytoscape',
+		schemas: schema_relations
+	}
+	var result = await web.cypher(query, options)
+	console.log(result)
+	return result
+}
+
+
+graph.getProject_backup = async function (rid, me_email) {
+	schema_relations = await this.getSchemaRelations()
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
 		OPTIONAL MATCH (project)-[r_set]->(set:Set)
 		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
+		OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
+		OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
 		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
-		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild`
+		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL OR child2.expand = true 
+		RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
@@ -161,14 +187,16 @@ async function getProjectThumbnails(me_email, data) {
 }
 
 graph.getProjectFiles = async function (rid, me_email) {
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN file`
+	if (!rid.match(/^#/)) rid = '#' + rid
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
 	console.log(query)
 	var result = await web.cypher(query)
 	return result
 }
 
 graph.getSetFiles = async function (set_rid, me_email) {
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_SET]->(s:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(s) = "#${set_rid}" RETURN file`
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
 		file.thumb = file.path.replace('data', '/api/thumbnails').split('/').slice(0, -1).join('/');
@@ -176,29 +204,84 @@ graph.getSetFiles = async function (set_rid, me_email) {
 	return response.result
 }
 
+// create Process that is linked to File
 graph.createProcessNode = async function (topic, params, filegraph, me_email) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
 	var file_rid = filegraph['@rid']
-	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
-
+	
 	// create process node
 	var processNode = {}
+	var process_rid = null
 	const process_attrs = { label: topic }
 	if(params.info) {
 		process_attrs.info = params.info
 	}
+
 	processNode = await this.create('Process', process_attrs)
-	var process_rid = processNode['@rid']
-	var process_path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	process_rid = processNode['@rid']
+	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
+	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
 	// update process path to record
-	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${processNode.path}" RETURN p`
 	var update_response = await web.cypher(update)
+	
 	// finally, connect process node to file node
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 
-	return update_response.result[0]
+	return processNode
+
+}
+
+graph.createOutputSetNode = async function (label, processNode) {
+
+	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
+	//params.topic = topic
+	const process_rid = processNode['@rid']
+	
+	// create process node
+	const set_attrs = { label: label }
+
+
+	const setNode = await this.create('Set', set_attrs)
+	const set_rid = setNode['@rid']
+
+	
+	// finally, connect process node to file node
+	await this.connect(process_rid, 'PRODUCED', set_rid)
+
+	return setNode
+
+}
+
+// Create SetProcess that is linked to Set
+graph.createSetProcessNode = async function (topic, params, filegraph, me_email) {
+
+	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
+	//params.topic = topic
+	var file_rid = filegraph['@rid']
+	
+	// create process node
+	var processNode = {}
+	var process_rid = null
+	const process_attrs = { label: topic }
+	if(params.info) {
+		process_attrs.info = params.info
+	}
+
+	processNode = await this.create('SetProcess', process_attrs)
+	process_rid = processNode['@rid']
+	
+
+	// finally, connect process node to file node
+	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+	// create process output Set
+	var setNode = await this.create('Set', {})
+	// and link it to SetProcess
+	await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+
+	return process_rid
 
 }
 
@@ -212,7 +295,7 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 }
 
-graph.createProjectFileNode = async function (project_rid, ctx, file_type, set_rid) {
+graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_rid) {
 
 	if(!ctx.file.description) ctx.file.description = ctx.file.originalname
 	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
@@ -256,7 +339,7 @@ graph.updateFileCount = async function (set_rid) {
 
 	const query = `UPDATE Set SET count = ${count} WHERE @rid = "${set_rid}" `
 	var response = await web.sql(query)
-	console.log(response)
+	return count
 }
 
 graph.createProcessFileNode = async function (process_rid, message, description) {
@@ -275,10 +358,12 @@ graph.createProcessFileNode = async function (process_rid, message, description)
 				extension: "${extension}",
 				label: "${label}",
 				description: "${description}",
+				expand: false,
+				set: null,
 				${setquery}
 				_active: true
 			}
-		) <- [r:PRODUCED] - (p) 
+		) 
 		RETURN file, p.path as process_path`
 	var response = await web.cypher(query)
 	console.log(response)
@@ -288,35 +373,44 @@ graph.createProcessFileNode = async function (process_rid, message, description)
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
 
+	// if output of process is a set, then connect file to set also and add attribute "set"
+	if(message.output_set) {
+		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
+		await this.setNodeAttribute(file_rid, {key:"set", value: message.output_set} ) // this attribute is used in project query
+	// otherwise connect file to process
+	} else {
+		await this.connect(process_rid, 'PRODUCED', file_rid)
+	}
+
 	return update_response.result[0]
 }
 
-graph.createSetFileNode = async function (set_rid, file_type, extension, label, description, process_path) {
+// graph.createSetFileNode = async function (set_rid, file_type, extension, label, description, process_path) {
 
-	if(!description) description = label
+// 	if(!description) description = label
 	
-	const query = `MATCH (p:Set) WHERE id(p) = "${set_rid}" 
-		CREATE (file:File 
-			{
-				type: "${file_type}",
-				extension: "${extension}",
-				label: "${label}",
-				description: "${description}",
-				_active: true
-			}
-		) <- [r:PRODUCED] - (p) 
-		RETURN file`
-		console.log(query)
-	var response = await web.cypher(query)
-	console.log(response)
+// 	const query = `MATCH (p:Set) WHERE id(p) = "${set_rid}" 
+// 		CREATE (file:File 
+// 			{
+// 				type: "${file_type}",
+// 				extension: "${extension}",
+// 				label: "${label}",
+// 				description: "${description}",
+// 				_active: true
+// 			}
+// 		) <- [r:PRODUCED] - (p) 
+// 		RETURN file`
+// 		console.log(query)
+// 	var response = await web.cypher(query)
+// 	console.log(response)
 
-	var file_rid = response.result[0].file['@rid']
-	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
-	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
-	var update_response = await web.cypher(update)
+// 	var file_rid = response.result[0].file['@rid']
+// 	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+// 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
+// 	var update_response = await web.cypher(update)
 
-	return update_response.result[0]
-}
+// 	return update_response.result[0]
+// }
 
 graph.getUserFileMetadata = async function (file_rid, me_email) {
 	file_rid = file_rid.replace('#','')
@@ -329,11 +423,33 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 		{type:Project, as:project}--> 
 		{type:File, as:file, where:(@rid = "#${file_rid}"), while: ($depth < 20)} return file`
 	var file_response = await web.sql(query)
+
 	if(file_response.result[0] && file_response.result[0].file)
 		return file_response.result[0].file
-	else 
+
+	else {
+		// check if file is a Set
+		var query_set = `MATCH {
+			type: Person, 
+			as:p, 
+			where:(id = "${me_email}")}
+		-IS_OWNER->
+			{type:Project, as:project}--> 
+			{type:Set, as:file, where:(@rid = "#${file_rid}"), while: ($depth < 20)} return file`
+		var set_response = await web.sql(query_set)
+		if(set_response.result[0] && set_response.result[0].file) {
+			// we need to get file types of the set content
+			const extensions = await getSetFileTypes(file_rid)
+			console.log('extensions', extensions)
+			set_response.result[0].file.extensions = extensions
+			return set_response.result[0].file
+
+		}
+	}
 		return null
 }
+
+
 
 
 graph.query = async function (body) {
@@ -871,7 +987,18 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 	} else {
 		return schemas
 	}
+
+
 }
 
+async function getSetFileTypes(set_rid) {
+	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group`
+	var response = await web.sql(query)	
+	var extensions = []
+	for(var result of response.result) {
+		extensions.push(result.extension_group)
+	}
+	return extensions
+}
 
 module.exports = graph

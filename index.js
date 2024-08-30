@@ -202,7 +202,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		ctx.file.description = await media.getTextDescription(ctx.file.path)
 	}
 
-	var filegraph = await Graph.createProjectFileNode(project_rid, ctx, file_type, ctx.params.set)
+	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set)
 	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 
 
@@ -393,12 +393,13 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		console.log(taskObj)
 
 		// if output of task is "Set", then create Set node
-		// if(taskObj.output_node && taskObj.output_node == "Set") {
-		// 	var setNode = await Graph.createSetNode(processNode.path, taskObj.output_node)
-		// 	ctx.request.body.process = setNode
-		// 	wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:setNode}
-		// 	send2UI(ctx.request.headers.mail, wsdata)
-		// }
+		if(taskObj.output_set) {
+			var setNode = await Graph.createOutputSetNode(taskObj.output_set, processNode)
+			wsdata = {command: 'add', type: 'set', target: processNode['@rid'], node:setNode}
+			ctx.request.body.output_set = setNode['@rid']
+			send2UI(ctx.request.headers.mail, wsdata)
+		}
+
 		nats.publish(topic, JSON.stringify(ctx.request.body))
 		ctx.body = ctx.request.params.file_rid
 
@@ -408,7 +409,44 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 })
 
 
+router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 
+	const topic = ctx.request.params.topic 
+	const set_rid = ctx.request.params.set_rid
+	try {
+		const service = services.getServiceAdapterByName(topic)
+		console.log(service)
+		console.log(ctx.request.body.task)
+		var task_name = service.tasks[ctx.request.body.task].name
+		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
+		console.log(set_metadata)
+
+		var processNode = await Graph.createSetProcessNode(task_name, ctx.request.body, set_metadata, ctx.request.headers.mail)
+
+		// await media.createProcessDir(processNode.path)
+		// if(service.tasks[ctx.request.body.task].system_params)
+		// 	ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		
+		// await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
+		// // add node to UI
+		// var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
+		// send2UI(ctx.request.headers.mail, wsdata)
+
+		// ctx.request.body.process = processNode
+		// ctx.request.body.file = file_metadata
+		// ctx.request.body.target = ctx.request.params.file_rid
+		// ctx.request.body.userId = ctx.headers[AUTH_HEADER]
+
+		// const taskObj = service.tasks[ctx.request.body.task]
+		// console.log(taskObj)
+
+		//nats.publish(topic, JSON.stringify(ctx.request.body))
+		ctx.body = ctx.request.params.set_rid
+
+	} catch(e) {
+		console.log('Queue failed!', e)
+	}
+})
 
 // NOMAD
 // nomad endpoints has different authorisation (auth header)
@@ -530,13 +568,26 @@ router.post('/api/nomad/process/files', upload.fields([
 				nats.publish(th.id, JSON.stringify(th))
 			} 
 
+			// update visual graph
 			if(message.userId) {
-				console.log('add file node to visual graph')
-				var wsdata = {
-					command: 'add', 
-					type: message.file.type, 
-					target: process_rid, 
-					node:fileNode
+				// update set's file count if file is part of set
+				if(message.output_set) {
+					var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
+					var wsdata = {
+						command: 'update', 
+						type: 'set',
+						target: message.output_set,
+						count: count
+					}
+				// otherwise add node to visual graph
+				} else {
+					var wsdata = {
+						command: 'add', 
+						type: message.file.type, 
+						target: process_rid, 
+						node:fileNode
+				}
+	
 				}
 				console.log(wsdata)
 				send2UI(message.userId, wsdata)
