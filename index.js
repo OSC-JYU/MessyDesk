@@ -153,8 +153,6 @@ router.all('/ws', async (ctx, next) => {
 	  ws.on('message', function message(data) {
 		//console.log('received: %s', data);
 		positions.updateProjectNodePosition(JSON.parse(data))
-		//ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
-		
 	  });
 	}
   })
@@ -216,6 +214,18 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		data.id = 'thumbnailer'
 		nats.publish('thumbnailer', JSON.stringify(data))
 
+		// // file metadata
+		var info = {
+			id:'md-imaginary', 
+			task: 'info', 
+			file: filegraph, 
+			userId: ctx.headers[AUTH_HEADER], 
+			target: filegraph['@rid'],
+			params:{task:'info'}
+		}
+		console.log(info)
+		nats.publish(info.id, JSON.stringify(info))
+		console.log('published info task', info)
 	} 
 
 	if(ctx.headers[AUTH_HEADER]) {
@@ -304,7 +314,7 @@ router.get('/api/projects', async function (ctx) {
 
 
 router.get('/api/projects/:rid', async function (ctx) {
-	var n = await Graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await Graph.getProject_backup(ctx.request.params.rid, ctx.request.headers.mail)
 	ctx.body = n
 })
 
@@ -352,7 +362,7 @@ router.post('/api/services/reload', async function (ctx) {
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
 	if(file) {
-		var service_list = await services.getServicesForFile(file)
+		var service_list = await services.getServicesForFile(file, ctx.request.query.filter)
 		ctx.body = service_list
 	} else {
 		ctx.body = []
@@ -362,7 +372,7 @@ router.get('/api/services/files/:rid', async function (ctx) {
 
 // add to queue
 
-router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
+router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
 	const file_rid = ctx.request.params.file_rid
@@ -400,7 +410,36 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 			send2UI(ctx.request.headers.mail, wsdata)
 		}
 
-		nats.publish(topic, JSON.stringify(ctx.request.body))
+		// ROI request must be handled separately
+		if(ctx.request.params.roi) {
+			// we can work with ROIs only if we have width and height of file
+			if(file_metadata.metadata) var metadata = file_metadata.metadata
+			if(metadata.width && metadata.height) {
+				var rois = await Graph.getROIs(ctx.request.params.file_rid)
+				for(var roi of rois) {
+					const areaWidth = Math.round(roi.rel_coordinates.width/100*metadata.width)
+					const areaheight = Math.round(roi.rel_coordinates.height/100*metadata.height)
+					const top = Math.round(roi.rel_coordinates.top/100*metadata.height)
+					const left = Math.round(roi.rel_coordinates.left/100*metadata.width)
+					console.log(areaWidth, areaheight, top, left)
+					//ctx.request.body.params.top = Math.round(roi.rel_coordinates.top/100*metadata.height)
+					//ctx.request.body.params.left = Math.round(roi.rel_coordinates.left/100*metadata.width) + areaWidth / 2
+					//377 245 146 390
+
+					ctx.request.body.params.left = left 
+					ctx.request.body.params.top = top 
+					ctx.request.body.params.areawidth = areaWidth 
+					ctx.request.body.params.areaheight = areaheight 
+					//ctx.request.body.params.areawidth = String(areaWidth)
+					//ctx.request.body.params.areaheight = String(Math.round(roi.rel_coordinates.height/100*metadata.height))
+					nats.publish(topic, JSON.stringify(ctx.request.body))
+				}	
+			}
+
+		} else {
+			nats.publish(topic, JSON.stringify(ctx.request.body))
+		}
+
 		ctx.body = ctx.request.params.file_rid
 
 	} catch(e) {
@@ -541,57 +580,74 @@ router.post('/api/nomad/process/files', upload.fields([
 			}
 
 		} else if(infoFilepath && contentFilepath) {
-			var description = ''
-			// for text nodes we create a description from the content of the file
-			if (message.file.type == 'text') {
-				description = await media.getTextDescription(contentFilepath)
-			}
-			const process_rid = message.process['@rid']
-	
-			const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
 
-			
-
-			//fileNode.path = path.join(DATA_DIR, fileNode.path)
-			await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
-
-			// for images and pdf files we create normal thumbnails
-			if(message.file.type == 'image' || message.file.type == 'pdf') {
-				var th = {
-					id:'thumbnailer', 
-					task: 'thumbnail', 
-					file: fileNode, 
-					userId: message.userId, 
-					target: fileNode['@rid']
+			// if this is "info" task then we save metadata to file node
+			if(message.task == 'info') {
+				console.log('INFO TASK')
+				console.log(contentFilepath)
+				try {
+					var info = await fse.readFile(contentFilepath)
+					var info_json = JSON.parse(info)
+					await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
+				} catch(e) {
+					console.log('file metadata failed!', e.message)
 				}
-				th.params = {width: 800, type: 'jpeg'}
-				nats.publish(th.id, JSON.stringify(th))
-			} 
 
-			// update visual graph
-			if(message.userId) {
-				// update set's file count if file is part of set
-				if(message.output_set) {
-					var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
-					var wsdata = {
-						command: 'update', 
-						type: 'set',
-						target: message.output_set,
-						count: count
+			// else save content to processFileNode
+			} else {
+				var description = ''
+				// for text nodes we create a description from the content of the file
+				if (message.file.type == 'text') {
+					description = await media.getTextDescription(contentFilepath)
+				}
+				const process_rid = message.process['@rid']
+		
+				const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
+	
+				
+	
+				//fileNode.path = path.join(DATA_DIR, fileNode.path)
+				await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
+	
+				// for images and pdf files we create normal thumbnails
+				if(message.file.type == 'image' || message.file.type == 'pdf') {
+					var th = {
+						id:'thumbnailer', 
+						task: 'thumbnail', 
+						file: fileNode, 
+						userId: message.userId, 
+						target: fileNode['@rid']
 					}
-				// otherwise add node to visual graph
-				} else {
-					var wsdata = {
-						command: 'add', 
-						type: message.file.type, 
-						target: process_rid, 
-						node:fileNode
-				}
+					th.params = {width: 800, type: 'jpeg'}
+					nats.publish(th.id, JSON.stringify(th))
+				} 
 	
+				// update visual graph
+				if(message.userId) {
+					// update set's file count if file is part of set
+					if(message.output_set) {
+						var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
+						var wsdata = {
+							command: 'update', 
+							type: 'set',
+							target: message.output_set,
+							count: count
+						}
+					// otherwise add node to visual graph
+					} else {
+						var wsdata = {
+							command: 'add', 
+							type: message.file.type, 
+							target: process_rid, 
+							node:fileNode
+					}
+		
+					}
+					console.log(wsdata)
+					send2UI(message.userId, wsdata)
 				}
-				console.log(wsdata)
-				send2UI(message.userId, wsdata)
 			}
+
 
 		// something went wrong in file processing	
 		} else {
@@ -700,6 +756,11 @@ router.delete('/api/graph/vertices/:rid', async function (ctx) {
 	ctx.body = n
 })
 
+router.post('/api/graph/vertices/:rid/rois', async function (ctx) {
+	var n = await Graph.createROIs('#' + ctx.request.params.rid, ctx.request.body)
+	ctx.body = n
+})
+
 router.post('/api/graph/edges', async function (ctx) {
 	var n = await Graph.connect(
 		ctx.request.body.from,
@@ -740,7 +801,9 @@ router.get('/api/documents', async function (ctx) {
 
 router.get('/api/documents/:rid', async function (ctx) {
 	var n = await Graph.getNodeAttributes(ctx.request.params.rid)
+	var rois = await Graph.getROIs(ctx.request.params.rid)
 	if(n.result && n.result.length) {
+		n.result[0].rois = rois
 		ctx.body = n.result[0]
 	} else {
 		ctx.status = 404; 

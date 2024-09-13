@@ -92,23 +92,19 @@ graph.getProject_old = async function (rid, me_email) {
 
 
 graph.getProject = async function (rid, me_email) {
+	if (!rid.match(/^#/)) rid = '#' + rid
 	schema_relations = await this.getSchemaRelations()
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-		//original files
-		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
-		// original files' children
-		OPTIONAL MATCH (file)-[r_file_child*]->(file_child) WHERE file_child.set is NULL OR file_child.expand = true 
-		// sets
-		OPTIONAL MATCH (project)-[r_set]->(set:Set)
-		OPTIONAL MATCH (set)-[r_set_child*]->(set_child) WHERE set_child.set is NULL OR set_child.expand = true 
-
-		return file, r_file_child, file_child, set, r_set_child, set_child`
+	const query = `MATCH {as: person, type: Person, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
+				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
+				RETURN file`
+console.log(query)
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
 		schemas: schema_relations
 	}
-	var result = await web.cypher(query, options)
+	
+	var result = await web.sql(query, options)
 	console.log(result)
 	return result
 }
@@ -123,7 +119,7 @@ graph.getProject_backup = async function (rid, me_email) {
 		OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
 		OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
 		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
-		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE child2.set is NULL OR child2.expand = true 
+		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
 		RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 	const options = {
 		serializer: 'graph',
@@ -326,6 +322,39 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 	}
 	
 	return update_response.result[0]
+}
+
+graph.createROIs = async function(rid, data) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+
+	for(var roi of data) {
+		roi.rel_coordinates = await this.getSelectionAsPercentage(rid, roi.coordinates)
+		// check if roi already exists
+		const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
+		var response = await web.cypher(query)
+		if(response.result.length > 0) {
+			// update
+			const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
+			console.log(update)
+			var update_response = await web.sql(update)
+		} else {
+			const query_c = `CREATE Vertex ROI CONTENT ${JSON.stringify(roi)}`
+			var response_c = await web.sql(query_c)
+			await this.connect(rid, 'HAS_ROI', response_c.result[0]['@rid'])
+		}
+	}
+	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
+	var response_count = await web.sql(query_count)
+	console.log(response_count)
+	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count} )
+
+}
+
+graph.getROIs = async function(rid) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+	const query = `MATCH (file:File)-[r:HAS_ROI]->(roi:ROI) WHERE id(file) = "${rid}" RETURN roi`
+	var response = await web.cypher(query)
+	return response.result
 }
 
 graph.updateFileCount = async function (set_rid) {
@@ -610,12 +639,18 @@ graph.setNodeAttribute = async function (rid, data) {
 	if (Array.isArray(data.value) && data.value.length > 0) {
 		data.value = data.value.map(i => `'${i}'`).join(',')
 		query = `SET node.${data.key} = [${data.value}]`
-	} else if (typeof data.value == 'boolean') {
+		return web.cypher(query)
+	} else if (typeof data.value == 'boolean' || typeof data.value == 'number') {
 		query = query + `SET node.${data.key} = ${data.value}`
+		return web.cypher(query)
 	} else if (typeof data.value == 'string') {
 		query = query + `SET node.${data.key} = '${data.value.replace(/'/g, "\\'")}'`
+		return web.cypher(query)
+	} else if (typeof data.value == 'object') {
+		query = `UPDATE ${rid} SET ${data.key} = ${JSON.stringify(data.value)}`
+		return web.sql(query)
 	}
-	return web.cypher(query)
+	throw('Illegal data', data)
 }
 
 
@@ -896,7 +931,34 @@ graph.getStats = async function () {
 	const result = await web.cypher(query)
 	return result
 }
+graph.getSelectionAsPercentage = async function(rid, selection) {
+	var response = await web.sql(`SELECT metadata FROM File WHERE @rid = ${rid}`)
+	console.log(response.result)
 
+	if(response.result.length == 1 && response.result[0].metadata) {
+		const imageHeight = response.result[0].metadata.height 
+		const imageWidth = response.result[0].metadata.width 
+		const { x, y, width, height } = selection;
+		console.log(selection)
+
+		// Adjust top calculation as y starts from the bottom
+		const topPercent = (y / imageHeight) * 100;
+		const leftPercent = (x / imageWidth) * 100;
+		const widthPercent = (width / imageWidth) * 100;
+		const heightPercent = (height / imageHeight) * 100;
+	
+		// Return the result as an object with two decimal places
+		return {
+			top: parseFloat(topPercent.toFixed(2)),
+			left: parseFloat(leftPercent.toFixed(2)),
+			width: parseFloat(widthPercent.toFixed(2)),
+			height: parseFloat(heightPercent.toFixed(2))
+		};
+	} else {
+		throw('File or metadata not found', rid)
+	}
+
+}
 
 graph.getDataWithSchema = async function (rid, by_groups) {
 	by_groups = 1
@@ -1000,5 +1062,7 @@ async function getSetFileTypes(set_rid) {
 	}
 	return extensions
 }
+
+
 
 module.exports = graph

@@ -32,6 +32,22 @@
     },
 
     "tasks": {
+        "extract": {
+            "filter": "ROI",
+            "name": "Extract",
+            "output": "image",
+            "description": "Extract images based on Regions of Interest (ROI).",
+            "info": "I Extracted images based on your selections.",
+            "roi_params": { 
+                "top": 0,
+                "left": 0,
+                "areawidth": 0,
+                "areaheight": 0
+            },
+
+            "params": {},
+            "params_help": {}
+        },
         "resize": {
             "name": "Resize by width",
             "output": "image",
@@ -56,7 +72,7 @@
             "description": "Flip image.",
             "params": {},
             "params_help": {},
-            "user_info": "I flipped image"
+            "info": "I flipped image"
         },
 
         "smartcrop": {
@@ -76,22 +92,21 @@
             "params_help": {
                 "rotate": {
                     "name": "rotate angle",
-                    "help": "How much image is rotated."
+                    "help": "How much image is rotated.",
+                    "default": 90
                 }
             },
             "info": "I rotated image {{rotate}} degrees"
            
         },
 
-        "rotate_osd": {
+        "OSD_rotate": {
+            "filter": "OSD",
             "name": "Auto-rotate (OSD)",
             "output": "image",
             "description": "Rotate image by angle given by orientation detection.",
             "supported_types": ["text"],
             "supported_formats": ["osd"],
-            "params": {
-                "rotate": 90
-            },
             "params": {},
             "params_help": {
             }
@@ -107,7 +122,8 @@
             "params_help": {
                 "sigma": {
                     "name": "sigma",
-                    "help": "How much image is blurred."
+                    "help": "How much image is blurred. Note that sigma is absolute value, not a percentage. This means that same sigma value blurs small image more than large image.",
+                    "default": 2
                 }
             },
             "info": "I blurred image by {{sigma}}. "

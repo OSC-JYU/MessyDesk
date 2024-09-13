@@ -101,6 +101,8 @@ web.createVertexType = async function(type) {
 }
 
 web.sql = async function(query, options) {
+	if(!options) var options = {}
+	
 	var config = {
 		auth: {
 			username: username,
@@ -111,8 +113,26 @@ web.sql = async function(query, options) {
 		command:query,
 		language:'sql'
 	}
-	var response = await axios.post(URL, query_data, config)
-	return response.data
+
+	if(options.serializer) query_data.serializer = options.serializer
+
+	try {
+		var response = await axios.post(URL, query_data, config)
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
+		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
+			options.labels = await getSchemaLabels(config)
+			return convert2CytoScapeJs(response.data, options)
+		} else {
+			return response.data
+		}
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: query, error: e})
+	}
+	//var response = await axios.post(URL, query_data, config)
+	//return response.data
 }
 
 web.cypher = async function(query, options) {
@@ -136,8 +156,9 @@ web.cypher = async function(query, options) {
 
 	try {
 		var response = await axios.post(URL, query_data, config)
-		if(query && query.toLowerCase().includes('create')) return response.data
-		else if(!options.serializer) return response.data
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
 		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
 			options.labels = await getSchemaLabels(config)
 			return convert2CytoScapeJs(response.data, options)
@@ -200,6 +221,7 @@ async function convert2CytoScapeJs(data, options) {
 							info: v.p.info,
 							width: 100,
 							description: v.p.description,
+							roi_count: v.p.roi_count,
 							count: v.p.count,
 							idc: v.r.replace(':','_')
 						 }

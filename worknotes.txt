@@ -237,9 +237,40 @@ MATCH {type: Project, as: project}-HAS_FILE->
 {type:File, as: file, where:(set IS NULL)} RETURN project,file
 
 
+MATCH {as:project, type:Project, where: (@rid=#217:15)}-->{as:file, 
+where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process')
+       OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
+       
+return project, file
+
+
 MISC:
 https://language-data-space.ec.europa.eu/related-initiatives/alt-edic_en
 
 https://github.com/xamkfi/digitalia-aida-pdf-paddleocr
 
 https://huggingface.co/docs/transformers/model_doc/trocr
+
+
+
+
+
+asciiflow.com
+
+
+                                           +--------> EXPANDED FILE
+                                           |                       
+                                           |                       
+              +-------->PROCESS---------->SET                      
+              |                                                    
+    +---> FILE|                                                    
+    |         |                                                    
+    |         +------->PROCESS----------> FILE-----> PROCESS       
+    |                                                              
+    |                                                              
+    |                                                              
+PROJECT                                                            
+    |                                                              
+    |                                                              
+    |                                                              
+    +--> SET----------> PROCESS -------> SET                       
