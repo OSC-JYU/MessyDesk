@@ -65,11 +65,11 @@
         "orientation_detection": {
             "name": "Detect page orientation",
             "output": "text",
-            "description": "Detect orientation of text image",
+            "description": "Detect orientation of image based on text",
             "params": {
                 "psm": 0
             },
-            "info": "I tried to detect orientation of image."
+            "info": "I tried to detect orientation of image based on text."
         }
     }
 }

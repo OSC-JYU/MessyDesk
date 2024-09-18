@@ -244,6 +244,37 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 
 })
 
+// get source file of a file
+router.get('/api/files/:file_rid/source', async function (ctx) {
+	try {
+		var source = await Graph.getFileSource(ctx.request.params.file_rid)
+		console.log(source)
+		if(!source) {
+			ctx.status = 404
+			ctx.body = {}
+		}
+
+		var file_metadata = await Graph.getUserFileMetadata(source['@rid'], ctx.request.headers.mail)
+		const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path))
+		if(file_metadata.type =='pdf') {
+			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
+			ctx.set('Content-Type', 'application/pdf');
+		} else if(file_metadata.type =='image') {
+			ctx.set('Content-Type', 'image/png');
+		} else if(file_metadata.type =='text') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else if(file_metadata.type =='data') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else {
+			ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+		}
+	   ctx.body = src
+	} catch(e) {
+		ctx.status = 403
+		ctx.body = {}
+	}
+
+})
 
 router.get('/api/files/:file_rid', async function (ctx) {
 	try {
@@ -383,6 +414,8 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		var task_name = service.tasks[ctx.request.body.task].name
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
+
+
 		var processNode = await Graph.createProcessNode(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
 
 		await media.createProcessDir(processNode.path)
@@ -398,6 +431,15 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		ctx.request.body.file = file_metadata
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
+
+		// do we need info about "parent" file?
+		if(service.tasks[ctx.request.body.task].source) {
+			var source = await Graph.getFileSource(ctx.request.params.file_rid)
+			if(source) {
+				var source_metadata = await Graph.getUserFileMetadata(source['@rid'], ctx.request.headers.mail)
+				ctx.request.body.source = source_metadata
+			}
+		}
 
 		const taskObj = service.tasks[ctx.request.body.task]
 		console.log(taskObj)

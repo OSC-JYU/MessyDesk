@@ -1,14 +1,21 @@
 
 TODO
 
-- implement sets
-- crunchers creator as pop up (does not mess graph)
+- image dimensions for all images (queue call)
+- ROI extraction with SHARP + set output option
+
+- Cruncher that uses that JSON as input (auto-rotate)
+- Set crunhers implementation
+- change type of json outputs to "json" and extension specifies more specfic type like ".osd.json" or ".ner.json"
 
 - virtual crunchers (tesseract orientation detection + imaginary rotate = fix orientation)
 
  
 DONE
+- orientation detection must output JSON
 - text file description from text content OK
+- implement sets
+- crunchers creator as pop up (does not mess graph)
 
 
 

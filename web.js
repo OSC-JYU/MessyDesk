@@ -199,6 +199,7 @@ function setParent(vertices, child, parent) {
 
 
 
+
 async function convert2CytoScapeJs(data, options) {
 	//console.log(data.result)
 	if(!options) var options = {labels:{}}

@@ -7,8 +7,8 @@
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
     "source_url": "https://github.com/h2non/node-imaginary",
     
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg","jpeg","webp"],
+    "supported_types": ["image","osd.json"],
+    "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif"],
 
 
     "params": {
@@ -101,15 +101,16 @@
         },
 
         "OSD_rotate": {
-            "filter": "OSD",
             "name": "Auto-rotate (OSD)",
             "output": "image",
+            "source":"source_file",
             "description": "Rotate image by angle given by orientation detection.",
-            "supported_types": ["text"],
-            "supported_formats": ["osd"],
+            "supported_types": ["osd.json"],
+            "supported_formats": ["json"],
             "params": {},
             "params_help": {
-            }
+            },
+            "info": "I rotated image based on orientation detection."
         },
 
         "blur": {

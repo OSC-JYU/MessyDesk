@@ -478,7 +478,14 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 		return null
 }
 
+graph.getFileSource = async function (file_rid) {
+	file_rid = file_rid.replace('#','')
+	const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${file_rid} )} return source`
+	var response = await web.sql(sql)
+	if(response.result[0] && response.result[0].source) return response.result[0].source
 
+	return null
+}
 
 
 graph.query = async function (body) {

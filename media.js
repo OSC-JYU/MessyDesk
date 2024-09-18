@@ -126,6 +126,7 @@ media.getTextDescription = async function (filePath) {
 	  }
 }
 
+
 async function checkFileExists(filePath) {
 	try {
 		console.log(filePath)
