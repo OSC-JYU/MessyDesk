@@ -214,18 +214,21 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		data.id = 'thumbnailer'
 		nats.publish('thumbnailer', JSON.stringify(data))
 
-		// // file metadata
-		var info = {
-			id:'md-imaginary', 
-			task: 'info', 
-			file: filegraph, 
-			userId: ctx.headers[AUTH_HEADER], 
-			target: filegraph['@rid'],
-			params:{task:'info'}
+		// image resolution info
+		if(file_type == 'image') {
+			var info = {
+				id:'md-imaginary', 
+				task: 'info', 
+				file: filegraph, 
+				userId: ctx.headers[AUTH_HEADER], 
+				target: filegraph['@rid'],
+				params:{task:'info'}
+			}
+			console.log(info)
+			nats.publish(info.id, JSON.stringify(info))
+			console.log('published info task', info)
 		}
-		console.log(info)
-		nats.publish(info.id, JSON.stringify(info))
-		console.log('published info task', info)
+
 	} 
 
 	if(ctx.headers[AUTH_HEADER]) {
@@ -639,7 +642,7 @@ router.post('/api/nomad/process/files', upload.fields([
 			} else {
 				var description = ''
 				// for text nodes we create a description from the content of the file
-				if (message.file.type == 'text') {
+				if (message.file.type == 'text' || message.file.type == 'osd.json') {
 					description = await media.getTextDescription(contentFilepath)
 				}
 				const process_rid = message.process['@rid']
@@ -662,9 +665,24 @@ router.post('/api/nomad/process/files', upload.fields([
 					}
 					th.params = {width: 800, type: 'jpeg'}
 					nats.publish(th.id, JSON.stringify(th))
+
+					// image resolution info
+					if(message.file.type == 'image') {
+						var info = {
+							id:'md-imaginary', 
+							task: 'info', 
+							file: fileNode, 
+							userId: message.userId, 
+							target: fileNode['@rid'],
+							params:{task:'info'}
+						}
+						console.log(info)
+						nats.publish(info.id, JSON.stringify(info))
+						console.log('published info task', info)
+					}
 				} 
 	
-				// update visual graph
+				// update set file count or add file to visual graph
 				if(message.userId) {
 					// update set's file count if file is part of set
 					if(message.output_set) {
@@ -707,6 +725,15 @@ router.post('/api/nomad/process/files', upload.fields([
 
 router.post('/api/nomad/process/files/error', async function (ctx) {
 	console.log(ctx.request.body)
+	if(ctx.request.body && ctx.request.body.error) {
+		var error = ctx.request.body.error
+		console.log('ERROR', error)
+	}
+	if(error.status == 'created_duplicate_source') {
+		
+		console.log('DUPLICATE')
+
+	}
 	ctx.body = []
 
 })

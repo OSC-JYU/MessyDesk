@@ -1,17 +1,30 @@
 
 TODO
 
-- image dimensions for all images (queue call)
-- ROI extraction with SHARP + set output option
+ui
+- create set must focus on new Set
+- uploading file to set must show that file is loaded
 
-- Cruncher that uses that JSON as input (auto-rotate)
 - Set crunhers implementation
+
 - change type of json outputs to "json" and extension specifies more specfic type like ".osd.json" or ".ner.json"
+- thumbnails must not be greater than original image (ROI)
+
+- OSD_rotate now creates a identical copy of original file. Change so that only File node is created and path points to origina path.
+  - make sure that removing the new File node does not remove the original file
 
 - virtual crunchers (tesseract orientation detection + imaginary rotate = fix orientation)
 
- 
+
+
+MAYBE:
+- ROI extraction with SHARP + set output option (extraction seem to work OK with imaginary)
+- change thumbnail generation from Imaginary to python thumbnailer (not urgent)
+
+
 DONE
+- image dimensions for all images (queue call, 2024.09.23)
+- Cruncher that uses that JSON as input (auto-rotate)
 - orientation detection must output JSON
 - text file description from text content OK
 - implement sets

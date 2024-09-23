@@ -3,6 +3,7 @@ const util			= require('util');
 const path 			= require('path');
 const stream 		= require('stream');
 const fs 			= require('fs-extra');
+const sizeOf		= require('image-size');
 
 
 const TYPES = ['image', 'text'] 
@@ -41,6 +42,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 		var exists = await checkFileExists(path.join(data_dir, filegraph.path))
 		if(!exists) {
 			await fs.rename(uploadpath, path.join(data_dir, filegraph.path));
+			//filedata = await this.getImageSize(path.join(data_dir, filegraph.path), filedata)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {
@@ -57,6 +59,18 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 		throw('file saving failed')
 	}
 }
+
+// media.getImageSize = async function(filepath, filedata) {
+// 	try {
+// 		const dimensions = await sizeOf(filepath)
+// 		console.log(dimensions.width, dimensions.height)
+// 		filedata.width = dimensions.width
+// 		filedata.height = dimensions.height
+// 		return filedata
+// 	} catch (error) {
+// 		console.error('Image size reading failed:', error);
+// 	}	
+// }
 
 media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	console.log(filename)
@@ -115,17 +129,39 @@ media.rid2path = function (rid) {
 }
 
 media.getTextDescription = async function (filePath) {
-	const maxCharacters = 100;
+	const maxCharacters = 150;
 	try {
 		const data = await fs.promises.readFile(filePath, 'utf8');
+		var json_str = JSON2text(data)
+		if(json_str) {
+			return json_str.substring(0, maxCharacters);
+		}
+
+		// if json is not valid, try to read as text
 		const first = data.substring(0, maxCharacters);
-		return first.replace(/[^a-zA-Z.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
+		return first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
 	  } catch (error) {
 		console.error('Error reading file:', error);
 		return ''
 	  }
 }
 
+function JSON2text(data) {
+	try {
+		var str_json = []
+		var json = JSON.parse(data)
+		for(var key in json) {
+			if(typeof json[key] == 'object') {
+				str_json.push(key + ': ' + JSON.stringify(json[key], null, 2))
+			} else {
+				str_json.push(key + ': ' + json[key])
+			}
+		}
+		return str_json.join('\n')
+	} catch(e) {
+		return null
+	}
+}
 
 async function checkFileExists(filePath) {
 	try {

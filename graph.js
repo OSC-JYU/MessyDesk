@@ -327,8 +327,8 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 graph.createROIs = async function(rid, data) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	for(var roi of data) {
-		roi.rel_coordinates = await this.getSelectionAsPercentage(rid, roi.coordinates)
+	for(var roi of data.rois) {
+		roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
 		// check if roi already exists
 		const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
 		var response = await web.cypher(query)
@@ -938,13 +938,9 @@ graph.getStats = async function () {
 	const result = await web.cypher(query)
 	return result
 }
-graph.getSelectionAsPercentage = async function(rid, selection) {
-	var response = await web.sql(`SELECT metadata FROM File WHERE @rid = ${rid}`)
-	console.log(response.result)
+graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selection) {
 
-	if(response.result.length == 1 && response.result[0].metadata) {
-		const imageHeight = response.result[0].metadata.height 
-		const imageWidth = response.result[0].metadata.width 
+	if(imageWidth && imageHeight) {
 		const { x, y, width, height } = selection;
 		console.log(selection)
 

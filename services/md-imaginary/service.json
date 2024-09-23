@@ -37,7 +37,7 @@
             "name": "Extract",
             "output": "image",
             "description": "Extract images based on Regions of Interest (ROI).",
-            "info": "I Extracted images based on your selections.",
+            "info": "I extracted images based on your selections.",
             "roi_params": { 
                 "top": 0,
                 "left": 0,
@@ -45,7 +45,12 @@
                 "areaheight": 0
             },
 
-            "params": {},
+            "params": {                
+                "_create_set": {
+                    "name": "Create Set",
+                    "help": "Create new Set and place extracted images in it.",
+                    "display": "checkbox"
+            }},
             "params_help": {}
         },
         "resize": {
@@ -91,7 +96,7 @@
             },
             "params_help": {
                 "rotate": {
-                    "name": "rotate angle",
+                    "name": "rotate angle (90, 180, 270)",
                     "help": "How much image is rotated.",
                     "default": 90
                 }
