@@ -1,24 +1,33 @@
 
 TODO
 
-ui
-- create set must focus on new Set
-- uploading file to set must show that file is loaded
+- SOLR
+- ner.json to ROI records (with type Person/Organisation/Place/Date)
+- human.json to ROI records
 
 - Set crunhers implementation
 
+
 - change type of json outputs to "json" and extension specifies more specfic type like ".osd.json" or ".ner.json"
 - thumbnails must not be greater than original image (ROI)
+
+- Nextcloud import
+
 
 - OSD_rotate now creates a identical copy of original file. Change so that only File node is created and path points to origina path.
   - make sure that removing the new File node does not remove the original file
 
 - virtual crunchers (tesseract orientation detection + imaginary rotate = fix orientation)
+- process report file
+
+
+UI TODO
+- create set must focus on new Set
+- uploading file to set must show that file is loaded
 
 
 
 MAYBE:
-- ROI extraction with SHARP + set output option (extraction seem to work OK with imaginary)
 - change thumbnail generation from Imaginary to python thumbnailer (not urgent)
 
 
@@ -149,6 +158,122 @@ MODE=development DB_PASSWORD=node_master DB_NAME=md_test DATA_DIR=test nodemon i
 modify and and internal.js (in 'test' directory so that data dir is created under 'test'):
 MODE=development DB_PASSWORD=node_master DB_NAME=md_test node internal.js
 
+
+*************************************************************************
+SOLR:
+
+  docker run -p 8983:8983 -t solr
+
+add core:
+
+  solr create_core -c messydesk
+
+Set configs via API
+
+- add field
+
+  curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
+    "name":"text",
+    "type":"string",
+    "stored":true,
+    "indexed":true
+  }
+  }' "http://localhost:8983/solr/messydesk/schema"
+
+
+- add copyField
+
+  curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"*_str", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
+
+
+- delete copyField
+  curl -X POST -H 'Content-Type: application/json' \   -d '{
+    "delete-copy-field": {
+      "source": "*_str",
+      "dest": "text"                                          
+    }
+  }' \
+  "http://localhost:8983/solr/messydesk/schema"
+
+
+- remove field:
+  curl -X POST -H 'Content-Type: application/json' \
+  -d '{"delete-field":{"name":"text"}}'
+
+- replace field:
+
+  curl -X POST -H 'Content-Type: application/json' \
+  -d '{
+    "replace-field": {
+      "name":"text",
+      "type":"text_general",
+      "stored":true,
+      "indexed":true,
+      "multiValued":false
+    }
+  }' \
+  "http://localhost:8983/solr/messydesk/schema"
+
+
+- delete index:
+
+  curl -X POST -H 'Content-Type: application/json' \
+  -d '{ "delete": { "query": "*:*" } }' \
+  "http://localhost:8983/solr/YOUR_CORE/update?commit=true"
+
+
+- n-gram settings (avoid need for wildcards):
+curl -X POST -H 'Content-type:application/json' \
+  http://localhost:8983/solr/<your-core-name>/schema \
+  --data-binary '{
+    "add-field-type": {
+      "name": "text_edge_ngram",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "analyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.EdgeNGramFilterFactory", "minGramSize": "3", "maxGramSize": "20" }
+        ]
+      }
+    }
+  }'
+
+
+
+schema + copyFields:
+- node (string) // Arcadadb @type
+- type (string)  // image, text, ner.json...
+- owner (string)
+- description (text_general) -> text
+- label (string) -> text
+- fulltext (text_general) -> text
+- text
+
+
+
+************************** SOLR ends ************************************
+
+PDF to other format:
+- In what format should be used displaying and indexing of PDF files? User should get PDF indexed just by uploading it (if - of course- it has text in it)
+
+- alternatives:
+-- pure html
+https://github.com/pdf2htmlEX/pdf2htmlEX
+build from: https://github.com/sergiomtzlosa/docker-pdf2htmlex
+* change git:// to https:// in Dockerfile
+podman build -t pdf2htmlex .
+podman run -it localhost/pdf2htmlex
+
+pdf2htmlEX --zoom 1.3 43901.pdf 43901.html
+
+-- HOCR html
+https://github.com/HazyResearch/pdftotree
+-- Alto XML
+https://github.com/kermitt2/pdfalto
+-- page XML
+OCR: https://github.com/mauvilsa/tesseract-recognize
 
 
 

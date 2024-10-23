@@ -93,6 +93,16 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	}
 }
 
+media.readJSON =  async function(fpath) {
+
+	try {
+		const jsonData = await fs.promises.readFile(fpath, 'utf8');
+		return jsonData
+	  } catch (error) {
+		console.error('Error reading data from json:', error);
+		return {}
+	  }
+}
 
 media.writeJSON =  async function(data, filename, fpath) {
 
@@ -126,6 +136,16 @@ media.detectType = async function(ctx) {
 
 media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
+}
+
+media.getText = async function (filePath) {
+	try {
+		const data = await fs.promises.readFile(filePath, 'utf8');
+		return data
+	  } catch (error) {
+		console.error('Error reading file:', error);
+		return ''
+	  }
 }
 
 media.getTextDescription = async function (filePath) {

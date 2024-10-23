@@ -66,12 +66,17 @@ web.createDB = async function() {
 	};
 	try {
 		await axios.post(url, {command: `create database ${DB}`}, config)
-		await this.createVertexType('Person')
+		await this.createVertexType('User')
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
+		await this.createVertexType('Set')
+		await this.createVertexType('SetProcess')
+		await this.createVertexType('ROI')
 		await this.createVertexType('Project')
-
-		await this.sql("CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
+		
+		await this.createVertexType('Person')
+		
+		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
@@ -170,6 +175,44 @@ web.cypher = async function(query, options) {
 		throw({msg: 'error in query', query: query, error: e})
 	}
 }
+
+
+web.solr = async function(data, options) {
+
+   // var url = "http://localhost:8983/solr/messydesk/select?q=text:" + data.query
+    var url = "http://localhost:8983/solr/messydesk/select?q=:" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+	console.log(url)
+
+	if(!data.query) {		
+		return []
+	} 
+
+	try {
+		var response = await axios.get(url)
+		return response.data
+
+
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
+
+
+web.indexDocuments = async function(data) {
+	if(!options) var options = {}
+	const url = "http://localhost:8983/solr/messydesk/update?commit=true"
+
+	try {
+		var response = await axios.post(url, data)
+		return response.data
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+
+}
+
 
 async function getSchemaLabels(config) {
 	const query = "MATCH (s:Schema_)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"

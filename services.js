@@ -88,11 +88,11 @@ services.getServicesForFile = async function(file, filter) {
 		// for Files we compare first type and then extension
 		} else {
 			// check service for supported types
-			console.log(this.service_list[service].supported_types)
-			console.log('comparing types..', file.type)
+			//console.log(this.service_list[service].supported_types)
+			//console.log('comparing types..', file.type)
 			if(this.service_list[service].supported_types.includes(file.type)) {
 				// we take only services that has consumer app listening
-				console.log('supported types')
+				//console.log('supported types')
 				if(this.service_list[service].consumers.length > 0) {
 					var service_with_tasks = pickTasks(this.service_list[service], [file.extension], filter)
 					matches.for_format.push(service_with_tasks)

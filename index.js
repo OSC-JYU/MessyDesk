@@ -12,6 +12,7 @@ const { pipeline }  = require('stream');
 const websocket 	= require('koa-easy-ws')
 
 const Graph 		= require('./graph.js');
+const web 			= require('./web.js');
 
 const media 		= require('./media.js');
 const schema 		= require('./schema.js');
@@ -184,7 +185,19 @@ router.get('/api/me', async function (ctx) {
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
 
+router.post('/api/search', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	console.log(ctx.request.body)
+	var n = await web.solr(ctx.request.body, me.rid)
+	ctx.body = n
+})
 
+
+router.post('/api/index', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.index(ctx.request.body, me.rid)
+	ctx.body = n
+})
 
 // upload
 
@@ -681,6 +694,12 @@ router.post('/api/nomad/process/files', upload.fields([
 						console.log('published info task', info)
 					}
 				} 
+
+				// create ROIs for ner.json and human.json
+				if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
+					Graph.createROIsFromJSON(process_rid, message, fileNode)
+					//path.join(data_dir, filegraph.path)
+				}
 	
 				// update set file count or add file to visual graph
 				if(message.userId) {

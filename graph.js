@@ -50,7 +50,7 @@ graph.initDB = async function () {
 graph.createProject = async function (data, me_rid) {
 
 	var project = {}
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
 	var response = await web.cypher(query)
 	console.log(response.result[0])
 	if (response.result[0].projects == 0) {
@@ -67,7 +67,7 @@ graph.createProject = async function (data, me_rid) {
 
 graph.createSet = async function (project_rid, data, me_rid) {
 
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
 	var response = await web.cypher(query)
 	console.log(response)
 	console.log(response.result[0])
@@ -84,8 +84,51 @@ graph.createSet = async function (project_rid, data, me_rid) {
 
 }
 
+
+graph.index = async function (userRid) {
+    // Construct the query to index user's data or all data
+    const filesQuery = userRid
+        ? `MATCH {type:User, as:user, where:(id = 'local.user@localhost')}-IS_OWNER->{type:Project, as:project}-->{type:File, as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+        : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{type:File, as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+
+    const response = await web.sql(filesQuery);
+
+    let documents = [];
+    let count = 0;
+
+    for (const item of response.result) {
+		// if type of File is text, then read text file from file path
+		item.file.fulltext = ''
+		if(item.file.type == 'text') {
+			item.file.fulltext = await media.getText(item.file.path)
+		}
+        documents.push({
+            id: item.file['@rid'],
+            label: item.file.label,
+            owner: item.file.ownerRid,
+			node: item.file['@type'],
+			type: item.file.type,
+			description: item.file.description,
+			fulltext: item.file.fulltext,
+        });
+        count++;
+        
+        if (count % 100 === 0) {
+            await web.indexDocuments(documents);
+            documents = [];
+        }
+    }
+
+    // Index any remaining documents
+    if (documents.length > 0) {
+        await web.indexDocuments(documents);
+    }
+
+    console.log(`${response.result.length} documents indexed`);
+}
+
 graph.getProject_old = async function (rid, me_email) {
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
 	var result = await web.cypher(query)
 	return result
 }
@@ -94,7 +137,7 @@ graph.getProject_old = async function (rid, me_email) {
 graph.getProject = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	schema_relations = await this.getSchemaRelations()
-	const query = `MATCH {as: person, type: Person, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
+	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
 				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
 				RETURN file`
 console.log(query)
@@ -112,7 +155,7 @@ console.log(query)
 
 graph.getProject_backup = async function (rid, me_email) {
 	schema_relations = await this.getSchemaRelations()
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
+	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
 		OPTIONAL MATCH (project)-[r_set]->(set:Set)
 		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
@@ -132,7 +175,7 @@ graph.getProject_backup = async function (rid, me_email) {
 
 
 graph.getProjects = async function (me_email) {
-	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await web.cypher(query)
 	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
@@ -162,7 +205,7 @@ graph.getProjects = async function (me_email) {
 
 
 async function getProjectThumbnails(me_email, data) {
-	const query = `MATCH (p:Person)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
 	var response = await web.cypher(query)
 
@@ -184,7 +227,7 @@ async function getProjectThumbnails(me_email, data) {
 
 graph.getProjectFiles = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
 	console.log(query)
 	var result = await web.cypher(query)
 	return result
@@ -192,7 +235,7 @@ graph.getProjectFiles = async function (rid, me_email) {
 
 graph.getSetFiles = async function (set_rid, me_email) {
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `MATCH (p:Person)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
 		file.thumb = file.path.replace('data', '/api/thumbnails').split('/').slice(0, -1).join('/');
@@ -324,6 +367,19 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 	return update_response.result[0]
 }
 
+graph.createROIsFromJSON =  async function(process_rid, message, fileNode) {
+	console.log(fileNode)
+	// read file from fileNode.path
+	const content = await media.readJSON(fileNode.path)
+	const data = JSON.parse(content)
+	for(var roi of data) {
+		console.log(roi)
+		
+	}
+	//await this.createROIs(process_rid, data)
+	
+}
+
 graph.createROIs = async function(rid, data) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
@@ -445,7 +501,7 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 	file_rid = file_rid.replace('#','')
 	// file must be somehow related to a project that is owned by user
 	var query = `MATCH {
-		type: Person, 
+		type: User, 
 		as:p, 
 		where:(id = "${me_email}")}
 	-IS_OWNER->
@@ -459,7 +515,7 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 	else {
 		// check if file is a Set
 		var query_set = `MATCH {
-			type: Person, 
+			type: User, 
 			as:p, 
 			where:(id = "${me_email}")}
 		-IS_OWNER->
@@ -509,8 +565,8 @@ graph.create = async function (type, data) {
 			}
 		}
 	}
-	// set some system attributes to all Persons
-	if (type === 'Person') {
+	// set some system attributes to all Users
+	if (type === 'User') {
 		if (!data['_group']) data_str_arr.push(`_group: "user"`) // default user group for all persons
 		if (!data['_access']) data_str_arr.push(`_access: "user"`) // default access for all persons
 	}
@@ -547,8 +603,8 @@ graph.merge = async function (type, node) {
 	for (var key of Object.keys(node[type])) {
 		attributes.push(`s.${key} = "${node[type][key]}"`)
 	}
-	// set some system attributes to all Persons
-	if (type === 'Person') {
+	// set some system attributes to all Users
+	if (type === 'User') {
 		if (!node['_group']) attributes.push(`s._group = "user"`) // default user group for all persons
 		if (!node['_access']) attributes.push(`s._access = "user"`) // default access for all persons
 	}
@@ -746,24 +802,24 @@ graph.createAttributeCypher = async function (attributes) {
 }
 
 
-graph.checkMe = async function (user) {
-	if (!user) throw ('user not defined')
-	var query = `MATCH (me:Person {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
-	var result = await web.cypher(query)
-	// add user if not found
-	if (result.result.length == 0) {
-		query = `MERGE (p:Person {id: "${user}"}) SET p.label = "${user}", p._group = 'user', p._active = true`
-		result = await web.cypher(query)
-		query = `MATCH (me:Person {id:"${user}"}) return id(me) as rid, me._group as group`
-		result = await web.cypher(query)
-		return result.result[0]
-	} else return result.result[0]
-}
+// graph.checkMe = async function (user) {
+// 	if (!user) throw ('user not defined')
+// 	var query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
+// 	var result = await web.cypher(query)
+// 	// add user if not found
+// 	if (result.result.length == 0) {
+// 		query = `MERGE (p:User {id: "${user}"}) SET p.label = "${user}", p._group = 'user', p._active = true`
+// 		result = await web.cypher(query)
+// 		query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group`
+// 		result = await web.cypher(query)
+// 		return result.result[0]
+// 	} else return result.result[0]
+// }
 
 
 graph.myId = async function (user) {
 	if (!user) throw ('user not defined')
-	var query = `MATCH (me:Person {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
+	var query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
 	var response = await web.cypher(query)
 	return response.result[0]
 }
@@ -802,25 +858,6 @@ graph.forceArray = async function (data, property) {
 }
 
 
-// data = {rel_types:[], node_types: []}
-graph.myGraph = async function (user, data) {
-	if (!data.return) data.return = 'p,r,n, n2'
-	var rel_types = []; var node_types = []
-	var node_query = ''
-	if (!user || !Array.isArray(data.rel_types) || !Array.isArray(data.node_types)) throw ('invalid query!')
-
-	// by default get all relations and all nodes linked to 'user'
-	for (var type of data.rel_types) {
-		rel_types.push(`:${type.trim()}`)
-	}
-	for (var node of data.node_types) {
-		node_types.push(`n:${node.trim()}`)
-	}
-	if (node_types.length) node_query = ` WHERE ${node_types.join(' OR ')}`
-	var query = `MATCH (p:Person {id:"${user}"})-[r${rel_types.join('|')}]-(n) OPTIONAL MATCH (n)--(n2) ${node_query} return ${data.return}`
-
-	return web.cypher(query, 'graph')
-}
 
 
 // get list of documents WITHOUT certain relation

@@ -80,12 +80,7 @@
             "info": "I flipped image"
         },
 
-        "smartcrop": {
-            "name": "Smart crop",
-            "output": "image",
-            "description": "Remove boring parts",
-            "params": {}
-        },
+
 
         "rotate": {
             "name": "Rotate",
