@@ -249,7 +249,7 @@ schema + copyFields:
 - description (text_general) -> text
 - label (string) -> text
 - fulltext (text_general) -> text
-- text
+- text (text_edge_ngram)
 
 
 

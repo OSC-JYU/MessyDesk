@@ -34,7 +34,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
-	const filedata = {}
+	var filedata = {}
 	try {
 		await fs.ensureDir(path.join(data_dir, filepath, 'process'))
 	
@@ -42,7 +42,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 		var exists = await checkFileExists(path.join(data_dir, filegraph.path))
 		if(!exists) {
 			await fs.rename(uploadpath, path.join(data_dir, filegraph.path));
-			//filedata = await this.getImageSize(path.join(data_dir, filegraph.path), filedata)
+			filedata = await this.getImageSize(path.join(data_dir, filegraph.path), filedata)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {
@@ -60,17 +60,32 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 	}
 }
 
-// media.getImageSize = async function(filepath, filedata) {
-// 	try {
-// 		const dimensions = await sizeOf(filepath)
-// 		console.log(dimensions.width, dimensions.height)
-// 		filedata.width = dimensions.width
-// 		filedata.height = dimensions.height
-// 		return filedata
-// 	} catch (error) {
-// 		console.error('Image size reading failed:', error);
-// 	}	
-// }
+media.getImageSize = async function(filepath, filedata) {
+	try {
+		const dimensions = await sizeOf(filepath)
+		filedata.width = dimensions.width
+		filedata.height = dimensions.height
+		filedata.imgtype = dimensions.type
+		if(dimensions.orientation && dimensions.orientation !== 1) {
+			filedata.orientation = dimensions.orientation
+			// convert exif orientation to degrees needed
+			switch(dimensions.orientation) {
+				case 3:
+					filedata.orientation = 180
+					break;
+				case 6:
+					filedata.orientation = 270
+					break;
+				case 8:
+					filedata.orientation = 90
+					break;
+			}
+		}
+		return filedata
+	} catch (error) {
+		console.error('Image size reading failed:', error);
+	}	
+}
 
 media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	console.log(filename)

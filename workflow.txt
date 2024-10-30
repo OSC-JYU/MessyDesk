@@ -38,6 +38,17 @@ ELSE
 4.4 send file to thumbnailer queue
 
 
+Image upload:
+
+1. File node is created
+2. File node directory is created
+3. File is saved under that directory.
+4. File is sent to thumbnailer queue
+
+Additional step for images with EXIF rotation:
+
+Image file is sent to image-info service, which return dimensions, type and exif orientation.
+If orientation is found and it is not 1, then image is sent to autorotate-endpoint of md-imaginary service. This image is then saved to the same directory as original file but with suffic '_exif_rot'. 
 
 
 

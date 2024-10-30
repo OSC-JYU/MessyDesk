@@ -228,19 +228,19 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		nats.publish('thumbnailer', JSON.stringify(data))
 
 		// image resolution info
-		if(file_type == 'image') {
-			var info = {
-				id:'md-imaginary', 
-				task: 'info', 
-				file: filegraph, 
-				userId: ctx.headers[AUTH_HEADER], 
-				target: filegraph['@rid'],
-				params:{task:'info'}
-			}
-			console.log(info)
-			nats.publish(info.id, JSON.stringify(info))
-			console.log('published info task', info)
-		}
+		// if(file_type == 'image') {
+		// 	var info = {
+		// 		id:'md-imaginary', 
+		// 		task: 'info', 
+		// 		file: filegraph, 
+		// 		userId: ctx.headers[AUTH_HEADER], 
+		// 		target: filegraph['@rid'],
+		// 		params:{task:'info'}
+		// 	}
+		// 	console.log(info)
+		// 	nats.publish(info.id, JSON.stringify(info))
+		// 	console.log('published info task', info)
+		// }
 
 	} 
 
@@ -697,7 +697,9 @@ router.post('/api/nomad/process/files', upload.fields([
 
 				// create ROIs for ner.json and human.json
 				if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
-					Graph.createROIsFromJSON(process_rid, message, fileNode)
+					console.log('ner file detected')
+					await Graph.createROIsFromJSON(process_rid, message, fileNode)
+					//console.log('ner file processed')
 					//path.join(data_dir, filegraph.path)
 				}
 	
@@ -722,7 +724,7 @@ router.post('/api/nomad/process/files', upload.fields([
 					}
 		
 					}
-					console.log(wsdata)
+					//console.log(wsdata)
 					send2UI(message.userId, wsdata)
 				}
 			}

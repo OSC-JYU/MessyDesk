@@ -85,6 +85,7 @@ graph.createSet = async function (project_rid, data, me_rid) {
 }
 
 
+
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
     const filesQuery = userRid
@@ -370,29 +371,45 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 graph.createROIsFromJSON =  async function(process_rid, message, fileNode) {
 	console.log(fileNode)
 	// read file from fileNode.path
-	const content = await media.readJSON(fileNode.path)
-	const data = JSON.parse(content)
-	for(var roi of data) {
+	const content = await media.getText(fileNode.path)
+	const json = JSON.parse(content)
+
+	if(json.length == 0) return
+	var data = {rois:[]}
+
+	for(var roi of json) {
+		console.log('roi')
 		console.log(roi)
+		data.rois.push(roi)
 		
 	}
-	//await this.createROIs(process_rid, data)
+	await this.createROIs(process_rid, data)
 	
 }
 
 graph.createROIs = async function(rid, data) {
+	// ROI can be user defined or auto generated
+	// user defined ROIs are linked to source node
+	// auto generated ROIs are linked to process node
+
 	if (!rid.match(/^#/)) rid = '#' + rid
 
 	for(var roi of data.rois) {
-		roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
-		// check if roi already exists
-		const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
-		var response = await web.cypher(query)
-		if(response.result.length > 0) {
-			// update
-			const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
-			console.log(update)
-			var update_response = await web.sql(update)
+		// only image ROIs have coordinates
+		if (roi.coordinates) {
+			roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
+		}
+		
+		// check if this is update by user
+		if(roi['@rid']) {
+			const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
+			var response = await web.cypher(query)
+			if(response.result.length > 0) {
+				// update
+				const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
+				console.log(update)
+				var update_response = await web.sql(update)
+			} 
 		} else {
 			const query_c = `CREATE Vertex ROI CONTENT ${JSON.stringify(roi)}`
 			var response_c = await web.sql(query_c)

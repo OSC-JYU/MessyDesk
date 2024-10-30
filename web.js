@@ -50,6 +50,9 @@ web.checkDB = async function() {
 	}
 }
 
+web.initSOLR = async function() {
+
+}
 
 web.createDB = async function() {
 	if(!password) {
@@ -179,7 +182,7 @@ web.cypher = async function(query, options) {
 
 web.solr = async function(data, options) {
 
-   // var url = "http://localhost:8983/solr/messydesk/select?q=text:" + data.query
+    //var url = "http://localhost:8983/solr/messydesk/select?q=text:" + data.query
     var url = "http://localhost:8983/solr/messydesk/select?q=:" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
 	console.log(url)
 
