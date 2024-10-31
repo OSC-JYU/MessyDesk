@@ -85,7 +85,7 @@ queue.publish = async function(topic, data) {
     //service.queue.add(service, data, filenode)
     await this.js.publish(`process.${topic}`, JSON.stringify(data))
   } catch(e) {
-    console.log('Could not add to queue!', e)
+    console.log(`ERROR: Could not add topic ${topic} to queue!\n`, e)
   }
 }
 

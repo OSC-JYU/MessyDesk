@@ -38,7 +38,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 	try {
 		await fs.ensureDir(path.join(data_dir, filepath, 'process'))
 	
-		filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
+		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(path.join(data_dir, filegraph.path))
 		if(!exists) {
 			await fs.rename(uploadpath, path.join(data_dir, filegraph.path));
@@ -71,13 +71,13 @@ media.getImageSize = async function(filepath, filedata) {
 			// convert exif orientation to degrees needed
 			switch(dimensions.orientation) {
 				case 3:
-					filedata.orientation = 180
+					filedata.rotate = 180
 					break;
 				case 6:
-					filedata.orientation = 270
+					filedata.rotate = 90
 					break;
 				case 8:
-					filedata.orientation = 90
+					filedata.rotate = 270
 					break;
 			}
 		}

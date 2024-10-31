@@ -214,8 +214,31 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 	}
 
 	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set)
-	await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
+	const file_info = await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 
+	await Graph.setNodeAttribute(filegraph['@rid'], {key: 'metadata', value: file_info})
+
+	// ************** EXIF FIX **************
+	// if file has EXIF orientation, then we need to rotate it
+	if(file_info.rotate) {
+
+		var rotatedata = {
+			id:"md-imaginary",
+			task:"rotate",
+			params: {rotate:`${file_info.rotate}`, stripmeta:'true', task:"rotate"},
+			info:"I auto-rotated image",
+		}
+		fetch(`http://localhost:3000/api/queue/md-imaginary/files/${filegraph['@rid'].replace('#','')}`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(rotatedata)
+		})
+	}
+
+	// ************** EXIF FIX ends**************
+	
 
 	// send to thumbnailer queue 
 	if(file_type == 'image' || file_type == 'pdf') {
@@ -639,95 +662,81 @@ router.post('/api/nomad/process/files', upload.fields([
 
 		} else if(infoFilepath && contentFilepath) {
 
-			// if this is "info" task then we save metadata to file node
-			if(message.task == 'info') {
-				console.log('INFO TASK')
-				console.log(contentFilepath)
-				try {
-					var info = await fse.readFile(contentFilepath)
-					var info_json = JSON.parse(info)
-					await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
-				} catch(e) {
-					console.log('file metadata failed!', e.message)
-				}
+			var description = ''
+			// for text nodes we create a description from the content of the file
+			if (message.file.type == 'text' || message.file.type == 'osd.json') {
+				description = await media.getTextDescription(contentFilepath)
+			}
+			const process_rid = message.process['@rid']
+	
+			const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
 
-			// else save content to processFileNode
-			} else {
-				var description = ''
-				// for text nodes we create a description from the content of the file
-				if (message.file.type == 'text' || message.file.type == 'osd.json') {
-					description = await media.getTextDescription(contentFilepath)
+			
+
+			//fileNode.path = path.join(DATA_DIR, fileNode.path)
+			await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
+
+			// for images and pdf files we create normal thumbnails
+			if(message.file.type == 'image' || message.file.type == 'pdf') {
+				var th = {
+					id:'thumbnailer', 
+					task: 'thumbnail', 
+					file: fileNode, 
+					userId: message.userId, 
+					target: fileNode['@rid']
 				}
-				const process_rid = message.process['@rid']
-		
-				const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
-	
-				
-	
-				//fileNode.path = path.join(DATA_DIR, fileNode.path)
-				await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
-	
-				// for images and pdf files we create normal thumbnails
-				if(message.file.type == 'image' || message.file.type == 'pdf') {
-					var th = {
-						id:'thumbnailer', 
-						task: 'thumbnail', 
+				th.params = {width: 800, type: 'jpeg'}
+				nats.publish(th.id, JSON.stringify(th))
+
+				// image resolution info
+				if(message.file.type == 'image') {
+					var info = {
+						id:'md-imaginary', 
+						task: 'info', 
 						file: fileNode, 
 						userId: message.userId, 
-						target: fileNode['@rid']
+						target: fileNode['@rid'],
+						params:{task:'info'}
 					}
-					th.params = {width: 800, type: 'jpeg'}
-					nats.publish(th.id, JSON.stringify(th))
+					console.log(info)
+					nats.publish(info.id, JSON.stringify(info))
+					console.log('published info task', info)
+				}
+			} 
 
-					// image resolution info
-					if(message.file.type == 'image') {
-						var info = {
-							id:'md-imaginary', 
-							task: 'info', 
-							file: fileNode, 
-							userId: message.userId, 
-							target: fileNode['@rid'],
-							params:{task:'info'}
-						}
-						console.log(info)
-						nats.publish(info.id, JSON.stringify(info))
-						console.log('published info task', info)
+			// create ROIs for ner.json and human.json
+			if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
+				console.log('ner file detected')
+				await Graph.createROIsFromJSON(process_rid, message, fileNode)
+				//console.log('ner file processed')
+				//path.join(data_dir, filegraph.path)
+			}
+
+			// update set file count or add file to visual graph
+			if(message.userId) {
+				// update set's file count if file is part of set
+				if(message.output_set) {
+					var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
+					var wsdata = {
+						command: 'update', 
+						type: 'set',
+						target: message.output_set,
+						count: count
 					}
-				} 
-
-				// create ROIs for ner.json and human.json
-				if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
-					console.log('ner file detected')
-					await Graph.createROIsFromJSON(process_rid, message, fileNode)
-					//console.log('ner file processed')
-					//path.join(data_dir, filegraph.path)
+				// otherwise add node to visual graph
+				} else {
+					var wsdata = {
+						command: 'add', 
+						type: message.file.type, 
+						target: process_rid, 
+						node:fileNode
 				}
 	
-				// update set file count or add file to visual graph
-				if(message.userId) {
-					// update set's file count if file is part of set
-					if(message.output_set) {
-						var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
-						var wsdata = {
-							command: 'update', 
-							type: 'set',
-							target: message.output_set,
-							count: count
-						}
-					// otherwise add node to visual graph
-					} else {
-						var wsdata = {
-							command: 'add', 
-							type: message.file.type, 
-							target: process_rid, 
-							node:fileNode
-					}
-		
-					}
-					//console.log(wsdata)
-					send2UI(message.userId, wsdata)
 				}
+				//console.log(wsdata)
+				send2UI(message.userId, wsdata)
 			}
+		
 
 
 		// something went wrong in file processing	

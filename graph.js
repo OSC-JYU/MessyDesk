@@ -713,8 +713,10 @@ graph.setEdgeAttribute = async function (rid, data) {
 
 
 graph.setNodeAttribute = async function (rid, data) {
+	console.log(rid, data)
 	if (!rid.match(/^#/)) rid = '#' + rid
 	let query = `MATCH (node) WHERE id(node) = '${rid}' `
+	console.log(query)
 
 	if (Array.isArray(data.value) && data.value.length > 0) {
 		data.value = data.value.map(i => `'${i}'`).join(',')
