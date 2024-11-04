@@ -163,22 +163,59 @@ media.getText = async function (filePath) {
 	  }
 }
 
-media.getTextDescription = async function (filePath) {
+media.getTextDescription = async function (filePath, file_type) {
 	const maxCharacters = 150;
 	try {
 		const data = await fs.promises.readFile(filePath, 'utf8');
-		var json_str = JSON2text(data)
-		if(json_str) {
-			return json_str.substring(0, maxCharacters);
+		// get number of characters	
+		const linecount = data.split(/\n/).length
+
+		if(file_type == 'ner.json') {
+			return NERsummary(data)
+
+		} else if(file_type == 'osd.json') {
+			var json_str = JSON2text(data)
+			if(json_str) {
+				return json_str.substring(0, maxCharacters);
+			}	
+		} else {
+			var first = data.substring(0, maxCharacters);
+			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
+			return 'lines: ' + linecount + '\n' + 'characters:' + data.length + '\n' + first
 		}
 
-		// if json is not valid, try to read as text
-		const first = data.substring(0, maxCharacters);
-		return first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
 	  } catch (error) {
 		console.error('Error reading file:', error);
 		return ''
 	  }
+}
+
+function NERsummary(data) {
+	try {
+
+		var json = JSON.parse(data)
+		const entityCounts = {};
+
+		// Iterate over each entity in the list
+		json.forEach(entity => {
+			const group = entity.entity_group;
+			// Increment the count for each entity group
+			entityCounts[group] = (entityCounts[group] || 0) + 1;
+		});
+		
+		// Create the summary as a plain text string
+		let summary = "Entity Groups Found:\n";
+		for (const [group, count] of Object.entries(entityCounts)) {
+			summary += `- ${group}: ${count}\n`;
+		}
+console.log(summary)
+		return summary;
+
+
+	} catch(e) {
+		console.log('erro in NER summary', e)
+		return null
+	}
 }
 
 function JSON2text(data) {

@@ -651,7 +651,8 @@ router.post('/api/nomad/process/files', upload.fields([
 					var wsdata = {
 						command: 'update', 
 						type: 'image',
-						target: message.file['@rid']
+						target: message.file['@rid'],
+						process: message.process['@rid']
 					}
 					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
 					await send2UI(message.userId, wsdata)
@@ -664,8 +665,8 @@ router.post('/api/nomad/process/files', upload.fields([
 
 			var description = ''
 			// for text nodes we create a description from the content of the file
-			if (message.file.type == 'text' || message.file.type == 'osd.json') {
-				description = await media.getTextDescription(contentFilepath)
+			if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
+				description = await media.getTextDescription(contentFilepath, message.file.type)
 			}
 			const process_rid = message.process['@rid']
 	

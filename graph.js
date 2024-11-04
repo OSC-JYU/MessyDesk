@@ -378,10 +378,7 @@ graph.createROIsFromJSON =  async function(process_rid, message, fileNode) {
 	var data = {rois:[]}
 
 	for(var roi of json) {
-		console.log('roi')
-		console.log(roi)
-		data.rois.push(roi)
-		
+		data.rois.push(roi)		
 	}
 	await this.createROIs(process_rid, data)
 	
@@ -407,7 +404,6 @@ graph.createROIs = async function(rid, data) {
 			if(response.result.length > 0) {
 				// update
 				const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
-				console.log(update)
 				var update_response = await web.sql(update)
 			} 
 		} else {
@@ -418,7 +414,6 @@ graph.createROIs = async function(rid, data) {
 	}
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
 	var response_count = await web.sql(query_count)
-	console.log(response_count)
 	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count} )
 
 }
@@ -661,7 +656,7 @@ graph.connect = async function (from, relation, to, match_by_id) {
 		if (!to.match(/^#/)) to = '#' + to
 	}
 	//relation = this.checkRelationData(relation)
-	console.log(relation)
+	//console.log(relation)
 	if (typeof relation == 'object') {
 		relation_type = relation.type
 		if (relation.attributes)
