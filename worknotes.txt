@@ -1,11 +1,16 @@
 
 TODO
 
-- SOLR
-- ner.json to ROI records (with type Person/Organisation/Place/Date)
+- indexing queue (for indexing and removing from index)
+- Set crunhers implementation
+- Set view must have pager and it must use smaller thumbnails
+
+- Image ROI's extract must be dynamic! If extracted image is crunched, then ROI gets locked
+
+- PDF image rendering in smaller chunks (more user friendly. One must get page count first.)
+
 - human.json to ROI records
 
-- Set crunhers implementation
 
 
 - change type of json outputs to "json" and extension specifies more specfic type like ".osd.json" or ".ner.json"
@@ -29,9 +34,12 @@ UI TODO
 
 MAYBE:
 - change thumbnail generation from Imaginary to python thumbnailer (not urgent)
+- IIIF server (for image ROIs)
 
 
 DONE
+- SOLR OK
+- ner.json to ROI records (with type Person/Organisation/Place/Date) OK
 - image dimensions for all images (queue call, 2024.09.23)
 - Cruncher that uses that JSON as input (auto-rotate)
 - orientation detection must output JSON

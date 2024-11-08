@@ -199,6 +199,16 @@ router.post('/api/index', async function (ctx) {
 	ctx.body = n
 })
 
+router.get('/api/entities/types', async function (ctx) {
+	var n = await Graph.getEntityTypes()
+	ctx.body = n
+})
+
+router.get('/api/entities/types/:type', async function (ctx) {
+	var n = await Graph.getEntitiesByType(ctx.request.params.type)
+	ctx.body = n
+})
+
 // upload
 
 router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async function (ctx)  {
@@ -215,18 +225,17 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 
 	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set)
 	const file_info = await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
-
-	await Graph.setNodeAttribute(filegraph['@rid'], {key: 'metadata', value: file_info})
+	if(file_info) await Graph.setNodeAttribute(filegraph['@rid'], {key: 'metadata', value: file_info})
 
 	// ************** EXIF FIX **************
 	// if file has EXIF orientation, then we need to rotate it
-	if(file_info.rotate) {
+	if(file_info && file_info.rotate) {
 
 		var rotatedata = {
 			id:"md-imaginary",
 			task:"rotate",
 			params: {rotate:`${file_info.rotate}`, stripmeta:'true', task:"rotate"},
-			info:"I auto-rotated image",
+			info:"I auto-rotated image based on EXIF orientation.",
 		}
 		fetch(`http://localhost:3000/api/queue/md-imaginary/files/${filegraph['@rid'].replace('#','')}`, {
 			method: 'POST',
@@ -495,7 +504,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		if(ctx.request.params.roi) {
 			// we can work with ROIs only if we have width and height of file
 			if(file_metadata.metadata) var metadata = file_metadata.metadata
-			if(metadata.width && metadata.height) {
+			if(metadata && metadata.width && metadata.height) {
 				var rois = await Graph.getROIs(ctx.request.params.file_rid)
 				for(var roi of rois) {
 					const areaWidth = Math.round(roi.rel_coordinates.width/100*metadata.width)
@@ -651,8 +660,7 @@ router.post('/api/nomad/process/files', upload.fields([
 					var wsdata = {
 						command: 'update', 
 						type: 'image',
-						target: message.file['@rid'],
-						process: message.process['@rid']
+						target: message.file['@rid']
 					}
 					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
 					await send2UI(message.userId, wsdata)
@@ -663,80 +671,109 @@ router.post('/api/nomad/process/files', upload.fields([
 
 		} else if(infoFilepath && contentFilepath) {
 
-			var description = ''
-			// for text nodes we create a description from the content of the file
-			if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
-				description = await media.getTextDescription(contentFilepath, message.file.type)
-			}
-			const process_rid = message.process['@rid']
-	
-			const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
-
 			
-
-			//fileNode.path = path.join(DATA_DIR, fileNode.path)
-			await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
-
-			// for images and pdf files we create normal thumbnails
-			if(message.file.type == 'image' || message.file.type == 'pdf') {
-				var th = {
-					id:'thumbnailer', 
-					task: 'thumbnail', 
-					file: fileNode, 
-					userId: message.userId, 
-					target: fileNode['@rid']
+			// if this is "info" task then we save metadata to file node
+			if(message.task == 'info') {
+				console.log('INFO TASK')
+				console.log(contentFilepath)
+				try {
+					var info = await fse.readFile(contentFilepath)
+					var info_json = JSON.parse(info)
+					await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
+				} catch(e) {
+					console.log('file metadata failed!', e.message)
 				}
-				th.params = {width: 800, type: 'jpeg'}
-				nats.publish(th.id, JSON.stringify(th))
+				// else save content to processFileNode
+			} else {
+				var description = ''
+				// for text nodes we create a description from the content of the file
+				if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
+					description = await media.getTextDescription(contentFilepath, message.file.type)
+				}
 
-				// image resolution info
-				if(message.file.type == 'image') {
-					var info = {
-						id:'md-imaginary', 
-						task: 'info', 
+				const process_rid = message.process['@rid']	
+				const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
+	
+				await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
+	
+				// for images and pdf files we create normal thumbnails
+				if(message.file.type == 'image' || message.file.type == 'pdf') {
+					var th = {
+						id:'thumbnailer', 
+						task: 'thumbnail', 
 						file: fileNode, 
 						userId: message.userId, 
-						target: fileNode['@rid'],
-						params:{task:'info'}
+						target: fileNode['@rid']
 					}
-					console.log(info)
-					nats.publish(info.id, JSON.stringify(info))
-					console.log('published info task', info)
-				}
-			} 
-
-			// create ROIs for ner.json and human.json
-			if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
-				console.log('ner file detected')
-				await Graph.createROIsFromJSON(process_rid, message, fileNode)
-				//console.log('ner file processed')
-				//path.join(data_dir, filegraph.path)
-			}
-
-			// update set file count or add file to visual graph
-			if(message.userId) {
-				// update set's file count if file is part of set
-				if(message.output_set) {
-					var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
-					var wsdata = {
-						command: 'update', 
-						type: 'set',
-						target: message.output_set,
-						count: count
-					}
-				// otherwise add node to visual graph
-				} else {
-					var wsdata = {
-						command: 'add', 
-						type: message.file.type, 
-						target: process_rid, 
-						node:fileNode
-				}
+					th.params = {width: 800, type: 'jpeg'}
+					nats.publish(th.id, JSON.stringify(th))
 	
+					// image resolution info
+					if(message.file.type == 'image') {
+						var info = {
+							id:'md-imaginary', 
+							task: 'info', 
+							file: fileNode, 
+							userId: message.userId, 
+							target: fileNode['@rid'],
+							params:{task:'info'}
+						}
+						console.log(info)
+						nats.publish(info.id, JSON.stringify(info))
+						console.log('published info task', info)
+					}
+				} 
+
+				// send to indexer queue if text
+				if (message.file.type == 'text') {
+					var index_msg = {
+						id:'solr', 
+						task: 'index', 
+						file: fileNode, 
+						userId: message.userId, 
+						target: fileNode['@rid']
+					}
+					console.log('publishing index message', JSON.stringify(index_msg, null, 2))
+					nats.publish(index_msg.id, JSON.stringify(index_msg))					
 				}
-				//console.log(wsdata)
-				send2UI(message.userId, wsdata)
+
+				// create ROIs for ner.json and human.json
+				if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
+					console.log('ner file detected')
+					await Graph.createROIsFromJSON(process_rid, message, fileNode)
+					//console.log('ner file processed')
+					//path.join(data_dir, filegraph.path)
+				}
+
+				// update set file count or add file to visual graph
+				if(message.userId) {
+					// update set's file count if file is part of set
+					if(message.output_set) {
+						var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
+						var wsdata = {
+							command: 'update', 
+							type: 'set',
+							target: message.output_set,
+							count: count
+						}
+					// otherwise add node to visual graph
+					} else {
+						var wsdata = {
+							command: 'add', 
+							type: message.file.type, 
+							target: process_rid, 
+							node:fileNode
+					}
+		
+					}
+					//console.log(wsdata)
+					send2UI(message.userId, wsdata)
+				}
 			}
+
+
+
+
 		
 
 

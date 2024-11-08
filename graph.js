@@ -1014,6 +1014,16 @@ graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selecti
 
 }
 
+graph.getEntityTypes = async function () {
+	var query = 'select type, count(type) as count from Entity group by type order by count desc'
+	return await web.sql(query)
+}
+
+graph.getEntitiesByType = async function (type) {
+	var query = `select from Entity where type = "${type}"`
+	return await web.sql(query)
+}
+
 graph.getDataWithSchema = async function (rid, by_groups) {
 	by_groups = 1
 

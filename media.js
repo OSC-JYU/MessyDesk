@@ -34,7 +34,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
-	var filedata = {}
+	var filedata = null
 	try {
 		await fs.ensureDir(path.join(data_dir, filepath, 'process'))
 	
@@ -42,7 +42,7 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 		var exists = await checkFileExists(path.join(data_dir, filegraph.path))
 		if(!exists) {
 			await fs.rename(uploadpath, path.join(data_dir, filegraph.path));
-			filedata = await this.getImageSize(path.join(data_dir, filegraph.path), filedata)
+			filedata = await this.getImageSize(path.join(data_dir, filegraph.path))
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {
@@ -60,7 +60,8 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 	}
 }
 
-media.getImageSize = async function(filepath, filedata) {
+media.getImageSize = async function(filepath) {
+	var filedata = {}
 	try {
 		const dimensions = await sizeOf(filepath)
 		filedata.width = dimensions.width
@@ -83,7 +84,8 @@ media.getImageSize = async function(filepath, filedata) {
 		}
 		return filedata
 	} catch (error) {
-		console.error('Image size reading failed:', error);
+		console.error('Image size reading failed:');
+		return null
 	}	
 }
 
