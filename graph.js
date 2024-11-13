@@ -128,6 +128,27 @@ graph.index = async function (userRid) {
     console.log(`${response.result.length} documents indexed`);
 }
 
+graph.getUsers = async function () {
+	const query = `SELECT FROM User ORDER by label`
+	var response = await web.sql(query)
+	return response.result
+}
+
+
+graph.createUser = async function (data) {
+	// check that email is valid
+	if(!data.id) throw ('Email not defined!')
+	if (!data.id.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)) throw ('Invalid email address!')
+
+	// email must be unique
+	const query = `MATCH (p:User) WHERE p.id = "${data.id}" RETURN count(p) as users`
+	var response = await web.cypher(query)
+	if (response.result[0].users > 0) throw ('User with that email already exists!')
+		
+	var user = await this.create('User', data, true)
+	return user
+}
+
 graph.getProject_old = async function (rid, me_email) {
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
 	var result = await web.cypher(query)
@@ -560,7 +581,7 @@ graph.query = async function (body) {
 	return web.cypher(body.query)
 }
 
-graph.create = async function (type, data) {
+graph.create = async function (type, data, admin) {
 	console.log(data)
 	var data_str_arr = []
 	// expression data to string
@@ -579,11 +600,12 @@ graph.create = async function (type, data) {
 	}
 	// set some system attributes to all Users
 	if (type === 'User') {
-		if (!data['_group']) data_str_arr.push(`_group: "user"`) // default user group for all persons
-		if (!data['_access']) data_str_arr.push(`_access: "user"`) // default access for all persons
+		if(!admin) throw ('You are not admin!')
+		if (!data['group']) data_str_arr.push(`group: "user"`) // default user group for all persons
+		if (!data['access']) data_str_arr.push(`access: "user"`) // default access for all persons
 	}
 	// _active
-	if (!data['_active']) data_str_arr.push(`_active: true`)
+	if (!data['active']) data_str_arr.push(`active: true`)
 
 	var query = `CREATE (n:${type} {${data_str_arr.join(',')}}) return n`
 	console.log(query)
@@ -592,8 +614,26 @@ graph.create = async function (type, data) {
 }
 
 
-graph.deleteNode = async function (rid) {
+graph.deleteNode = async function (rid, nats) {
 	if (!rid.match(/^#/)) rid = '#' + rid
+
+	// remove node and all children (out nodes) from index
+	const q = `TRAVERSE out() FROM ${rid}`
+	var traverse = await web.sql(q)
+	var targets = []
+	for(var node of traverse.result) {
+		console.log(node)
+		targets.push({id: node['@rid']})
+	}
+
+	var index_msg = {
+		id:'solr', 
+		task: 'delete', 
+		target: targets
+	}
+	nats.publish(index_msg.id, JSON.stringify(index_msg))
+
+	// delete first children and then node
 	var query = `MATCH (n)
 		WHERE id(n) = "${rid}" 
 		OPTIONAL MATCH (n)-[*]->(child)
@@ -833,156 +873,10 @@ graph.createAttributeCypher = async function (attributes) {
 
 graph.myId = async function (user) {
 	if (!user) throw ('user not defined')
-	var query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
-	var response = await web.cypher(query)
+	var query = `SELECT FROM User WHERE id = "${user}" `
+	var response = await web.sql(query)
 	return response.result[0]
 }
-
-
-graph.getGroups = async function () {
-	var query = 'MATCH (x:UserGroup) RETURN x.label as label, x.id as id'
-	var result = await web.cypher(query)
-	return result.result
-}
-
-
-graph.getMaps = async function () {
-	var query = 'MATCH (t:QueryMap) RETURN t order by t.label'
-	var result = await web.cypher(query)
-	return result.result
-}
-
-
-graph.getMenus = async function (group) {
-	//var query = 'MATCH (m:Menu) return m'
-	var query = `MATCH (m:Menu) -[:VISIBLE_FOR_GROUP]->(n:UserGroup {id:"${group}"}) OPTIONAL MATCH (m)-[]-(q) WHERE q:Query OR q:Tag RETURN COLLECT( q) AS items, m.label as label, m.id as id ORDER BY id`
-	var result = await web.cypher(query)
-	var menus = this.forceArray(result.result, 'items')
-	return menus
-}
-
-
-graph.forceArray = async function (data, property) {
-	for (var row of data) {
-		if (!Array.isArray(row[property])) {
-			row[property] = [row[property]]
-		}
-	}
-	return data
-}
-
-
-
-
-// get list of documents WITHOUT certain relation
-// NOTE: open cypher bundled with Arcadedb did not work with "MATCH NOT (n)-[]-()"" -format. This could be done with other query language.
-graph.getListByType = async function (query_params) {
-	var query = `MATCH (n) return n.label as text, id(n) as value ORDER by text`
-	if (query_params.type) query = `MATCH (n:${query_params.type}) return n.label as text, id(n) as value ORDER by text`
-	var all = await web.cypher(query)
-	if (query_params.relation && query_params.target) {
-		query = `MATCH (n:${query_params.type})-[r:${query_params.relation}]-(t) WHERE id(t) = "#${query_params.target}" return COLLECT(id(n)) as ids`
-		var linked = await web.cypher(query)
-		//console.log(linked.result)
-		//console.log(all.result)
-		var r = all.result.filter(item => !linked.result[0].ids.includes(item.value));
-		//console.log(r)
-		return r
-
-	} else {
-		return all
-	}
-}
-
-
-graph.importGraphYAML = async function (filename, mode) {
-	console.log(`** importing graph ${filename} with mode ${mode} **`)
-	try {
-		const file_path = path.resolve('./graph', filename)
-		const data = await fsPromises.readFile(file_path, 'utf8')
-		const graph_data = yaml.load(data)
-		if (mode == 'clear') {
-			var query = 'MATCH (s) WHERE NOT s:Schema_ DETACH DELETE s'
-			var result = await web.cypher(query)
-			await this.setSystemNodes()
-			await this.createSystemGraph()
-			await this.writeGraphToDB(graph_data)
-		}
-		this.createIndex()
-		// const filePath = path.resolve('./schemas', filename)
-		// const data = await fsPromises.readFile(filePath, 'utf8')
-		// const schema = yaml.load(data)
-		// await this.writeSchemaToDB(schema)
-	} catch (e) {
-		throw (e)
-	}
-	console.log('Done import')
-}
-
-
-graph.writeGraphToDB = async function (graph) {
-	try {
-		for (var node of graph.nodes) {
-			console.log(node)
-			const type = Object.keys(node)[0]
-			console.log(type)
-			console.log(node[type])
-			if (type != 'Layout')
-				await this.create(type, node[type])
-		}
-
-		for (var edge of graph.edges) {
-			const edge_key = Object.keys(edge)[0]
-			const splitted = edge_key.split('->')
-			if (splitted.length == 3) {
-				const link = splitted[1].trim()
-				const [from_type, ...from_rest] = splitted[0].split(':')
-				const [to_type, ...to_rest] = splitted[2].split(':')
-				const from_id = from_rest.join(':').trim()
-				const to_id = to_rest.join(':').trim()
-				await this.connect(from_id, { type: link, attributes: edge[edge_key] }, to_id, true)
-			} else {
-				throw ('Graph edge error: ' + Object.keys(edge)[0])
-			}
-		}
-	} catch (e) {
-		throw (e)
-	}
-}
-
-
-
-
-graph.getTags = async function () {
-	var query = 'MATCH (t:Tag) RETURN t order by t.label'
-	return await web.cypher(query)
-}
-
-
-graph.getQueries = async function () {
-	var query = 'MATCH (t:Query)  RETURN t'
-	return await web.cypher(query)
-}
-
-
-graph.getStyles = async function () {
-	var query = 'MATCH (s:Schema_) return COALESCE(s._style,"") as style, s._type as type'
-	return await web.cypher(query)
-}
-
-
-graph.getFileList = async function (dir) {
-	if (['graph', 'styles', 'schemas'].includes(dir)) {
-		var files = await fsPromises.readdir(dir)
-		console.log(files)
-		return files
-	} else {
-		throw ('Illegal path')
-	}
-}
-
-
-
 
 graph.getStats = async function () {
 	const query = 'MATCH (n) RETURN DISTINCT LABELS(n) as labels, COUNT(n) as count  ORDER by count DESC'
@@ -1021,6 +915,17 @@ graph.getEntityTypes = async function () {
 
 graph.getEntitiesByType = async function (type) {
 	var query = `select from Entity where type = "${type}"`
+	return await web.sql(query)
+}
+
+graph.getTags = async function (userRID) {
+	var query = `MATCH {type:Tag, as:tag, where:(owner = "${userRID}")} RETURN tag order by tag.label`
+	return await web.sql(query)
+}
+
+graph.createTag = async function (label, userRID) {
+	if(!label) return
+	var query = `create Vertex Tag set label = "${label}", owner = "${userRID}"`
 	return await web.sql(query)
 }
 

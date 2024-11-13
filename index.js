@@ -105,6 +105,7 @@ app.use(serve(path.join(__dirname, '/public')))
 app.use(async function handleError(context, next) {
 	if(process.env.MODE === 'development') {
 		context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
+		context.request.user = await Graph.myId(context.request.headers[AUTH_HEADER])
 		if(process.env.DEV_USER) 
 			context.request.headers[AUTH_HEADER] = process.env.DEV_USER
 	}
@@ -160,6 +161,7 @@ router.all('/ws', async (ctx, next) => {
 
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
+	console.log(ctx.request.user)
 })
 
 router.get('/connections', function (ctx) {
@@ -177,12 +179,24 @@ router.get('/connections/test', async function (ctx) {
 
 })
 
-
-
 router.get('/api/me', async function (ctx) {
 
 	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
+})
+
+router.get('/api/users', async function (ctx) {
+
+	if(ctx.request.user.access == 'admin') {
+		ctx.body = await Graph.getUsers()
+	}
+})
+
+router.post('/api/users', async function (ctx) {
+
+	if(ctx.request.user.access == 'admin') {
+		ctx.body = await Graph.createUser(ctx.request.body)
+	}
 })
 
 router.post('/api/search', async function (ctx) {
@@ -200,12 +214,22 @@ router.post('/api/index', async function (ctx) {
 })
 
 router.get('/api/entities/types', async function (ctx) {
-	var n = await Graph.getEntityTypes()
+	var n = await Graph.getEntityTypes(ctx.request.headers[AUTH_HEADER])
 	ctx.body = n
 })
 
 router.get('/api/entities/types/:type', async function (ctx) {
 	var n = await Graph.getEntitiesByType(ctx.request.params.type)
+	ctx.body = n
+})
+
+router.get('/api/tags', async function (ctx) {
+	var n = await Graph.getTags(ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.post('/api/tags', async function (ctx) {
+	var n = await Graph.createTag(ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
 	ctx.body = n
 })
 
@@ -889,7 +913,7 @@ router.post('/api/graph/vertices/:rid', async function (ctx) {
 })
 
 router.delete('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.deleteNode(ctx.request.params.rid)
+	var n = await Graph.deleteNode(ctx.request.params.rid, nats)
 	ctx.body = n
 })
 

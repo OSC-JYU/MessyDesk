@@ -6,6 +6,7 @@
     "api_type": "elg",
     "api": "/process",
     "name" :"Replicate image AI",
+    "access" : "commercial",
 
     "supported_types": ["image"],
     "supported_formats": ["png", "jpg", "jpeg"],

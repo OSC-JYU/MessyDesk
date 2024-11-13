@@ -1,9 +1,12 @@
 
 TODO
 
-- indexing queue (for indexing and removing from index)
-- Set crunhers implementation
-- Set view must have pager and it must use smaller thumbnails
+- user management OK (initial, no research groups yet)
+
+- sets
+-- Set crunhers implementation
+-- Set view must have pager and it must use smaller thumbnails
+
 
 - Image ROI's extract must be dynamic! If extracted image is crunched, then ROI gets locked
 
@@ -38,6 +41,7 @@ MAYBE:
 
 
 DONE
+- indexing queue (for indexing and removing from index) OK
 - SOLR OK
 - ner.json to ROI records (with type Person/Organisation/Place/Date) OK
 - image dimensions for all images (queue call, 2024.09.23)
