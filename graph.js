@@ -873,7 +873,7 @@ graph.createAttributeCypher = async function (attributes) {
 
 graph.myId = async function (user) {
 	if (!user) throw ('user not defined')
-	var query = `SELECT FROM User WHERE id = "${user}" `
+	var query = `SELECT @rid AS rid, group, access, label, id, active FROM User WHERE id = "${user}"`
 	var response = await web.sql(query)
 	return response.result[0]
 }

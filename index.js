@@ -392,7 +392,7 @@ router.get('/api/process/(.*)', async function (ctx) {
 
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
-	console.log('creating project')
+	console.log('creating project', me)
 	var n = await Graph.createProject(ctx.request.body, me.rid)
 	console.log('project created')
 	console.log(n)
