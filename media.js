@@ -11,10 +11,19 @@ const TYPES = ['image', 'text']
 
 let media = {}
 
-media.createProjectDir = async function(project) {
+media.createDataDir = async function(data_dir) {
+	try {
+		//await fs.ensureDir(data_dir)
+		await fs.ensureDir(path.join(data_dir, 'projects'))
+	} catch(e) {
+		throw('Could not create data directory!' + e.message)
+	}
+}
+
+media.createProjectDir = async function(project, data_dir) {
 	const rid = this.rid2path(project['@rid'])
 	try {
-		await fs.ensureDir(path.join('data', 'projects', rid, 'files'))
+		await fs.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -28,7 +37,7 @@ media.createProcessDir = async function(process_path) {
 	}
 }
 
-media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
+media.uploadFile = async function(uploadpath, filegraph) {
 
 	console.log(filegraph)
 	var file_rid = filegraph['@rid']
@@ -36,13 +45,13 @@ media.uploadFile = async function(uploadpath, filegraph, data_dir = './') {
 
 	var filedata = null
 	try {
-		await fs.ensureDir(path.join(data_dir, filepath, 'process'))
+		await fs.ensureDir(path.join(filepath, 'process'))
 	
 		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
-		var exists = await checkFileExists(path.join(data_dir, filegraph.path))
+		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
-			await fs.rename(uploadpath, path.join(data_dir, filegraph.path));
-			filedata = await this.getImageSize(path.join(data_dir, filegraph.path))
+			await fs.rename(uploadpath, filegraph.path);
+			filedata = await this.getImageSize(filegraph.path)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {

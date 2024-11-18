@@ -69,17 +69,18 @@ web.createDB = async function() {
 	};
 	try {
 		await axios.post(url, {command: `create database ${DB}`}, config)
+		await this.createVertexType('Project')
 		await this.createVertexType('User')
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
 		await this.createVertexType('Set')
 		await this.createVertexType('SetProcess')
 		await this.createVertexType('ROI')
-		await this.createVertexType('Project')
+		await this.createVertexType('Entity')
 		
-		await this.createVertexType('Person')
-		
-		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
+		//await this.createVertexType('Person')
+		// development user
+		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
@@ -180,27 +181,38 @@ web.cypher = async function(query, options) {
 }
 
 
-web.solr = async function(data, options) {
+web.solr = async function(data, user_rid) {
 
-    //var url = "http://localhost:8983/solr/messydesk/select?q=text:" + data.query
-    var url = "http://localhost:8983/solr/messydesk/select?q=:" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+    var url = "http://localhost:8983/solr/messydesk/select?q=owner:testi AND " + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+
 	console.log(url)
-
+	
 	if(!data.query) {		
 		return []
 	} 
-
+	
 	try {
 		var response = await axios.get(url)
 		return response.data
-
-
+		
+		
 	} catch(e) {
 		console.log(e.message)
 		throw({msg: 'error in query', query: data, error: e})
 	}
 }
 
+web.solrDropUserData = async function(userRID) {
+	
+	var url = "http://localhost:8983/solr/messydesk/delete?q=owner:" + userRID + "&wt=json"
+	try {
+		var response = await axios.get(url)
+		return response.data	
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
 
 web.indexDocuments = async function(data) {
 	if(!options) var options = {}

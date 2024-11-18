@@ -45,7 +45,17 @@ graph.initDB = async function () {
 	}
 }
 
-
+graph.hasAccess = async function (item_rid, user_rid) {
+	if (!item_rid.match(/^#/)) item_rid = '#' + item_rid
+	const query = `TRAVERSE in() FROM ${item_rid}`
+	var response = await web.sql(query)
+	var user = response.result.filter(function (x) { return x['@rid'] == user_rid })
+	if (!user.length) {
+		return false
+	} else {
+		return true
+	}
+}
 
 graph.createProject = async function (data, me_rid) {
 
@@ -85,12 +95,25 @@ graph.createSet = async function (project_rid, data, me_rid) {
 }
 
 
+graph.dropIndex = async function (userRid) {
+
+	const query = userRid
+	? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+	: `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+	//const query = `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return item, user.@rid AS ownerRid`
+
+}
+
 
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
     const filesQuery = userRid
-        ? `MATCH {type:User, as:user, where:(id = 'local.user@localhost')}-IS_OWNER->{type:Project, as:project}-->{type:File, as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
-        : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{type:File, as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+        ? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+        : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+
+		console.log(filesQuery)
+
+
 
     const response = await web.sql(filesQuery);
 
@@ -101,7 +124,12 @@ graph.index = async function (userRid) {
 		// if type of File is text, then read text file from file path
 		item.file.fulltext = ''
 		if(item.file.type == 'text') {
-			item.file.fulltext = await media.getText(item.file.path)
+			try {
+				item.file.fulltext = await media.getText(item.file.path)
+			} catch (e) {
+				console.log(e)
+			}
+			//item.file.fulltext = await media.getText(item.file.path)
 		}
         documents.push({
             id: item.file['@rid'],
@@ -115,6 +143,7 @@ graph.index = async function (userRid) {
         count++;
         
         if (count % 100 === 0) {
+			console.log(documents)
             await web.indexDocuments(documents);
             documents = [];
         }
@@ -196,7 +225,7 @@ graph.getProject_backup = async function (rid, me_email) {
 }
 
 
-graph.getProjects = async function (me_email) {
+graph.getProjects = async function (me_email, data_dir) {
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await web.cypher(query)
 	var data = response.result.map(item => {
@@ -221,12 +250,13 @@ graph.getProjects = async function (me_email) {
 		return 0;
 	});
 
-	data = await getProjectThumbnails(me_email, data)
+	data = await getProjectThumbnails(me_email, data, data_dir)
 	return data
 }
 
 
-async function getProjectThumbnails(me_email, data) {
+async function getProjectThumbnails(me_email, data, data_dir) {
+
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
 	var response = await web.cypher(query)
@@ -238,7 +268,7 @@ async function getProjectThumbnails(me_email, data) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						project.paths.push(part.replace('data', '/api/thumbnails').replace(filename, ''))
+						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
 					}
 				});
 			}
@@ -255,12 +285,12 @@ graph.getProjectFiles = async function (rid, me_email) {
 	return result
 }
 
-graph.getSetFiles = async function (set_rid, me_email) {
+graph.getSetFiles = async function (set_rid, me_email, data_dir) {
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
-		file.thumb = file.path.replace('data', '/api/thumbnails').split('/').slice(0, -1).join('/');
+		file.thumb = file.path.replace(data_dir, '/api/thumbnails').split('/').slice(0, -1).join('/');
 	}
 	return response.result
 }
@@ -356,7 +386,7 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 }
 
-graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_rid) {
+graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_rid, data_dir) {
 
 	if(!ctx.file.description) ctx.file.description = ctx.file.originalname
 	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
@@ -366,6 +396,7 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 				type: "${file_type}",
 				extension: "${extension}",
 				label: "${ctx.file.originalname}",
+				original_filename: "${ctx.file.originalname}",
 				description: "${ctx.file.description}",
 				_active: true
 			}
@@ -375,7 +406,7 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 	console.log(response)
 
 	var file_rid = response.result[0]['@rid']
-	var file_path = path.join('data', 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	var file_path = path.join(data_dir, 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
 	
@@ -908,6 +939,19 @@ graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selecti
 
 }
 
+graph.traverse = async function (rid, direction, userRID) {
+	console.log('traverse', rid, direction, userRID)
+	const access = await this.hasAccess(rid, userRID)
+	console.log('access', access)
+	if(access == false) return
+
+	if (!rid.match(/^#/)) rid = '#' + rid
+	var query = `TRAVERSE ${direction}() FROM ${rid}`
+	console.log(query)
+	var response = await web.sql(query)
+	return response.result
+}
+
 graph.getEntityTypes = async function () {
 	var query = 'select type, count(type) as count from Entity group by type order by count desc'
 	return await web.sql(query)
@@ -915,6 +959,16 @@ graph.getEntityTypes = async function () {
 
 graph.getEntitiesByType = async function (type) {
 	var query = `select from Entity where type = "${type}"`
+	return await web.sql(query)
+}
+
+graph.getEntity = async function (rid, userRID) {
+	var query = `MATCH {type: ${type}, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	return await web.sql(query)
+}
+
+graph.createEntity = async function (type, label,  userRID) {
+	var query = `CREATE Vertex Entity set type = "${type}", label = "${label}", owner = "${userRID}"`
 	return await web.sql(query)
 }
 
@@ -927,6 +981,13 @@ graph.createTag = async function (label, userRID) {
 	if(!label) return
 	var query = `create Vertex Tag set label = "${label}", owner = "${userRID}"`
 	return await web.sql(query)
+}
+
+graph.getNode = async function (userRID) {
+	var query = `MATCH {type:User, as:user, where: (id = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file`
+	var response = await web.sql(query)
+	if(response.result.length == 0) return []
+	return response.result[0]
 }
 
 graph.getDataWithSchema = async function (rid, by_groups) {
@@ -972,52 +1033,9 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 		})
 	}
 
-	if (by_groups) {
-		const tags = await this.getTags()
-		var out = {
-			_attributes: data.result[0].source,
-			tags: {
-				default_display: {
-					relations: [],
-					label: 'default',
-					count: 0
-				},
-			}
-		}
-		var default_group = []
-		for (var relation of schemas) {
-			if (relation.display && relation.display == 'default') {
-				out.tags.default_display.relations.push(relation)
-				out.tags.default_display.count = out.tags.default_display.count + relation.data.length
-			} else if (relation.tags) {
-				if (Array.isArray(relation.tags) && relation.tags.length > 0) {
-					var tag = tags.result.find(x => relation.tags.includes(x.id))
-				} else if (typeof relation.tags == 'string') {
-					var tag = tags.result.find(x => relation.tags == x.id)
-				}
-				if (tag) {
-					var tag_label = tag.label ? tag.label : tag.id
-					if (!out.tags[relation.tags]) {
-						out.tags[relation.tags] = { relations: [], label: tag_label, count: 0 }
-					}
-					out.tags[relation.tags].relations.push(relation)
-					out.tags[relation.tags].count = out.tags[relation.tags].count + relation.data.length
-					// if tag was found but empty, then push to default group
-				} else {
-					default_group.push(relation)
-				}
 
-				// if no tag found, then push to default group
-			} else {
-				default_group.push(relation)
-			}
-
-		}
-		out.tags.default_group = { relations: default_group, label: 'Relations' }
-		return out
-	} else {
 		return schemas
-	}
+	
 
 
 }

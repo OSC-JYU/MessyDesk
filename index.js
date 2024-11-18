@@ -22,7 +22,7 @@ const nomad 		= require('./nomad.js');
 let nats
 let positions
 
-const DATA_DIR = process.env.DATA_DIR || './'
+const DATA_DIR = process.env.DATA_DIR || 'data'
 
 const connections = new Map();
 
@@ -33,6 +33,7 @@ const connections = new Map();
 	const {layout} = await import('./layouts.mjs');
 	nats = queue
 	positions = layout
+	await media.createDataDir(DATA_DIR)
 	await nomad.getStatus()
 	await services.loadServiceAdapters()
 	// create main stream and all consumers in NATS
@@ -104,10 +105,14 @@ app.use(serve(path.join(__dirname, '/public')))
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
 	if(process.env.MODE === 'development') {
-		context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
+		// allow sending AUTH_HEADER for development
+		if(!context.request.headers[AUTH_HEADER]) {
+			context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
+			if(process.env.DEV_USER) 
+				context.request.headers[AUTH_HEADER] = process.env.DEV_USER			
+		}
+
 		context.request.user = await Graph.myId(context.request.headers[AUTH_HEADER])
-		if(process.env.DEV_USER) 
-			context.request.headers[AUTH_HEADER] = process.env.DEV_USER
 	}
 	await next()
 });
@@ -122,7 +127,8 @@ const upload = multer({
 app.use(async function handleError(context, next) {
 
 	try {
-		await next();
+		if(!context.request.user) context.status = 401
+		else await next();
 	} catch (error) {
 		context.status = 500;
 		var error_msg = error
@@ -164,6 +170,16 @@ router.get('/api', function (ctx) {
 	console.log(ctx.request.user)
 })
 
+router.get('/api/settings', function (ctx) {
+	ctx.body = {
+		info: 'MessyDesk API',
+		version: require('./package.json').version,
+		mode: process.env.MODE,
+		data_dir: DATA_DIR,
+		db: process.env.DB_NAME,
+		user: ctx.request.user}
+})
+
 router.get('/connections', function (ctx) {
 	const itr = connections.keys()
 	var arr = []
@@ -200,16 +216,32 @@ router.post('/api/users', async function (ctx) {
 })
 
 router.post('/api/search', async function (ctx) {
-	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	console.log(ctx.request.body)
-	var n = await web.solr(ctx.request.body, me.rid)
+	var n = await web.solr(ctx.request.body, ctx.request.user.rid)
 	ctx.body = n
 })
 
 
 router.post('/api/index', async function (ctx) {
-	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await Graph.index(ctx.request.body, me.rid)
+	//if(ctx.request.user.access == 'admin') {
+		var n = await Graph.index()
+		ctx.body = n
+	//}
+})
+
+router.post('/api/index/me', async function (ctx) {
+
+	var n = await Graph.index(ctx.request.body, ctx.request.user.rid)
+	ctx.body = n
+	
+})
+
+router.post('/api/entities', async function (ctx) {
+	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.get('/api/entities/:rid', async function (ctx) {
+	var n = await Graph.getEntity(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
 	ctx.body = n
 })
 
@@ -233,6 +265,7 @@ router.post('/api/tags', async function (ctx) {
 	ctx.body = n
 })
 
+
 // upload
 
 router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async function (ctx)  {
@@ -247,7 +280,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		ctx.file.description = await media.getTextDescription(ctx.file.path)
 	}
 
-	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set)
+	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set, DATA_DIR)
 	const file_info = await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
 	if(file_info) await Graph.setNodeAttribute(filegraph['@rid'], {key: 'metadata', value: file_info})
 
@@ -352,7 +385,7 @@ router.get('/api/files/:file_rid', async function (ctx) {
 	try {
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
-		const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path))
+		const src = fs.createReadStream(file_metadata.path)
 		if(file_metadata.type =='pdf') {
 			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 			ctx.set('Content-Type', 'application/pdf');
@@ -376,14 +409,14 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join(DATA_DIR, 'data',ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
+    const src = fs.createReadStream(path.join(DATA_DIR, ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
 	ctx.set('Content-Type', 'image/jpeg');
    ctx.body = src
 })
 
 router.get('/api/process/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join(DATA_DIR, 'data',ctx.request.path.replace('/api/process/','/'), 'params.json'));
+    const src = fs.createReadStream(path.join(DATA_DIR, ctx.request.path.replace('/api/process/','/'), 'params.json'));
 	ctx.set('Content-Type', 'application/json');
    ctx.body = src
 })
@@ -396,7 +429,7 @@ router.post('/api/projects', async function (ctx) {
 	var n = await Graph.createProject(ctx.request.body, me.rid)
 	console.log('project created')
 	console.log(n)
-	await media.createProjectDir(n)
+	await media.createProjectDir(n, DATA_DIR)
 	ctx.body = n
 })
 
@@ -411,7 +444,7 @@ router.post('/api/projects/:rid/sets', async function (ctx) {
 })
 
 router.get('/api/projects', async function (ctx) {
-	var n = await Graph.getProjects(ctx.request.headers.mail)
+	var n = await Graph.getProjects(ctx.request.headers.mail, DATA_DIR)
 	ctx.body = n
 })
 
@@ -686,7 +719,7 @@ router.post('/api/nomad/process/files', upload.fields([
 						type: 'image',
 						target: message.file['@rid']
 					}
-					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
+					wsdata.image = base_path.replace(DATA_DIR + '/', 'api/thumbnails/')
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {
@@ -846,7 +879,7 @@ router.get('/api/layouts/:rid', async function (ctx) {
 
 
 router.get('/api/sets/:rid/files', async function (ctx) {
-	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], DATA_DIR)
 	ctx.body = n
 })
 
@@ -883,6 +916,25 @@ router.get('/api/schemas/:schema', async function (ctx) {
 	ctx.body = n
 })
 
+// GRAPH API
+
+router.get('/api/graph/traverse/:rid/:direction', async function (ctx) {
+
+	try {
+		var traverse = await Graph.traverse(ctx.request.params.rid, ctx.request.params.direction, ctx.request.user.rid)
+		console.log(traverse)
+		if(!traverse) {
+			console.log('ei muka ole')
+			ctx.status = 404
+			ctx.body = {}
+		}
+		ctx.body = traverse
+	} catch(e) {
+		throw(e)
+	}
+})
+
+
 router.post('/api/graph/query/me', async function (ctx) {
 	var n = await Graph.myGraph(user, ctx.request.body)
 	ctx.body = n
@@ -903,7 +955,8 @@ router.post('/api/graph/vertices', async function (ctx) {
 
 
 router.get('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.getDataWithSchema(ctx.request.params.rid)
+	//var n = await Graph.getDataWithSchema(ctx.request.params.rid)
+	var n = await Graph.getNode(ctx.request.params.rid, ctx.request.user.rid)
 	ctx.body = n
 })
 
