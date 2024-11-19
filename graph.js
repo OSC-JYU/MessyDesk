@@ -111,10 +111,6 @@ graph.index = async function (userRid) {
         ? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
         : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
-		console.log(filesQuery)
-
-
-
     const response = await web.sql(filesQuery);
 
     let documents = [];
@@ -129,7 +125,6 @@ graph.index = async function (userRid) {
 			} catch (e) {
 				console.log(e)
 			}
-			//item.file.fulltext = await media.getText(item.file.path)
 		}
         documents.push({
             id: item.file['@rid'],
@@ -205,7 +200,7 @@ console.log(query)
 
 
 graph.getProject_backup = async function (rid, me_email) {
-	schema_relations = await this.getSchemaRelations()
+
 	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
 		OPTIONAL MATCH (project)-[r_set]->(set:Set)
@@ -217,8 +212,7 @@ graph.getProject_backup = async function (rid, me_email) {
 		RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 	const options = {
 		serializer: 'graph',
-		format: 'cytoscape',
-		schemas: schema_relations
+		format: 'vueflow'
 	}
 	var result = await web.cypher(query, options)
 	return result
@@ -958,6 +952,7 @@ graph.getEntityTypes = async function () {
 }
 
 graph.getEntitiesByType = async function (type) {
+	if(!type) return []
 	var query = `select from Entity where type = "${type}"`
 	return await web.sql(query)
 }

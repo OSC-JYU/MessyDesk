@@ -201,6 +201,28 @@ media.getTextDescription = async function (filePath, file_type) {
 	  }
 }
 
+
+media.getThumbnail = function(filePath) {
+	try {
+		var thumbfile = 'preview.jpg'
+		var base = path.dirname(filePath)
+		// get filename from path	
+		var f = path.basename(filePath)
+		if(f.includes('.')) {
+			if(f == 'preview.jpg' || f == 'thumbnail.jpg') {
+				thumbfile = f
+			}
+		} else {
+			base = path.join(base, f)
+		}
+		//console.log(p)
+	  	//await fs.access(filePath);
+		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
+	  	return src
+	} catch (err) {
+		return false;
+	}
+}
 function NERsummary(data) {
 	try {
 
@@ -255,6 +277,5 @@ async function checkFileExists(filePath) {
 		return false;
 	}
 }
-
 
 module.exports = media

@@ -168,9 +168,10 @@ web.cypher = async function(query, options) {
 		//if(query && query.toLowerCase().includes('create')) return response.data
 		if(!options.serializer) return response.data
 
-		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
-			options.labels = await getSchemaLabels(config)
-			return convert2CytoScapeJs(response.data, options)
+		else if(options.serializer == 'graph' && options.format == 'vueflow') {
+			//options.labels = await getSchemaLabels(config)
+			return convert2VueFlow(response.data, options)
+			//return convert2CytoScapeJs(response.data, options)
 		} else {
 			return response.data
 		}
@@ -183,7 +184,7 @@ web.cypher = async function(query, options) {
 
 web.solr = async function(data, user_rid) {
 
-    var url = "http://localhost:8983/solr/messydesk/select?q=owner:testi AND " + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+    var url = "http://localhost:8983/solr/messydesk/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
 
 	console.log(url)
 	
@@ -258,7 +259,7 @@ function setParent(vertices, child, parent) {
 
 
 
-async function convert2CytoScapeJs(data, options) {
+async function convert2VueFlow(data, options) {
 	//console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
@@ -270,41 +271,32 @@ async function convert2CytoScapeJs(data, options) {
 			if(!vertex_ids.includes(v.r)) {
 				var node = {}
 
-					node = {
-						data:{
-							id:v.r,
-							name:v.p.label,
-							type: v.t,
-							type_label: options.labels[v.t],
-							active: v.p._active,
-							info: v.p.info,
-							width: 100,
-							description: v.p.description,
-							roi_count: v.p.roi_count,
-							count: v.p.count,
-							idc: v.r.replace(':','_')
-						 }
-					}
-					if(!node.data.active) inactive_nodes.push(v.r)
+				node = {
+					data:{
+						id:v.r,
+						name:v.p.label,
+						type: v.t,
+						//type_label: options.labels[v.t],
+						//active: v.p._active,
+						info: v.p.info,
+						description: v.p.description,
+						roi_count: v.p.roi_count,
+						count: v.p.count,
+						//idc: v.r.replace(':','_')
+						}
+				}
+				//if(!node.data.active) inactive_nodes.push(v.r)
 				
 				//node.data.info = v.p.info
-				if(v.r == options.current) node.data.current = 'yes'
-				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
+				//if(v.r == options.current) node.data.current = 'yes'
+				//if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
+				
+				// direct link to thumbnail
+				if(v.p.path) node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
 
-				// thumbnail paths
-				if(['image', 'pdf'].includes(node.data._type)) {
-					if(v.p.path) {
-						const img_path = path.join(DATA_DIR, path.dirname(v.p.path), 'thumbnail.jpg')
-						const exists = await fs.pathExists(img_path)
-						if(exists) {
-							node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
-						}
-					}
-				}
 				nodes.push(node)
 				vertex_ids.push(v.r)
-				//console.log(node)
 			}
 		}
 	}

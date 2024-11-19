@@ -105,6 +105,7 @@ app.use(serve(path.join(__dirname, '/public')))
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
 	if(process.env.MODE === 'development') {
+		//console.log('auth header: ', context.request.headers[AUTH_HEADER])
 		// allow sending AUTH_HEADER for development
 		if(!context.request.headers[AUTH_HEADER]) {
 			context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
@@ -229,10 +230,18 @@ router.post('/api/index', async function (ctx) {
 })
 
 router.post('/api/index/me', async function (ctx) {
-
 	var n = await Graph.index(ctx.request.body, ctx.request.user.rid)
 	ctx.body = n
-	
+})
+
+router.post('/api/index/:rid', async function (ctx) {
+	var n = await Graph.index(ctx.request.body, ctx.request.params.rid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.delete('/api/index/:rid', async function (ctx) {
+	var n = await Graph.indexRemove(ctx.request.body, ctx.request.params.rid, ctx.request.user.rid)
+	ctx.body = n
 })
 
 router.post('/api/entities', async function (ctx) {
@@ -304,9 +313,21 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 	}
 
 	// ************** EXIF FIX ends**************
-	
 
-	// send to thumbnailer queue 
+	// send to indexer queue if text
+	if (file_type == 'text') {
+		var index_msg = {
+			id:'solr', 
+			task: 'index', 
+			file: filegraph, 
+			userId: ctx.headers[AUTH_HEADER], 
+			target: filegraph['@rid']
+		}
+		console.log('publishing index message', JSON.stringify(index_msg, null, 2))
+		nats.publish(index_msg.id, JSON.stringify(index_msg))					
+	}
+
+	// send to thumbnailer queue if image or PDF
 	if(file_type == 'image' || file_type == 'pdf') {
 		var data = {file: filegraph}
 		data.userId = ctx.headers[AUTH_HEADER]
@@ -315,21 +336,6 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		data.params = {width: 800, type: 'jpeg'}
 		data.id = 'thumbnailer'
 		nats.publish('thumbnailer', JSON.stringify(data))
-
-		// image resolution info
-		// if(file_type == 'image') {
-		// 	var info = {
-		// 		id:'md-imaginary', 
-		// 		task: 'info', 
-		// 		file: filegraph, 
-		// 		userId: ctx.headers[AUTH_HEADER], 
-		// 		target: filegraph['@rid'],
-		// 		params:{task:'info'}
-		// 	}
-		// 	console.log(info)
-		// 	nats.publish(info.id, JSON.stringify(info))
-		// 	console.log('published info task', info)
-		// }
 
 	} 
 
@@ -409,16 +415,16 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join(DATA_DIR, ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
+	const src = media.getThumbnail(ctx.request.path.replace('/api/thumbnails/','./'))
 	ctx.set('Content-Type', 'image/jpeg');
-   ctx.body = src
+   	ctx.body = src
 })
 
 router.get('/api/process/(.*)', async function (ctx) {
 
     const src = fs.createReadStream(path.join(DATA_DIR, ctx.request.path.replace('/api/process/','/'), 'params.json'));
 	ctx.set('Content-Type', 'application/json');
-   ctx.body = src
+    ctx.body = src
 })
 
 // project
@@ -706,7 +712,7 @@ router.post('/api/nomad/process/files', upload.fields([
 		if(message.id === 'thumbnailer') {
 
 			var filepath = message.file.path
-			const base_path = path.join(DATA_DIR, path.dirname(filepath))
+			const base_path = path.dirname(filepath)
 			const filename = message.thumb_name || 'preview.jpg'
 
 			try {
@@ -719,7 +725,8 @@ router.post('/api/nomad/process/files', upload.fields([
 						type: 'image',
 						target: message.file['@rid']
 					}
-					wsdata.image = base_path.replace(DATA_DIR + '/', 'api/thumbnails/')
+					// direct link to thumbnail
+					wsdata.image = 'api/thumbnails/' + base_path
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {

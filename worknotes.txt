@@ -430,4 +430,14 @@ PROJECT
     |                                                              
     |                                                              
     |                                                              
-    +--> SET----------> PROCESS -------> SET                       
+    +--> SET----------> PROCESS -------> SET                   
+
+
+
+REST examples
+
+- add Desk
+http POST :8200/api/projects label=rest-Desk
+
+- add file to Desk
+
