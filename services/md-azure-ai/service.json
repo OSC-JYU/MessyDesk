@@ -1,0 +1,35 @@
+{
+
+    "url": "",
+    "id": "md-azure-ai",
+    "type": "text",
+    "api_type": "elg",
+    "api": "/process",
+    "location": "external",
+    "access": "commercial",
+    "name" :"Azure AI",
+
+    "supported_types": ["text"],
+    "supported_formats": ["txt"],
+
+    "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
+
+    "params": {
+
+    },
+
+
+    "tasks": {
+        "discpiline_info": {
+            "name": "Etsi väitöskirjan tiedot",
+            "output": "json",
+            "description": "Yrittää löytää väitöskirjan tiedot teoksen tekstistä. Anna tekstinä kolme ensimmäistä sivua.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Extract following information from text. \n - title\n - author\n - faculty\n - ISBN\n Give result as JSON file in following format: \n { \"title\": \"\", \"author\": \"\", \"faculty\": \"\" }"}
+                ]
+            }
+        }
+    }
+}

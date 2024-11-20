@@ -6,10 +6,12 @@ const username = 'root'
 const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.ARCADEDB_HOST || 'http://localhost'
-const DB = process.env.ARCADEDB_DB || 'messydesk'
-const PORT = process.env.ARCADEDB_PORT || 2480
+const DB_HOST = process.env.DB_HOST || 'http://localhost'
+const DB = process.env.DB_NAME || 'messydesk'
+const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
+
+const DATA_DIR = process.env.DATA_DIR || './'
 
 console.log(URL)
 
@@ -48,6 +50,9 @@ web.checkDB = async function() {
 	}
 }
 
+web.initSOLR = async function() {
+
+}
 
 web.createDB = async function() {
 	if(!password) {
@@ -64,12 +69,18 @@ web.createDB = async function() {
 	};
 	try {
 		await axios.post(url, {command: `create database ${DB}`}, config)
-		await this.createVertexType('Person')
+		await this.createVertexType('Project')
+		await this.createVertexType('User')
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
-		await this.createVertexType('Project')
-
-		await this.sql("CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}", 'sql')
+		await this.createVertexType('Set')
+		await this.createVertexType('SetProcess')
+		await this.createVertexType('ROI')
+		await this.createVertexType('Entity')
+		
+		//await this.createVertexType('Person')
+		// development user
+		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
@@ -99,6 +110,8 @@ web.createVertexType = async function(type) {
 }
 
 web.sql = async function(query, options) {
+	if(!options) var options = {}
+	
 	var config = {
 		auth: {
 			username: username,
@@ -109,8 +122,26 @@ web.sql = async function(query, options) {
 		command:query,
 		language:'sql'
 	}
-	var response = await axios.post(URL, query_data, config)
-	return response.data
+
+	if(options.serializer) query_data.serializer = options.serializer
+
+	try {
+		var response = await axios.post(URL, query_data, config)
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
+		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
+			options.labels = await getSchemaLabels(config)
+			return convert2CytoScapeJs(response.data, options)
+		} else {
+			return response.data
+		}
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: query, error: e})
+	}
+	//var response = await axios.post(URL, query_data, config)
+	//return response.data
 }
 
 web.cypher = async function(query, options) {
@@ -134,11 +165,13 @@ web.cypher = async function(query, options) {
 
 	try {
 		var response = await axios.post(URL, query_data, config)
-		if(query && query.toLowerCase().includes('create')) return response.data
-		else if(!options.serializer) return response.data
-		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
-			options.labels = await getSchemaLabels(config)
-			return convert2CytoScapeJs(response.data, options)
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
+		else if(options.serializer == 'graph' && options.format == 'vueflow') {
+			//options.labels = await getSchemaLabels(config)
+			return convert2VueFlow(response.data, options)
+			//return convert2CytoScapeJs(response.data, options)
 		} else {
 			return response.data
 		}
@@ -147,6 +180,55 @@ web.cypher = async function(query, options) {
 		throw({msg: 'error in query', query: query, error: e})
 	}
 }
+
+
+web.solr = async function(data, user_rid) {
+
+    var url = "http://localhost:8983/solr/messydesk/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+
+	console.log(url)
+	
+	if(!data.query) {		
+		return []
+	} 
+	
+	try {
+		var response = await axios.get(url)
+		return response.data
+		
+		
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
+
+web.solrDropUserData = async function(userRID) {
+	
+	var url = "http://localhost:8983/solr/messydesk/delete?q=owner:" + userRID + "&wt=json"
+	try {
+		var response = await axios.get(url)
+		return response.data	
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
+
+web.indexDocuments = async function(data) {
+	if(!options) var options = {}
+	const url = "http://localhost:8983/solr/messydesk/update?commit=true"
+
+	try {
+		var response = await axios.post(url, data)
+		return response.data
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+
+}
+
 
 async function getSchemaLabels(config) {
 	const query = "MATCH (s:Schema_)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
@@ -176,7 +258,8 @@ function setParent(vertices, child, parent) {
 
 
 
-async function convert2CytoScapeJs(data, options) {
+
+async function convert2VueFlow(data, options) {
 	//console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
@@ -187,52 +270,33 @@ async function convert2CytoScapeJs(data, options) {
 		for(var v of data.result.vertices) {
 			if(!vertex_ids.includes(v.r)) {
 				var node = {}
-				if(v.p._type) { // schema
-					node = {
-						data:{
-							id:v.r,
-							name:options.labels[v.p._type],
-							type: v.p._type,
-							type_label: v.p._type,
-							info: 'dd',
-							active: true,
-							width: 100,
-							idc: v.r.replace(':','_')
-						}
-					}
-				} else {
-					node = {
-						data:{
-							id:v.r,
-							name:v.p.label,
-							type: v.t,
-							type_label: options.labels[v.t],
-							active: v.p._active,
-							info: v.p.info,
-							width: 100,
-							description: v.p.description,
-							idc: v.r.replace(':','_')
-						 }
-					}
-					if(!node.data.active) inactive_nodes.push(v.r)
-				}
 
-				//node.data.info = v.p.info
-				if(v.r == options.current) node.data.current = 'yes'
-				if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
-				if(v.p.type) node.data._type = v.p.type
-				if(['image', 'pdf'].includes(node.data._type)) {
-					if(v.p.path) {
-						const img_path = path.join(path.dirname(v.p.path), 'thumbnail.jpg')
-						const exists = await fs.pathExists(img_path)
-						if(exists) {
-							node.data.image = path.join('api/thumbnails', path.dirname(v.p.path).replace('data/',''))
+				node = {
+					data:{
+						id:v.r,
+						name:v.p.label,
+						type: v.t,
+						//type_label: options.labels[v.t],
+						//active: v.p._active,
+						info: v.p.info,
+						description: v.p.description,
+						roi_count: v.p.roi_count,
+						count: v.p.count,
+						//idc: v.r.replace(':','_')
 						}
-					}
 				}
+				//if(!node.data.active) inactive_nodes.push(v.r)
+				
+				//node.data.info = v.p.info
+				//if(v.r == options.current) node.data.current = 'yes'
+				//if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
+				if(v.p.type) node.data._type = v.p.type
+				
+				// direct link to thumbnail
+				if(v.p.path) node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+
 				nodes.push(node)
 				vertex_ids.push(v.r)
-				//console.log(node)
 			}
 		}
 	}

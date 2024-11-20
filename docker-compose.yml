@@ -13,7 +13,7 @@ services:
       - arcadedata_md:/home/arcadedb/databases
 
   nats-jetstreams:
-    image: nats:2.10.12-linux
+    image: nats:2.10.22-linux
     container_name: md-nats
     ports:
       - 4222:4222
@@ -22,7 +22,18 @@ services:
     restart: unless-stopped
     command: ["-js", "-m", "8222"]
 
+  solr:
+    image: solr:9.7
+    container_name: md-solr
+    ports:
+      - 8983:8983
+    restart: unless-stopped
+    volumes:
+      - solrdata_md:/var/solr
+    command: ["solr-precreate", "messydesk"]
+
 
 volumes:
   arcadedata_md: {}
+  solrdata_md: {}
 

@@ -3,6 +3,7 @@ const util			= require('util');
 const path 			= require('path');
 const stream 		= require('stream');
 const fs 			= require('fs-extra');
+const sizeOf		= require('image-size');
 
 
 const TYPES = ['image', 'text'] 
@@ -10,10 +11,19 @@ const TYPES = ['image', 'text']
 
 let media = {}
 
-media.createProjectDir = async function(project) {
-	const rid = this.rid2path(project.result[0]['@rid'])
+media.createDataDir = async function(data_dir) {
 	try {
-		await fs.ensureDir(path.join('data', 'projects', rid, 'files'))
+		//await fs.ensureDir(data_dir)
+		await fs.ensureDir(path.join(data_dir, 'projects'))
+	} catch(e) {
+		throw('Could not create data directory!' + e.message)
+	}
+}
+
+media.createProjectDir = async function(project, data_dir) {
+	const rid = this.rid2path(project['@rid'])
+	try {
+		await fs.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -33,14 +43,15 @@ media.uploadFile = async function(uploadpath, filegraph) {
 	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
-	const filedata = {}
+	var filedata = null
 	try {
 		await fs.ensureDir(path.join(filepath, 'process'))
 	
-		filedata.filepath = path.join(filepath, this.rid2path(file_rid) + '.' + filedata.extension)
+		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
 			await fs.rename(uploadpath, filegraph.path);
+			filedata = await this.getImageSize(filegraph.path)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {
@@ -56,6 +67,35 @@ media.uploadFile = async function(uploadpath, filegraph) {
 		await fs.unlink(uploadpath)
 		throw('file saving failed')
 	}
+}
+
+media.getImageSize = async function(filepath) {
+	var filedata = {}
+	try {
+		const dimensions = await sizeOf(filepath)
+		filedata.width = dimensions.width
+		filedata.height = dimensions.height
+		filedata.imgtype = dimensions.type
+		if(dimensions.orientation && dimensions.orientation !== 1) {
+			filedata.orientation = dimensions.orientation
+			// convert exif orientation to degrees needed
+			switch(dimensions.orientation) {
+				case 3:
+					filedata.rotate = 180
+					break;
+				case 6:
+					filedata.rotate = 90
+					break;
+				case 8:
+					filedata.rotate = 270
+					break;
+			}
+		}
+		return filedata
+	} catch (error) {
+		console.error('Image size reading failed:');
+		return null
+	}	
 }
 
 media.saveThumbnail = async function(uploadpath, basepath, filename) {
@@ -79,6 +119,16 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	}
 }
 
+media.readJSON =  async function(fpath) {
+
+	try {
+		const jsonData = await fs.promises.readFile(fpath, 'utf8');
+		return jsonData
+	  } catch (error) {
+		console.error('Error reading data from json:', error);
+		return {}
+	  }
+}
 
 media.writeJSON =  async function(data, filename, fpath) {
 
@@ -114,17 +164,108 @@ media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
 }
 
-media.getTextDescription = async function (filePath) {
-	const maxCharacters = 100;
+media.getText = async function (filePath) {
 	try {
 		const data = await fs.promises.readFile(filePath, 'utf8');
-		const first = data.substring(0, maxCharacters);
-		console.log(first);
-		return first.replace(/(?<!^)\s+/g, ' ').trim().replace(/"/g, '') + '...'
+		return data
 	  } catch (error) {
 		console.error('Error reading file:', error);
 		return ''
 	  }
+}
+
+media.getTextDescription = async function (filePath, file_type) {
+	const maxCharacters = 150;
+	try {
+		const data = await fs.promises.readFile(filePath, 'utf8');
+		// get number of characters	
+		const linecount = data.split(/\n/).length
+
+		if(file_type == 'ner.json') {
+			return NERsummary(data)
+
+		} else if(file_type == 'osd.json') {
+			var json_str = JSON2text(data)
+			if(json_str) {
+				return json_str.substring(0, maxCharacters);
+			}	
+		} else {
+			var first = data.substring(0, maxCharacters);
+			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
+			return 'lines: ' + linecount + '\n' + 'characters:' + data.length + '\n' + first
+		}
+
+	  } catch (error) {
+		console.error('Error reading file:', error);
+		return ''
+	  }
+}
+
+
+media.getThumbnail = function(filePath) {
+	try {
+		var thumbfile = 'preview.jpg'
+		var base = path.dirname(filePath)
+		// get filename from path	
+		var f = path.basename(filePath)
+		if(f.includes('.')) {
+			if(f == 'preview.jpg' || f == 'thumbnail.jpg') {
+				thumbfile = f
+			}
+		} else {
+			base = path.join(base, f)
+		}
+		//console.log(p)
+	  	//await fs.access(filePath);
+		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
+	  	return src
+	} catch (err) {
+		return false;
+	}
+}
+function NERsummary(data) {
+	try {
+
+		var json = JSON.parse(data)
+		const entityCounts = {};
+
+		// Iterate over each entity in the list
+		json.forEach(entity => {
+			const group = entity.entity_group;
+			// Increment the count for each entity group
+			entityCounts[group] = (entityCounts[group] || 0) + 1;
+		});
+		
+		// Create the summary as a plain text string
+		let summary = "Entity Groups Found:\n";
+		for (const [group, count] of Object.entries(entityCounts)) {
+			summary += `- ${group}: ${count}\n`;
+		}
+console.log(summary)
+		return summary;
+
+
+	} catch(e) {
+		console.log('erro in NER summary', e)
+		return null
+	}
+}
+
+function JSON2text(data) {
+	try {
+		var str_json = []
+		var json = JSON.parse(data)
+		for(var key in json) {
+			if(typeof json[key] == 'object') {
+				str_json.push(key + ': ' + JSON.stringify(json[key], null, 2))
+			} else {
+				str_json.push(key + ': ' + json[key])
+			}
+		}
+		return str_json.join('\n')
+	} catch(e) {
+		return null
+	}
 }
 
 async function checkFileExists(filePath) {
@@ -136,6 +277,5 @@ async function checkFileExists(filePath) {
 		return false;
 	}
 }
-
 
 module.exports = media

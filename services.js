@@ -6,8 +6,8 @@ const nomad 		= require('./nomad.js');
 
 let services = {service_list: {}}
 
-services.loadServiceAdapters = async function () {
-	const directoryPath = 'services'
+services.loadServiceAdapters = async function (service_path = 'services') {
+	const directoryPath = service_path
 	try {
 		// Create an object to store the results
 		const servicesObject = {};
@@ -72,48 +72,81 @@ services.getServices = function () {
 }
 
 
-services.getServicesForFile = async function(file) {
+services.getServicesForFile = async function(file, filter) {
 
 	const matches = {for_type: [], for_format: []}
 	if(!file) return matches
 	
 	for(var service in this.service_list) {
-		// check service for supported types
-		if(this.service_list[service].supported_types.includes(file.type)) {
-			// we take only services that has consumer app listening
+		
+		// for Sets we compare only extensions
+		if(file['@type'] == 'Set') {
 			if(this.service_list[service].consumers.length > 0) {
-				//if(this.service_list[service].supported_formats.includes(file.extension)) {
-					var service_with_tasks = pickTasks(this.service_list[service], file)
+				var service_with_tasks = pickTasks(this.service_list[service], file.extensions)
+				matches.for_format.push(service_with_tasks)
+			}			
+		// for Files we compare first type and then extension
+		} else {
+			// check service for supported types
+			//console.log(this.service_list[service].supported_types)
+			//console.log('comparing types..', file.type)
+			if(this.service_list[service].supported_types.includes(file.type)) {
+				// we take only services that has consumer app listening
+				//console.log('supported types')
+				if(this.service_list[service].consumers.length > 0) {
+					var service_with_tasks = pickTasks(this.service_list[service], [file.extension], filter)
 					matches.for_format.push(service_with_tasks)
+				}
+			} 
+		}
 
-					//matches.for_format.push(this.service_list[service])
-				//} //else {
-				//	matches.for_type.push(this.service_list[service])
-			//	}
-			}
-		} 
 
 	}
 	return matches
 }
 
 
-pickTasks = function(service, file) {
+pickTasks = function(service, extensions, filter) {
+
 	const service_object = JSON.parse(JSON.stringify(service))
 	service_object.tasks = {}
 	for(var task in service.tasks) {
+
 		// if task has its own supported formats then compare to file extension
 		if(service.tasks[task].supported_formats) {
-			if(service.tasks[task].supported_formats.includes(file.extension)) {
-				service_object.tasks[task] = service.tasks[task]
+			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
 			}
+			
 		// otherwise compare file extension to service's supported formats
-		} else if(service.supported_formats.includes(file.extension)) {
-
-			service_object.tasks[task] = service.tasks[task]
+		} else {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+			
 		}
+		
 	}	
 	return service_object
+}
+
+filterTask = function(filter, task) {
+	// When filter is provided, we return only tasks that has that filter that matches to query filter
+	if(filter) {
+		if(task.filter && task.filter == filter) {
+			return true
+		}
+		return false
+
+	// by default we filter out tasks with "filter" property
+	} else if(!task.filter) {
+		return true
+	}
+
+	return false
+
 }
 
 checkService = function(array, service) {

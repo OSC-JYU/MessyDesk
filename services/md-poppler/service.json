@@ -22,7 +22,7 @@
             },
             "output": "store",
             "name": "Extract text from PDF",
-            "description": "Creates a txt file from PDF.",
+            "description": "This will extract text from searchable PDF and output a .txt file from. <br/>Note that this is does <b>not</b> do Optical Character Regonition. ",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
@@ -41,7 +41,7 @@
                 "task": "pdf2images"
             },
             "output": "store",
-            "output_node": "Set",
+            "output_set": "PDF as images",
             "name": "Render PDF as images",
             "description": "Renders pages as image files in any resolution.",
             "params_help": {
@@ -62,6 +62,7 @@
                 "task": "pdfimages"
             },
             "output": "store",
+            "output_set": "images of PDF",
             "name": "Extract images from PDF (png)",
             "description": "Extract images from PDF as png files.",
             "params_help": {

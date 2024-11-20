@@ -18,7 +18,7 @@ job "MD-thumbnailer" {
     task "md-imaginary" {
       driver = "docker"
         config {
-            image = "nextcloud/aio-imaginary"
+            image = "nextcloud/aio-imaginary:20240424_101241-latest"
             ports = ["node"]
         }
 

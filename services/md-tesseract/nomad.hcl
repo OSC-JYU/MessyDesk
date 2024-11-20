@@ -18,7 +18,7 @@ job "MD-tesseract" {
     task "md-tesseract" {
       driver = "docker"
         config {
-            image = "osc.jyu.fi/md-tesseract:0.1"
+            image = "osc.repo.kopla.jyu.fi/messydesk/md-tesseract:0.1"
             ports = ["node"]
         }
 

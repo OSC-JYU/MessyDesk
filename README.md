@@ -45,11 +45,14 @@ Start NATS and Arcadedb
     docker-compose up
 
 
-Start Nomad locally:
+Start Nomad locally (Docker):
 
     sudo nomad agent -dev 
 
-Start back end:
+If you are using nomad, you need some extra settings: https://support.hashicorp.com/hc/en-us/articles/20752437319955-Configuring-nomad-podman-driver-with-a-Nomad-Cluster-and-Running-a-Nomad-Job-Using-the-Podman-Driver
+
+
+Start back end (Docker):
 
     MODE=development DB_PASSWORD=node_master node index.js
 
@@ -65,15 +68,16 @@ One more repository is needed:
 
     cd ..
     git clone https://github.com/OSC-JYU/MD-consumers.git
-    cd MD-consumers/MDc-imaginary
+    cd MD-consumers
 
-We need to start two instances:
+Let's start thumbnailer and simple image manipulation service (rotate, scale etc.)
 
-    NAME=md-imaginary node index.mjs
+    NAME=thumbnailer node api-imaginary.mjs
 
 And then in another terminal:
 
-    NAME=thumbnailer node index.mjs
+    NAME=md-imaginary node api-imaginary.mjs
+    
 
 Now we have also two consumer application and two nomad jobs, thumbnailer and imaginary library for image manipulation.
 
@@ -145,9 +149,3 @@ Call service:
 
 
 
-
-### ELG API
-
-https://european-language-grid.readthedocs.io/en/stable/all/A3_API/LTInternalAPI.html#
-
-https://www.lingsoft.fi/en/microservices-at-your-service-bridging-gap-between-nlp-research-and-industry

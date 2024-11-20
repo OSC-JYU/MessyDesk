@@ -12,6 +12,7 @@ const { pipeline }  = require('stream');
 const websocket 	= require('koa-easy-ws')
 
 const Graph 		= require('./graph.js');
+const web 			= require('./web.js');
 
 const media 		= require('./media.js');
 const schema 		= require('./schema.js');
@@ -20,6 +21,8 @@ const services 		= require('./services.js');
 const nomad 		= require('./nomad.js');
 let nats
 let positions
+
+const DATA_DIR = process.env.DATA_DIR || 'data'
 
 const connections = new Map();
 
@@ -30,24 +33,32 @@ const connections = new Map();
 	const {layout} = await import('./layouts.mjs');
 	nats = queue
 	positions = layout
+	await media.createDataDir(DATA_DIR)
 	await nomad.getStatus()
 	await services.loadServiceAdapters()
 	// create main stream and all consumers in NATS
 	await nats.init(services.getServices())
-	// start thumbnailer and Poppler services
-	//var thumb = await services.getServiceAdapterByName('thumbnailer')
-	//await nomad.createService(thumb)
-	//var ima = await services.getServiceAdapterByName('md-imaginary')
-	//await nomad.createService(ima)
+
+	if(process.env.NODE_ENV != 'production') {
+		// start thumbnailer and Poppler services
+		// var thumb = await services.getServiceAdapterByName('thumbnailer')
+		// await nomad.createService(thumb)
+		// var ima = await services.getServiceAdapterByName('md-imaginary')
+		// await nomad.createService(ima)		
+	}
+
 	await Graph.initDB()
 
 })();
 
 process.on( 'SIGINT', async function() {
 	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
-	// we may want to shutdown nomad jobs if we are developing locally
-	//await nomad.stopService('MD-thumbnailer')
-	//await nomad.stopService('MD-imaginary')
+	if(process.env.NODE_ENV != 'production') {
+		// // we may want to shutdown nomad jobs if we are developing locally
+		// await nomad.stopService('MD-thumbnailer')
+		// await nomad.stopService('MD-imaginary')
+	}
+
 	process.exit( );
   })
 
@@ -94,9 +105,15 @@ app.use(serve(path.join(__dirname, '/public')))
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
 	if(process.env.MODE === 'development') {
-		context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
-		if(process.env.DEV_USER) 
-			context.request.headers[AUTH_HEADER] = process.env.DEV_USER
+		//console.log('auth header: ', context.request.headers[AUTH_HEADER])
+		// allow sending AUTH_HEADER for development
+		if(!context.request.headers[AUTH_HEADER]) {
+			context.request.headers[AUTH_HEADER] = "local.user@localhost" // dummy shibboleth
+			if(process.env.DEV_USER) 
+				context.request.headers[AUTH_HEADER] = process.env.DEV_USER			
+		}
+
+		context.request.user = await Graph.myId(context.request.headers[AUTH_HEADER])
 	}
 	await next()
 });
@@ -111,7 +128,8 @@ const upload = multer({
 app.use(async function handleError(context, next) {
 
 	try {
-		await next();
+		if(!context.request.user) context.status = 401
+		else await next();
 	} catch (error) {
 		context.status = 500;
 		var error_msg = error
@@ -144,14 +162,23 @@ router.all('/ws', async (ctx, next) => {
 	  ws.on('message', function message(data) {
 		//console.log('received: %s', data);
 		positions.updateProjectNodePosition(JSON.parse(data))
-		//ws.send(JSON.stringify({target:'#267:25', label:'joo'}))
-		
 	  });
 	}
   })
 
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
+	console.log(ctx.request.user)
+})
+
+router.get('/api/settings', function (ctx) {
+	ctx.body = {
+		info: 'MessyDesk API',
+		version: require('./package.json').version,
+		mode: process.env.MODE,
+		data_dir: DATA_DIR,
+		db: process.env.DB_NAME,
+		user: ctx.request.user}
 })
 
 router.get('/connections', function (ctx) {
@@ -169,47 +196,202 @@ router.get('/connections/test', async function (ctx) {
 
 })
 
-
-
 router.get('/api/me', async function (ctx) {
 
 	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
 
+router.get('/api/users', async function (ctx) {
+
+	if(ctx.request.user.access == 'admin') {
+		ctx.body = await Graph.getUsers()
+	}
+})
+
+router.post('/api/users', async function (ctx) {
+
+	if(ctx.request.user.access == 'admin') {
+		ctx.body = await Graph.createUser(ctx.request.body)
+	}
+})
+
+router.post('/api/search', async function (ctx) {
+	var n = await web.solr(ctx.request.body, ctx.request.user.rid)
+	ctx.body = n
+})
+
+
+router.post('/api/index', async function (ctx) {
+	//if(ctx.request.user.access == 'admin') {
+		var n = await Graph.index()
+		ctx.body = n
+	//}
+})
+
+router.post('/api/index/me', async function (ctx) {
+	var n = await Graph.index(ctx.request.body, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.post('/api/index/:rid', async function (ctx) {
+	var n = await Graph.index(ctx.request.body, ctx.request.params.rid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.delete('/api/index/:rid', async function (ctx) {
+	var n = await Graph.indexRemove(ctx.request.body, ctx.request.params.rid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.post('/api/entities', async function (ctx) {
+	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.get('/api/entities/:rid', async function (ctx) {
+	var n = await Graph.getEntity(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.get('/api/entities/types', async function (ctx) {
+	var n = await Graph.getEntityTypes(ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.get('/api/entities/types/:type', async function (ctx) {
+	var n = await Graph.getEntitiesByType(ctx.request.params.type)
+	ctx.body = n
+})
+
+router.get('/api/tags', async function (ctx) {
+	var n = await Graph.getTags(ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
+
+router.post('/api/tags', async function (ctx) {
+	var n = await Graph.createTag(ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
+	ctx.body = n
+})
 
 
 // upload
 
-router.post('/api/projects/:rid/upload', upload.single('file'), async function (ctx)  {
+router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async function (ctx)  {
 
 	var response = await Graph.getProject_old(ctx.request.params.rid, ctx.request.headers.mail)
 	if (response.result.length == 0) throw('Project not found')
 
 	project_rid = response.result[0]["@rid"]
 	file_type = await media.detectType(ctx)
-	var filegraph = await Graph.createProjectFileGraph(project_rid, ctx, file_type)
-	await media.uploadFile(ctx.file.path, filegraph)
-	var data = {file: filegraph}
-	data.userId = ctx.headers[AUTH_HEADER]
-	data.target = filegraph['@rid']
-	data.task = 'thumbnail'
-	data.params = {width: 800, type: 'jpeg'}
-	data.id = 'thumbnailer'
+	
+	if(file_type == 'text') {
+		ctx.file.description = await media.getTextDescription(ctx.file.path)
+	}
 
-	// send to thumbnailer queue 
-	nats.publish(data.id, JSON.stringify(data))
+	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set, DATA_DIR)
+	const file_info = await media.uploadFile(ctx.file.path, filegraph, DATA_DIR)
+	if(file_info) await Graph.setNodeAttribute(filegraph['@rid'], {key: 'metadata', value: file_info})
+
+	// ************** EXIF FIX **************
+	// if file has EXIF orientation, then we need to rotate it
+	if(file_info && file_info.rotate) {
+
+		var rotatedata = {
+			id:"md-imaginary",
+			task:"rotate",
+			params: {rotate:`${file_info.rotate}`, stripmeta:'true', task:"rotate"},
+			info:"I auto-rotated image based on EXIF orientation.",
+		}
+		fetch(`http://localhost:3000/api/queue/md-imaginary/files/${filegraph['@rid'].replace('#','')}`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(rotatedata)
+		})
+	}
+
+	// ************** EXIF FIX ends**************
+
+	// send to indexer queue if text
+	if (file_type == 'text') {
+		var index_msg = {
+			id:'solr', 
+			task: 'index', 
+			file: filegraph, 
+			userId: ctx.headers[AUTH_HEADER], 
+			target: filegraph['@rid']
+		}
+		console.log('publishing index message', JSON.stringify(index_msg, null, 2))
+		nats.publish(index_msg.id, JSON.stringify(index_msg))					
+	}
+
+	// send to thumbnailer queue if image or PDF
+	if(file_type == 'image' || file_type == 'pdf') {
+		var data = {file: filegraph}
+		data.userId = ctx.headers[AUTH_HEADER]
+		data.target = filegraph['@rid']
+		data.task = 'thumbnail'
+		data.params = {width: 800, type: 'jpeg'}
+		data.id = 'thumbnailer'
+		nats.publish('thumbnailer', JSON.stringify(data))
+
+	} 
+
+	if(ctx.headers[AUTH_HEADER]) {
+		console.log('add file node to visual graph')
+		var wsdata = {
+			command: 'add', 
+			type: file_type, 
+			node: filegraph,
+			set: ctx.params.set
+		}
+		console.log(wsdata)
+		send2UI(ctx.headers[AUTH_HEADER], wsdata)
+	}
 
 	ctx.body = filegraph
 
 })
 
+// get source file of a file
+router.get('/api/files/:file_rid/source', async function (ctx) {
+	try {
+		var source = await Graph.getFileSource(ctx.request.params.file_rid)
+		console.log(source)
+		if(!source) {
+			ctx.status = 404
+			ctx.body = {}
+		}
+
+		var file_metadata = await Graph.getUserFileMetadata(source['@rid'], ctx.request.headers.mail)
+		const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path))
+		if(file_metadata.type =='pdf') {
+			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
+			ctx.set('Content-Type', 'application/pdf');
+		} else if(file_metadata.type =='image') {
+			ctx.set('Content-Type', 'image/png');
+		} else if(file_metadata.type =='text') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else if(file_metadata.type =='data') {
+			ctx.set('Content-Type', 'text/plain; charset=utf-8');
+		} else {
+			ctx.set('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+		}
+	   ctx.body = src
+	} catch(e) {
+		ctx.status = 403
+		ctx.body = {}
+	}
+
+})
 
 router.get('/api/files/:file_rid', async function (ctx) {
 	try {
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
-		const src = fs.createReadStream(file_metadata.path);
+		const src = fs.createReadStream(file_metadata.path)
 		if(file_metadata.type =='pdf') {
 			ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 			ctx.set('Content-Type', 'application/pdf');
@@ -233,39 +415,48 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/thumbnails/','/'), 'preview.jpg'));
+	const src = media.getThumbnail(ctx.request.path.replace('/api/thumbnails/','./'))
 	ctx.set('Content-Type', 'image/jpeg');
-   ctx.body = src
+   	ctx.body = src
 })
 
 router.get('/api/process/(.*)', async function (ctx) {
 
-    const src = fs.createReadStream(path.join('data',ctx.request.path.replace('/api/process/','/'), 'params.json'));
+    const src = fs.createReadStream(path.join(DATA_DIR, ctx.request.path.replace('/api/process/','/'), 'params.json'));
 	ctx.set('Content-Type', 'application/json');
-   ctx.body = src
+    ctx.body = src
 })
 
 // project
 
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
-	console.log(me)
-	console.log('creating project')
+	console.log('creating project', me)
 	var n = await Graph.createProject(ctx.request.body, me.rid)
 	console.log('project created')
 	console.log(n)
-	await media.createProjectDir(n)
+	await media.createProjectDir(n, DATA_DIR)
 	ctx.body = n
 })
 
+
+router.post('/api/projects/:rid/sets', async function (ctx) {
+	var me = await Graph.myId(ctx.request.headers.mail)
+	console.log('creating set')
+	var set = await Graph.createSet(ctx.request.params.rid, ctx.request.body, me.rid)
+	console.log('Set created')
+	console.log(set)
+	ctx.body = set
+})
+
 router.get('/api/projects', async function (ctx) {
-	var n = await Graph.getProjects(ctx.request.headers.mail)
+	var n = await Graph.getProjects(ctx.request.headers.mail, DATA_DIR)
 	ctx.body = n
 })
 
 
 router.get('/api/projects/:rid', async function (ctx) {
-	var n = await Graph.getProject(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await Graph.getProject_backup(ctx.request.params.rid, ctx.request.headers.mail)
 	ctx.body = n
 })
 
@@ -297,11 +488,23 @@ router.get('/api/services', async function (ctx) {
 	ctx.body = await services.getServices()
 })
 
+router.post('/api/services/reload', async function (ctx) {
+	// reload all service adapters
+	try {
+		await services.loadServiceAdapters()
+		ctx.body = {status: 'ok', service:services}
+	} catch(e) {
+		console.log(e)
+		ctx.status = 500
+		ctx.body = {error:e}
+	}
+})
+
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
 	if(file) {
-		var service_list = await services.getServicesForFile(file)
+		var service_list = await services.getServicesForFile(file, ctx.request.query.filter)
 		ctx.body = service_list
 	} else {
 		ctx.body = []
@@ -311,7 +514,7 @@ router.get('/api/services/files/:rid', async function (ctx) {
 
 // add to queue
 
-router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
+router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
 	const file_rid = ctx.request.params.file_rid
@@ -322,12 +525,17 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		var task_name = service.tasks[ctx.request.body.task].name
 		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
 
-		var processNode = await Graph.createProcessGraph(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
+
+
+		var processNode = await Graph.createProcessNode(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
 
 		await media.createProcessDir(processNode.path)
-		await media.writeJSON(ctx.request.body, 'params.json', path.dirname(processNode.path))
+		if(service.tasks[ctx.request.body.task].system_params)
+			ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		
+		await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
-		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode}
+		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)
 
 		ctx.request.body.process = processNode
@@ -335,7 +543,56 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 		ctx.request.body.target = ctx.request.params.file_rid
 		ctx.request.body.userId = ctx.headers[AUTH_HEADER]
 
-		nats.publish(topic, JSON.stringify(ctx.request.body))
+		// do we need info about "parent" file?
+		if(service.tasks[ctx.request.body.task].source) {
+			var source = await Graph.getFileSource(ctx.request.params.file_rid)
+			if(source) {
+				var source_metadata = await Graph.getUserFileMetadata(source['@rid'], ctx.request.headers.mail)
+				ctx.request.body.source = source_metadata
+			}
+		}
+
+		const taskObj = service.tasks[ctx.request.body.task]
+		console.log(taskObj)
+
+		// if output of task is "Set", then create Set node
+		if(taskObj.output_set) {
+			var setNode = await Graph.createOutputSetNode(taskObj.output_set, processNode)
+			wsdata = {command: 'add', type: 'set', target: processNode['@rid'], node:setNode}
+			ctx.request.body.output_set = setNode['@rid']
+			send2UI(ctx.request.headers.mail, wsdata)
+		}
+
+		// ROI request must be handled separately
+		if(ctx.request.params.roi) {
+			// we can work with ROIs only if we have width and height of file
+			if(file_metadata.metadata) var metadata = file_metadata.metadata
+			if(metadata && metadata.width && metadata.height) {
+				var rois = await Graph.getROIs(ctx.request.params.file_rid)
+				for(var roi of rois) {
+					const areaWidth = Math.round(roi.rel_coordinates.width/100*metadata.width)
+					const areaheight = Math.round(roi.rel_coordinates.height/100*metadata.height)
+					const top = Math.round(roi.rel_coordinates.top/100*metadata.height)
+					const left = Math.round(roi.rel_coordinates.left/100*metadata.width)
+					console.log(areaWidth, areaheight, top, left)
+					//ctx.request.body.params.top = Math.round(roi.rel_coordinates.top/100*metadata.height)
+					//ctx.request.body.params.left = Math.round(roi.rel_coordinates.left/100*metadata.width) + areaWidth / 2
+					//377 245 146 390
+
+					ctx.request.body.params.left = left 
+					ctx.request.body.params.top = top 
+					ctx.request.body.params.areawidth = areaWidth 
+					ctx.request.body.params.areaheight = areaheight 
+					//ctx.request.body.params.areawidth = String(areaWidth)
+					//ctx.request.body.params.areaheight = String(Math.round(roi.rel_coordinates.height/100*metadata.height))
+					nats.publish(topic, JSON.stringify(ctx.request.body))
+				}	
+			}
+
+		} else {
+			nats.publish(topic, JSON.stringify(ctx.request.body))
+		}
+
 		ctx.body = ctx.request.params.file_rid
 
 	} catch(e) {
@@ -344,7 +601,44 @@ router.post('/api/queue/:topic/files/:file_rid', async function (ctx) {
 })
 
 
+router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 
+	const topic = ctx.request.params.topic 
+	const set_rid = ctx.request.params.set_rid
+	try {
+		const service = services.getServiceAdapterByName(topic)
+		console.log(service)
+		console.log(ctx.request.body.task)
+		var task_name = service.tasks[ctx.request.body.task].name
+		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
+		console.log(set_metadata)
+
+		var processNode = await Graph.createSetProcessNode(task_name, ctx.request.body, set_metadata, ctx.request.headers.mail)
+
+		// await media.createProcessDir(processNode.path)
+		// if(service.tasks[ctx.request.body.task].system_params)
+		// 	ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		
+		// await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
+		// // add node to UI
+		// var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
+		// send2UI(ctx.request.headers.mail, wsdata)
+
+		// ctx.request.body.process = processNode
+		// ctx.request.body.file = file_metadata
+		// ctx.request.body.target = ctx.request.params.file_rid
+		// ctx.request.body.userId = ctx.headers[AUTH_HEADER]
+
+		// const taskObj = service.tasks[ctx.request.body.task]
+		// console.log(taskObj)
+
+		//nats.publish(topic, JSON.stringify(ctx.request.body))
+		ctx.body = ctx.request.params.set_rid
+
+	} catch(e) {
+		console.log('Queue failed!', e)
+	}
+})
 
 // NOMAD
 // nomad endpoints has different authorisation (auth header)
@@ -354,17 +648,26 @@ router.get('/api/nomad/status', async function (ctx) {
 
 })
 
+
 // endpoint for consumer apps for starting their work horses
 router.post('/api/nomad/service/:name/create', async function (ctx) {
+	// reload all service adapters
+	//await services.loadServiceAdapters()
 	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
-	var service = await nomad.createService(adapter)
-	ctx.body = service
+	try {
+		var service = await nomad.createService(adapter)
+		ctx.body = service
+	} catch(e) {
+		console.log(e)
+		ctx.status = 500
+		ctx.body = {error:e}
+	}
 })
 
 // endpoint for consumer apps to get file to be processed
 router.get('/api/nomad/files/:file_rid', async function (ctx) {
 	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
-    const src = fs.createReadStream(file_metadata.path);
+    const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path));
 	if(file_metadata.type =='pdf') {
 		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
 		ctx.set('Content-Type', 'application/pdf');
@@ -409,10 +712,11 @@ router.post('/api/nomad/process/files', upload.fields([
 		if(message.id === 'thumbnailer') {
 
 			var filepath = message.file.path
-			const base_path = path.join(path.dirname(filepath))
+			const base_path = path.dirname(filepath)
 			const filename = message.thumb_name || 'preview.jpg'
 
 			try {
+				console.log('saving thumbnail to', base_path, filename)
 				await media.saveThumbnail(contentFilepath, base_path, filename)
 				console.log('sending thumbnail WS', filename)
 				if(filename == 'thumbnail.jpg') {
@@ -421,7 +725,8 @@ router.post('/api/nomad/process/files', upload.fields([
 						type: 'image',
 						target: message.file['@rid']
 					}
-					wsdata.image = base_path.replace('data/', 'api/thumbnails/')
+					// direct link to thumbnail
+					wsdata.image = 'api/thumbnails/' + base_path
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {
@@ -429,40 +734,112 @@ router.post('/api/nomad/process/files', upload.fields([
 			}
 
 		} else if(infoFilepath && contentFilepath) {
-			var description = 'Detected text should be here'
-			// for text nodes we create a description from the content of the file
-			if (message.file.type == 'text') {
-				description = await media.getTextDescription(contentFilepath)
-			}
-			const process_rid = message.process['@rid']
-			var fileNode = await Graph.createProcessFileNode(process_rid, message.file.type, message.file.extension, message.file.label, description)
-			console.log(fileNode)
-			await media.uploadFile(contentFilepath, fileNode)
 
-			// for images and pdf files we create normal thumbnails
-			if(message.file.type == 'image' || message.file.type == 'pdf') {
-				var th = {
-					id:'thumbnailer', 
-					task: 'thumbnail', 
-					file: fileNode, 
-					userId: message.userId, 
-					target: fileNode['@rid']
+			
+			// if this is "info" task then we save metadata to file node
+			if(message.task == 'info') {
+				console.log('INFO TASK')
+				console.log(contentFilepath)
+				try {
+					var info = await fse.readFile(contentFilepath)
+					var info_json = JSON.parse(info)
+					await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
+				} catch(e) {
+					console.log('file metadata failed!', e.message)
 				}
-				th.params = {width: 800, type: 'jpeg'}
-				nats.publish(th.id, JSON.stringify(th))
-			} 
+				// else save content to processFileNode
+			} else {
+				var description = ''
+				// for text nodes we create a description from the content of the file
+				if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
+					description = await media.getTextDescription(contentFilepath, message.file.type)
+				}
 
-			if(message.userId) {
-				console.log('add file node to visual graph')
-				var wsdata = {
-					command: 'add', 
-					type: message.file.type, 
-					target: process_rid, 
-					node:fileNode
+				const process_rid = message.process['@rid']	
+				const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
+	
+				await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
+	
+				// for images and pdf files we create normal thumbnails
+				if(message.file.type == 'image' || message.file.type == 'pdf') {
+					var th = {
+						id:'thumbnailer', 
+						task: 'thumbnail', 
+						file: fileNode, 
+						userId: message.userId, 
+						target: fileNode['@rid']
+					}
+					th.params = {width: 800, type: 'jpeg'}
+					nats.publish(th.id, JSON.stringify(th))
+	
+					// image resolution info
+					if(message.file.type == 'image') {
+						var info = {
+							id:'md-imaginary', 
+							task: 'info', 
+							file: fileNode, 
+							userId: message.userId, 
+							target: fileNode['@rid'],
+							params:{task:'info'}
+						}
+						console.log(info)
+						nats.publish(info.id, JSON.stringify(info))
+						console.log('published info task', info)
+					}
+				} 
+
+				// send to indexer queue if text
+				if (message.file.type == 'text') {
+					var index_msg = {
+						id:'solr', 
+						task: 'index', 
+						file: fileNode, 
+						userId: message.userId, 
+						target: fileNode['@rid']
+					}
+					console.log('publishing index message', JSON.stringify(index_msg, null, 2))
+					nats.publish(index_msg.id, JSON.stringify(index_msg))					
 				}
-				console.log(wsdata)
-				send2UI(message.userId, wsdata)
+
+				// create ROIs for ner.json and human.json
+				if(message.file.type == 'ner.json' || message.file.type == 'human.json') {
+					console.log('ner file detected')
+					await Graph.createROIsFromJSON(process_rid, message, fileNode)
+					//console.log('ner file processed')
+					//path.join(data_dir, filegraph.path)
+				}
+
+				// update set file count or add file to visual graph
+				if(message.userId) {
+					// update set's file count if file is part of set
+					if(message.output_set) {
+						var count = await Graph.updateFileCount(message.output_set) // TODO: this might be slow
+						var wsdata = {
+							command: 'update', 
+							type: 'set',
+							target: message.output_set,
+							count: count
+						}
+					// otherwise add node to visual graph
+					} else {
+						var wsdata = {
+							command: 'add', 
+							type: message.file.type, 
+							target: process_rid, 
+							node:fileNode
+					}
+		
+					}
+					//console.log(wsdata)
+					send2UI(message.userId, wsdata)
+				}
 			}
+
+
+
+
+		
+
 
 		// something went wrong in file processing	
 		} else {
@@ -480,27 +857,20 @@ router.post('/api/nomad/process/files', upload.fields([
 
 router.post('/api/nomad/process/files/error', async function (ctx) {
 	console.log(ctx.request.body)
+	if(ctx.request.body && ctx.request.body.error) {
+		var error = ctx.request.body.error
+		console.log('ERROR', error)
+	}
+	if(error.status == 'created_duplicate_source') {
+		
+		console.log('DUPLICATE')
+
+	}
 	ctx.body = []
 
 })
 
 
-
-
-router.get('/api/queries', async function (ctx) {
-	ctx.body = []
-})
-
-
-router.get('/api/menus', async function (ctx) {
-	ctx.body = []
-})
-
-
-router.get('/api/groups', async function (ctx) {
-	ctx.body = []
-
-})
 
 router.post('/api/layouts', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
@@ -516,7 +886,7 @@ router.get('/api/layouts/:rid', async function (ctx) {
 
 
 router.get('/api/sets/:rid/files', async function (ctx) {
-	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], DATA_DIR)
 	ctx.body = n
 })
 
@@ -553,6 +923,25 @@ router.get('/api/schemas/:schema', async function (ctx) {
 	ctx.body = n
 })
 
+// GRAPH API
+
+router.get('/api/graph/traverse/:rid/:direction', async function (ctx) {
+
+	try {
+		var traverse = await Graph.traverse(ctx.request.params.rid, ctx.request.params.direction, ctx.request.user.rid)
+		console.log(traverse)
+		if(!traverse) {
+			console.log('ei muka ole')
+			ctx.status = 404
+			ctx.body = {}
+		}
+		ctx.body = traverse
+	} catch(e) {
+		throw(e)
+	}
+})
+
+
 router.post('/api/graph/query/me', async function (ctx) {
 	var n = await Graph.myGraph(user, ctx.request.body)
 	ctx.body = n
@@ -573,7 +962,8 @@ router.post('/api/graph/vertices', async function (ctx) {
 
 
 router.get('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.getDataWithSchema(ctx.request.params.rid)
+	//var n = await Graph.getDataWithSchema(ctx.request.params.rid)
+	var n = await Graph.getNode(ctx.request.params.rid, ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -583,7 +973,12 @@ router.post('/api/graph/vertices/:rid', async function (ctx) {
 })
 
 router.delete('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.deleteNode(ctx.request.params.rid)
+	var n = await Graph.deleteNode(ctx.request.params.rid, nats)
+	ctx.body = n
+})
+
+router.post('/api/graph/vertices/:rid/rois', async function (ctx) {
+	var n = await Graph.createROIs('#' + ctx.request.params.rid, ctx.request.body)
 	ctx.body = n
 })
 
@@ -627,13 +1022,16 @@ router.get('/api/documents', async function (ctx) {
 
 router.get('/api/documents/:rid', async function (ctx) {
 	var n = await Graph.getNodeAttributes(ctx.request.params.rid)
+	var rois = await Graph.getROIs(ctx.request.params.rid)
 	if(n.result && n.result.length) {
+		n.result[0].rois = rois
 		ctx.body = n.result[0]
 	} else {
 		ctx.status = 404; 
 		ctx.body = {}
 	}
 })
+
 
 async function send2UI(userId, data) {
 	const ws = connections.get(userId)

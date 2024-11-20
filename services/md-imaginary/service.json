@@ -7,8 +7,8 @@
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
     "source_url": "https://github.com/h2non/node-imaginary",
     
-    "supported_types": ["image","text"],
-    "supported_formats": ["png", "jpg","jpeg"],
+    "supported_types": ["image","osd.json"],
+    "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif"],
 
 
     "params": {
@@ -32,6 +32,27 @@
     },
 
     "tasks": {
+        "extract": {
+            "filter": "ROI",
+            "name": "Extract",
+            "output": "image",
+            "description": "Extract images based on Regions of Interest (ROI).",
+            "info": "I extracted images based on your selections.",
+            "roi_params": { 
+                "top": 0,
+                "left": 0,
+                "areawidth": 0,
+                "areaheight": 0
+            },
+
+            "params": {                
+                "_create_set": {
+                    "name": "Create Set",
+                    "help": "Create new Set and place extracted images in it.",
+                    "display": "checkbox"
+            }},
+            "params_help": {}
+        },
         "resize": {
             "name": "Resize by width",
             "output": "image",
@@ -56,15 +77,10 @@
             "description": "Flip image.",
             "params": {},
             "params_help": {},
-            "user_info": "I flipped image"
+            "info": "I flipped image"
         },
 
-        "smartcrop": {
-            "name": "Smart crop",
-            "output": "image",
-            "description": "Remove boring parts",
-            "params": {}
-        },
+
 
         "rotate": {
             "name": "Rotate",
@@ -75,26 +91,26 @@
             },
             "params_help": {
                 "rotate": {
-                    "name": "rotate angle",
-                    "help": "How much image is rotated."
+                    "name": "rotate angle (90, 180, 270)",
+                    "help": "How much image is rotated.",
+                    "default": 90
                 }
             },
             "info": "I rotated image {{rotate}} degrees"
            
         },
 
-        "rotate_osd": {
+        "OSD_rotate": {
             "name": "Auto-rotate (OSD)",
             "output": "image",
+            "source":"source_file",
             "description": "Rotate image by angle given by orientation detection.",
-            "supported_types": ["text"],
-            "supported_formats": ["osd"],
-            "params": {
-                "rotate": 90
-            },
+            "supported_types": ["osd.json"],
+            "supported_formats": ["json"],
             "params": {},
             "params_help": {
-            }
+            },
+            "info": "I rotated image based on orientation detection."
         },
 
         "blur": {
@@ -107,7 +123,8 @@
             "params_help": {
                 "sigma": {
                     "name": "sigma",
-                    "help": "How much image is blurred."
+                    "help": "How much image is blurred. Note that sigma is absolute value, not a percentage. This means that same sigma value blurs small image more than large image.",
+                    "default": 2
                 }
             },
             "info": "I blurred image by {{sigma}}. "

@@ -1,0 +1,56 @@
+{
+
+    "url": "",
+    "id": "md-replicate-image",
+    "type": "image",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"Replicate image AI",
+    "access" : "commercial",
+
+    "supported_types": ["image"],
+    "supported_formats": ["png", "jpg", "jpeg"],
+
+    "description": "Replicate lets you run machine learning models with a cloud API, without having to understand the intricacies of machine learning or manage your own infrastructure. You can run open-source models that other people have published, or package and publish your own models. Those models can be public or private.",
+
+    "params": {
+
+    },
+
+
+    "tasks": {
+        "alt_text": {
+            "name": "Generate ALT text from image",
+            "output": "text",
+            "description": "Describe image based on the visible things in image. Good for ALT text generation.",
+
+            "system_params": {
+                "image_input": "image",
+                "model": "yorickvp/llava-13b",
+                "version": "b5f6212d032508382d61ff00469ddda3e32fd8a0e75dc39d8a4191bb742157fb",
+                "prompts": [
+                    {"role": "system", "content": "This is an alt text description. What can be seen in the front? what can be seen in the back? Is the photo coloured or black and white? indicate in the description if there's text in the picture. Do not use words image or picture in the description. Don't count the amount of things. "}
+                ]
+            }
+        },
+
+        "deoldify": {
+            "name": "Colorize B/W image",
+            "output": "image",
+            "description": "Add colours to old images ",
+            "params": {
+                "model_name": "Artistic",
+                "render_factor": 35
+            },
+            "params_help": {
+                "model_name": "Artistic has more vibrant color but may leave important parts of the image gray.Stable is better for nature scenery and is less prone to leaving gray human parts",
+                "render_factor": "The default value of 35 has been carefully chosen and should work -ok- for most scenarios (but probably won't be the -best-). This determines resolution at which the color portion of the image is rendered. Lower resolution will render faster, and colors also tend to look more vibrant. Older and lower quality images in particular will generally benefit by lowering the render factor. Higher render factors are often better for higher quality images, but the colors may get slightly washed out."
+            },
+            "system_params": {
+                "image_input": "input_image",
+                "model": "arielreplicate/deoldify_image",
+                "version": "0da600fab0c45a66211339f1c16b71345d22f26ef5fea3dca1bb90bb5711e950"
+            }
+        }  
+    }
+}
