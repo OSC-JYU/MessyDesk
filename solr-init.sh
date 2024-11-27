@@ -36,6 +36,7 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
   }
   }' "http://localhost:8983/solr/messydesk/schema"
 
+
 curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"owner",
     "type":"string",
@@ -43,6 +44,7 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "indexed":true
   }
   }' "http://localhost:8983/solr/messydesk/schema"
+
 
   curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"label",
@@ -52,6 +54,7 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
   }
   }' "http://localhost:8983/solr/messydesk/schema"
 
+
   curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"description",
     "type":"string",
@@ -60,13 +63,6 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
   }
   }' "http://localhost:8983/solr/messydesk/schema"
 
-# curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
-#     "name":"fulltext",
-#     "type":"string",
-#     "stored":true,
-#     "indexed":true
-#   }
-#   }' "http://localhost:8983/solr/messydesk/schema"
 
   curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"fulltext",
@@ -76,6 +72,32 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
   }
   }' "http://localhost:8983/solr/messydesk/schema"
 
+
+    curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
+    "name":"error_node",
+    "type":"string",
+    "stored":true,
+    "indexed":true
+  }
+  }' "http://localhost:8983/solr/messydesk/schema"
+
+
+    curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
+    "name":"error",
+    "type":"string",
+    "stored":true,
+    "indexed":true
+  }
+  }' "http://localhost:8983/solr/messydesk/schema"
+
+
+    curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
+    "name":"message",
+    "type":"string",
+    "stored":true,
+    "indexed":true
+  }
+  }' "http://localhost:8983/solr/messydesk/schema"
 
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"description", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"label", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"

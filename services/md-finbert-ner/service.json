@@ -1,5 +1,5 @@
 {
-    "url": "http://localhost:3800",
+    "url": "http://localhost:8600",
     "id": "md-finbert-ner",
     "type": "text",
     "api_type": "elg",

@@ -854,12 +854,34 @@ router.post('/api/nomad/process/files', upload.fields([
 })
 
 
-
+// endpoint for process errors
 router.post('/api/nomad/process/files/error', async function (ctx) {
-	console.log(ctx.request.body)
 	if(ctx.request.body && ctx.request.body.error) {
 		var error = ctx.request.body.error
-		console.log('ERROR', error)
+		if(ctx.request.body.message) {
+			var message = ctx.request.body.message
+			var wsdata = {
+				command: 'update', 
+				target: message.process['@rid'],
+				error: 'error'
+
+			}
+			// write error to node, send update to UI and index error
+			await Graph.setNodeAttribute(message.process['@rid'], {key: 'node_error', value: 'error'})
+			await send2UI(message.userId, wsdata)
+
+			var index_msg = [{
+				type: 'error',
+				id:message.process['@rid'] + '_error', 
+				error_node: message.process['@rid'], 
+				error: JSON.stringify(error), 
+				message: JSON.stringify(message), 
+				owner: message.userId
+			}]
+			await web.indexDocuments(index_msg)				
+		
+		}
+
 	}
 	if(error.status == 'created_duplicate_source') {
 		
@@ -870,7 +892,12 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 
 })
 
+// get node error
+router.get('/api/errors/:rid', async function (ctx) {
 
+	var n = await web.getError(ctx.request.params.rid)
+	ctx.body = n
+})
 
 router.post('/api/layouts', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])

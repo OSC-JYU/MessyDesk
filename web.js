@@ -6,7 +6,7 @@ const username = 'root'
 const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.DB_HOST || 'http://localhost'
+const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
 const DB = process.env.DB_NAME || 'messydesk'
 const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
@@ -181,6 +181,23 @@ web.cypher = async function(query, options) {
 	}
 }
 
+// get node error
+web.getError = async function(rid) {
+	rid = rid.replace('#', '')
+	rid = rid.replace(':', '%3A')	
+	rid = '%23' + rid
+
+	var url = `http://localhost:8983/solr/messydesk/select?indent=true&q=*:*&fq={!term f=type}error&fq={!term f=error_node}${rid}&wt=json` 
+	console.log(url)
+	try {
+		var response = await axios.get(url)
+		return response.data
+			
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
 
 web.solr = async function(data, user_rid) {
 
@@ -291,9 +308,11 @@ async function convert2VueFlow(data, options) {
 				//if(v.r == options.current) node.data.current = 'yes'
 				//if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
 				if(v.p.type) node.data._type = v.p.type
+				if(v.p.node_error) node.data.error = v.p.node_error
 				
 				// direct link to thumbnail
-				if(v.p.path) node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+				if(v.t != 'Process' && v.p.path) 
+					node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
 
 				nodes.push(node)
 				vertex_ids.push(v.r)

@@ -215,8 +215,7 @@ media.getThumbnail = function(filePath) {
 		} else {
 			base = path.join(base, f)
 		}
-		//console.log(p)
-	  	//await fs.access(filePath);
+
 		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
 	  	return src
 	} catch (err) {

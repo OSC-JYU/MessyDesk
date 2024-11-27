@@ -1,6 +1,7 @@
 
 TODO
 
+- NER objects to search
 - user management OK (initial, no research groups yet)
 
 - sets
@@ -156,6 +157,7 @@ MD-tesseract          8400
 MD-pdfalto            8500
 MD-finbert-ner        8600
 MD-human              8700
+MD-paddle-ocr-fin     8800
 MD-imaginary          9000
   
 
@@ -262,6 +264,9 @@ schema + copyFields:
 - label (string) -> text
 - fulltext (text_general) -> text
 - text (text_edge_ngram)
+- error_node (string)
+- error (string)
+
 
 
 
