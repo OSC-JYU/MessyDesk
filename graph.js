@@ -11,13 +11,17 @@ const media = require("./media.js")
 const timers = require('timers-promises')
 
 const MAX_STR_LENGTH = 2048
-
+const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
+const DB = process.env.DB_NAME || 'messydesk'
+const PORT = process.env.DB_PORT || 2480
+const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 let graph = {}
 
 graph.initDB = async function () {
+	web.initURL(URL)
 	console.log(`ArcadeDB: ${web.getURL()}`)
-	console.log(`Checking database...`)
+	console.log(`Checking database...jooko`)
 	let db_exists = false
 	try {
 		db_exists = await web.checkDB()
@@ -90,8 +94,23 @@ graph.createSet = async function (project_rid, data, me_rid) {
 		console.log('Project not found')
 		throw ('Set creation failed! Project not found!')
 	}
-	
+}
 
+graph.createSource = async function (project_rid, data, me_rid) {
+
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
+	var response = await web.cypher(query)
+	console.log(response)
+	console.log(response.result[0])
+	if (response.result.length == 1) {
+		var source = await this.create('Source', data)
+		var source_rid = source['@rid']
+		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
+		return source
+	} else {
+		console.log('Project not found')
+		throw ('Source creation failed! Project not found!')
+	}
 }
 
 
@@ -203,13 +222,14 @@ graph.getProject_backup = async function (rid, me_email) {
 
 	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+		OPTIONAL MATCH (project)-[r_source]->(source:Source)
 		OPTIONAL MATCH (project)-[r_set]->(set:Set)
 		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
 		OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
 		OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
 		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
 		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
-		RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
+		RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 	const options = {
 		serializer: 'graph',
 		format: 'vueflow'

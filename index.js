@@ -1,6 +1,6 @@
 const Koa			= require('koa');
-const Router		= require('koa-router');
-const bodyParser	= require('koa-body');
+const Router		= require('@koa/router');
+const { bodyParser }	= require('@koa/bodyparser');
 const json			= require('koa-json')
 const serve 		= require('koa-static')
 const multer 		= require('@koa/multer');
@@ -197,20 +197,17 @@ router.get('/connections/test', async function (ctx) {
 })
 
 router.get('/api/me', async function (ctx) {
-
 	var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
 	ctx.body = {rid: me.rid, admin: me.admin, group:me.group, access:me.access, id: ctx.request.headers[AUTH_HEADER], mode:process.env.MODE ? process.env.MODE : 'production' }
 })
 
 router.get('/api/users', async function (ctx) {
-
 	if(ctx.request.user.access == 'admin') {
 		ctx.body = await Graph.getUsers()
 	}
 })
 
 router.post('/api/users', async function (ctx) {
-
 	if(ctx.request.user.access == 'admin') {
 		ctx.body = await Graph.createUser(ctx.request.body)
 	}
@@ -274,6 +271,23 @@ router.post('/api/tags', async function (ctx) {
 	ctx.body = n
 })
 
+// data source
+
+router.post('/api/projects/:rid/sources', async function (ctx) {
+	var source = await Graph.createSource(ctx.request.params.rid, ctx.request.body, ctx.request.user.rid)
+	// make request to nextcloud queu
+	var get_dirs = {
+		id:"md-nextcloud",
+		task:"info",
+		file:source,
+		params: {url:`${source.url}`, task:"info"},
+		info:"",
+		userId: ctx.request.user.id
+	}
+	nats.publish(get_dirs.id, JSON.stringify(get_dirs))
+	ctx.body = source
+
+})
 
 // upload
 
@@ -738,12 +752,24 @@ router.post('/api/nomad/process/files', upload.fields([
 			
 			// if this is "info" task then we save metadata to file node
 			if(message.task == 'info') {
-				console.log('INFO TASK')
-				console.log(contentFilepath)
 				try {
 					var info = await fse.readFile(contentFilepath)
 					var info_json = JSON.parse(info)
-					await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
+					if (message.file.type == 'image') {
+						// image info
+						await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: {width:info_json.width, height:info_json.height}})
+					} else {
+						// nextcloud directory info
+						await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: info_json})
+						var wsdata = {
+							command: 'update', 
+							type: message.file.type, 
+							target: message.file['@rid'], 
+							count:info_json.count,
+							description: info_json.size + ' MB'
+						}
+						send2UI(message.userId, wsdata)
+					}
 				} catch(e) {
 					console.log('file metadata failed!', e.message)
 				}
@@ -862,7 +888,7 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 			var message = ctx.request.body.message
 			var wsdata = {
 				command: 'update', 
-				target: message.process['@rid'],
+				target: message.process['@rid'] || '',
 				error: 'error'
 
 			}

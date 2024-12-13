@@ -12,10 +12,19 @@ const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 const DATA_DIR = process.env.DATA_DIR || './'
+const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr'
+const SOLR_CORE = process.env.SOLR_CORE || 'messydesk'
 
 console.log(URL)
 
 let web = {}
+
+web.initURL = function(url) {
+	console.log('intializing URL...')
+	console.log(url)
+	console.log(URL)
+	console.log('done intializing URL')
+}
 
 web.checkService = async function(url) {
 	try {
@@ -50,9 +59,6 @@ web.checkDB = async function() {
 	}
 }
 
-web.initSOLR = async function() {
-
-}
 
 web.createDB = async function() {
 	if(!password) {
@@ -70,6 +76,7 @@ web.createDB = async function() {
 	try {
 		await axios.post(url, {command: `create database ${DB}`}, config)
 		await this.createVertexType('Project')
+		await this.createVertexType('Source')
 		await this.createVertexType('User')
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
@@ -187,7 +194,7 @@ web.getError = async function(rid) {
 	rid = rid.replace(':', '%3A')	
 	rid = '%23' + rid
 
-	var url = `http://localhost:8983/solr/messydesk/select?indent=true&q=*:*&fq={!term f=type}error&fq={!term f=error_node}${rid}&wt=json` 
+	var url = `${SOLR_URL}/${SOLR_CORE}/select?indent=true&q=*:*&fq={!term f=type}error&fq={!term f=error_node}${rid}&wt=json` 
 	console.log(url)
 	try {
 		var response = await axios.get(url)
@@ -201,7 +208,7 @@ web.getError = async function(rid) {
 
 web.solr = async function(data, user_rid) {
 
-    var url = "http://localhost:8983/solr/messydesk/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+    var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
 
 	console.log(url)
 	
@@ -222,7 +229,7 @@ web.solr = async function(data, user_rid) {
 
 web.solrDropUserData = async function(userRID) {
 	
-	var url = "http://localhost:8983/solr/messydesk/delete?q=owner:" + userRID + "&wt=json"
+	var url = `${SOLR_URL}/${SOLR_CORE}/delete?q=owner:" + userRID + "&wt=json`
 	try {
 		var response = await axios.get(url)
 		return response.data	
@@ -234,7 +241,7 @@ web.solrDropUserData = async function(userRID) {
 
 web.indexDocuments = async function(data) {
 	if(!options) var options = {}
-	const url = "http://localhost:8983/solr/messydesk/update?commit=true"
+	const url = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`
 
 	try {
 		var response = await axios.post(url, data)
@@ -302,13 +309,10 @@ async function convert2VueFlow(data, options) {
 						//idc: v.r.replace(':','_')
 						}
 				}
-				//if(!node.data.active) inactive_nodes.push(v.r)
-				
-				//node.data.info = v.p.info
-				//if(v.r == options.current) node.data.current = 'yes'
-				//if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
+
 				if(v.p.type) node.data._type = v.p.type
 				if(v.p.node_error) node.data.error = v.p.node_error
+				if(v.p.metadata) node.data.metadata = v.p.metadata
 				
 				// direct link to thumbnail
 				if(v.t != 'Process' && v.p.path) 

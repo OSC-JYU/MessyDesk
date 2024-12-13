@@ -3,7 +3,7 @@ const path 			= require('path');
 const axios 		= require('axios');
 
 
-const URL = 'http://localhost:4646/v1'
+const URL = process.env.NOMAD_URL || 'http://localhost:4646/v1'
 
 let nomad = {}
 
