@@ -192,7 +192,7 @@ media.getTextDescription = async function (filePath, file_type) {
 		} else {
 			var first = data.substring(0, maxCharacters);
 			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
-			return 'lines: ' + linecount + '\n' + 'characters:' + data.length + '\n' + first
+			return first + '\n' + ' -lines: ' + linecount + '\n' + ' -characters:' + data.length
 		}
 
 	  } catch (error) {

@@ -207,17 +207,48 @@ web.getError = async function(rid) {
 }
 
 web.solr = async function(data, user_rid) {
+	console.log(user_rid)
 
-    var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
+	const query = data.query;
+	const filters = ["type:text", "owner:" + user_rid]; 
+	//const filters = []; 
+	const params = {
+		q: query,
+		//bq: 'torvalds^5',
+		defType: "edismax",
+		qf: "fulltext^5",
+		pf: "fulltext^5",
+		//pf2: "fulltext^5",
+		//pf3: "fulltext^5",
+		hl: true,
+		"hl.fl": "fulltext",
+		"hl.simple.pre": "<em>",
+		"hl.simple.post": "</em>",
+		"hl.snippets": 3,
+		"hl.fragsize": 100,
+		wt: "json",
+		fl: "description,label,id,owner",
+		fq: filters.join(" AND ") // Combine multiple filters if needed
+	};
 
-	console.log(url)
+	const queryString = Object.entries(params)
+	.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+	.join("&");
+  
+  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/select?${queryString}`;
+	console.log(finalUrl)
+
+    //var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + ${data.query} + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
+	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id`;
+	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&pf=description^5 label^3 fulltext^2&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id,type&fq=type:text`
+
 	
 	if(!data.query) {		
 		return []
 	} 
 	
 	try {
-		var response = await axios.get(url)
+		var response = await axios.get(finalUrl)
 		return response.data
 		
 		

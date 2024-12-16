@@ -214,7 +214,7 @@ router.post('/api/users', async function (ctx) {
 })
 
 router.post('/api/search', async function (ctx) {
-	var n = await web.solr(ctx.request.body, ctx.request.user.rid)
+	var n = await web.solr(ctx.request.body, ctx.request.user.id)
 	ctx.body = n
 })
 
@@ -334,7 +334,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 			id:'solr', 
 			task: 'index', 
 			file: filegraph, 
-			userId: ctx.headers[AUTH_HEADER], 
+			userId: ctx.request.user.id, 
 			target: filegraph['@rid']
 		}
 		console.log('publishing index message', JSON.stringify(index_msg, null, 2))
