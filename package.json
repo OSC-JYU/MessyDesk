@@ -24,6 +24,7 @@
     "koa-json": "^2.0.2",
     "koa-static": "^5.0.0",
     "nats": "^2.19.0",
+    "pdf2json": "^3.1.4",
     "timers-promises": "^1.0.1",
     "uuidv4": "^6.2.13",
     "winston": "^3.5.0",

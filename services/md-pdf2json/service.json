@@ -1,0 +1,27 @@
+{
+    "url": "http://localhost:9000",
+    "id": "md-pdf2json",
+    "type": "pdf",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"PDF to JSON",
+    
+    "supported_types": ["pdf"],
+    "supported_formats": ["pdf"],
+
+    "description": "pdf2json is a node.js module converts binary PDF to JSON and text. Built with pdf.js, it extracts text content and interactive form elements for server-side processing and command-line use.",
+    "source_url": "https://github.com/modesty/pdf2json",
+
+
+
+    "tasks": {
+        "pdf2json": {
+            "params": {
+                "task": "pdf2json"
+            },
+            "output": "pdf.json",
+            "name": "Convert PDF to JSON",
+            "description": ""
+        }
+    }
+}

@@ -127,7 +127,7 @@ graph.dropIndex = async function (userRid) {
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
     const filesQuery = userRid
-        ? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+        ? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
         : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
     const response = await web.sql(filesQuery);
@@ -145,19 +145,23 @@ graph.index = async function (userRid) {
 				console.log(e)
 			}
 		}
-        documents.push({
-            id: item.file['@rid'],
-            label: item.file.label,
-            owner: item.file.ownerRid,
-			node: item.file['@type'],
-			type: item.file.type,
-			description: item.file.description,
-			fulltext: item.file.fulltext,
-        });
-        count++;
+		// must have owner
+		if(userRid || item.ownerRid) {
+			documents.push({
+				id: item.file['@rid'],
+				label: item.file.label || '',
+				owner: userRid || item.ownerRid,
+				node: item.file['@type'],
+				type: item.file.type || '',
+				description: item.file.description || '',
+				fulltext: item.file.fulltext,
+			});
+			count++;
+		}
+
         
-        if (count % 100 === 0) {
-			console.log(documents)
+        if (count % 1000 === 0) {
+			//console.log(documents)
             await web.indexDocuments(documents);
             documents = [];
         }
@@ -169,6 +173,7 @@ graph.index = async function (userRid) {
     }
 
     console.log(`${response.result.length} documents indexed`);
+	return count
 }
 
 graph.getUsers = async function () {
@@ -282,7 +287,7 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+						project.paths.push('api/thumbnails/' + part.replace(filename, ''))
 					}
 				});
 			}
@@ -304,13 +309,13 @@ graph.getSetFiles = async function (set_rid, me_email, data_dir) {
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
-		file.thumb = file.path.replace(data_dir, '/api/thumbnails').split('/').slice(0, -1).join('/');
+		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 	}
 	return response.result
 }
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, params, filegraph, me_email) {
+graph.createProcessNode = async function (topic, service, params, filegraph, me_email) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -320,6 +325,8 @@ graph.createProcessNode = async function (topic, params, filegraph, me_email) {
 	var processNode = {}
 	var process_rid = null
 	const process_attrs = { label: topic }
+	process_attrs.service = service.name
+	process_attrs.params = JSON.stringify(params)
 	if(params.info) {
 		process_attrs.info = params.info
 	}

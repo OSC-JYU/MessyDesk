@@ -94,7 +94,7 @@ media.getImageSize = async function(filepath) {
 		return filedata
 	} catch (error) {
 		console.error('Image size reading failed:');
-		return null
+		return filedata
 	}	
 }
 

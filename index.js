@@ -91,10 +91,8 @@ logger.info('MessyDesk started');
 var visitors = []
 
 
-//var app				= new Koa();
-//const app = websockify(new Koa());
 const app = new Koa();
-var router			= new Router();
+var router = new Router();
 
 app.use(websocket())
 app.use(json({ pretty: true, param: 'pretty' }))
@@ -166,6 +164,7 @@ router.all('/ws', async (ctx, next) => {
 	}
   })
 
+
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
 	console.log(ctx.request.user)
@@ -214,7 +213,7 @@ router.post('/api/users', async function (ctx) {
 })
 
 router.post('/api/search', async function (ctx) {
-	var n = await web.solr(ctx.request.body, ctx.request.user.id)
+	var n = await web.solr(ctx.request.body, ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -227,7 +226,8 @@ router.post('/api/index', async function (ctx) {
 })
 
 router.post('/api/index/me', async function (ctx) {
-	var n = await Graph.index(ctx.request.body, ctx.request.user.rid)
+	console.log(ctx.request.user.rid)
+	var n = await Graph.index(ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -342,16 +342,29 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 	}
 
 	// send to thumbnailer queue if image or PDF
-	if(file_type == 'image' || file_type == 'pdf') {
+	if(file_type == 'image') {
 		var data = {file: filegraph}
 		data.userId = ctx.headers[AUTH_HEADER]
 		data.target = filegraph['@rid']
 		data.task = 'thumbnail'
 		data.params = {width: 800, type: 'jpeg'}
 		data.id = 'thumbnailer'
-		nats.publish('thumbnailer', JSON.stringify(data))
+		nats.publish('thumbnailer', JSON.stringify(data))	
 
-	} 
+	} else if(file_type == 'pdf') {
+		var data = {file: filegraph}
+		data.userId = ctx.headers[AUTH_HEADER]
+		data.target = filegraph['@rid']
+		data.task = 'pdf2images'
+		data.params = {
+			firstPageToConvert: '1',
+			lastPageToConvert: '1',
+			task: 'pdf2images'
+		},
+		data.role = 'thumbnail'
+		data.id = 'md-poppler'
+		nats.publish('md-poppler', JSON.stringify(data))
+	}
 
 	if(ctx.headers[AUTH_HEADER]) {
 		console.log('add file node to visual graph')
@@ -368,6 +381,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 	ctx.body = filegraph
 
 })
+
 
 // get source file of a file
 router.get('/api/files/:file_rid/source', async function (ctx) {
@@ -541,7 +555,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 
 
 
-		var processNode = await Graph.createProcessNode(task_name, ctx.request.body, file_metadata, ctx.request.headers.mail)
+		var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail)
 
 		await media.createProcessDir(processNode.path)
 		if(service.tasks[ctx.request.body.task].system_params)
@@ -722,8 +736,8 @@ router.post('/api/nomad/process/files', upload.fields([
 	
 		}
 	
-		// check if this is thumbnail
-		if(message.id === 'thumbnailer') {
+		// check if this is thumbnail ('role' is for PDF thumbnail via Poppler)
+		if(message.id === 'thumbnailer' || message.role === 'thumbnail') {
 
 			var filepath = message.file.path
 			const base_path = path.dirname(filepath)
@@ -733,7 +747,7 @@ router.post('/api/nomad/process/files', upload.fields([
 				console.log('saving thumbnail to', base_path, filename)
 				await media.saveThumbnail(contentFilepath, base_path, filename)
 				console.log('sending thumbnail WS', filename)
-				if(filename == 'thumbnail.jpg') {
+				if(filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
 					var wsdata = {
 						command: 'update', 
 						type: 'image',
@@ -1097,6 +1111,22 @@ async function send2UI(userId, data) {
 
 
 app.use(router.routes());
+
+
+app.use(async (ctx, next) => {
+    
+
+    // Check if ctx.body is not set and the request method is GET
+    if (!ctx.body && ctx.method === 'GET') {
+        // Send index.html as the default response
+        const indexStream = fs.createReadStream(path.join(__dirname, 'public', 'index.html'));
+        ctx.type = 'text/html';
+        ctx.body = indexStream;
+    } else {
+		await next();
+	}
+});
+
 
 var set_port = process.env.PORT || 8200
 var server = app.listen(set_port, function () {

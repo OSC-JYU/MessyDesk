@@ -208,9 +208,8 @@ web.getError = async function(rid) {
 
 web.solr = async function(data, user_rid) {
 	console.log(user_rid)
-
 	const query = data.query;
-	const filters = ["type:text", "owner:" + user_rid]; 
+
 	//const filters = []; 
 	const params = {
 		q: query,
@@ -227,16 +226,22 @@ web.solr = async function(data, user_rid) {
 		"hl.snippets": 3,
 		"hl.fragsize": 100,
 		wt: "json",
-		fl: "description,label,id,owner",
-		fq: filters.join(" AND ") // Combine multiple filters if needed
+		fl: "description,label,id,owner"
+		
 	};
 
 	const queryString = Object.entries(params)
 	.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
 	.join("&");
+
+	// lets handle filters diffrently because that nasty Arcadedb RID format (#425:0)
+	user_rid = user_rid.replace(':', '\\:')
+	user_rid = user_rid.replace('#', '%23')
+	const filters = ["type%3Atext", `owner%3A${user_rid}`]; 
+	var filters_url = filters.join("%20AND%20") // Combine multiple filters if needed
   
   	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/select?${queryString}`;
-	console.log(finalUrl)
+	console.log(finalUrl + '&fq=' + filters_url)
 
     //var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + ${data.query} + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
 	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id`;
@@ -344,6 +349,8 @@ async function convert2VueFlow(data, options) {
 				if(v.p.type) node.data._type = v.p.type
 				if(v.p.node_error) node.data.error = v.p.node_error
 				if(v.p.metadata) node.data.metadata = v.p.metadata
+				if(v.p.service) node.data.service = v.p.service
+				
 				
 				// direct link to thumbnail
 				if(v.t != 'Process' && v.p.path) 
