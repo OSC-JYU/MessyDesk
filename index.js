@@ -1036,6 +1036,14 @@ router.get('/api/graph/vertices/:rid', async function (ctx) {
 
 router.post('/api/graph/vertices/:rid', async function (ctx) {
 	var n = await Graph.setNodeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	if(ctx.request.body.key && ctx.request.body.key == 'description') {
+		var wsdata = {
+			command: 'update', 
+			target: '#' + ctx.request.params.rid, 
+			description: ctx.request.body.value
+		}
+		send2UI(ctx.request.user.id, wsdata)	
+	}
 	ctx.body = n
 })
 
