@@ -242,22 +242,22 @@ router.delete('/api/index/:rid', async function (ctx) {
 })
 
 router.post('/api/entities', async function (ctx) {
-	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
-	ctx.body = n
-})
-
-router.get('/api/entities/:rid', async function (ctx) {
-	var n = await Graph.getEntity(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.user.rid)
 	ctx.body = n
 })
 
 router.get('/api/entities/types', async function (ctx) {
-	var n = await Graph.getEntityTypes(ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getEntityTypes(ctx.request.user.rid)
 	ctx.body = n
 })
 
 router.get('/api/entities/types/:type', async function (ctx) {
 	var n = await Graph.getEntitiesByType(ctx.request.params.type)
+	ctx.body = n
+})
+
+router.get('/api/entities/:rid', async function (ctx) {
+	var n = await Graph.getEntity(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
 	ctx.body = n
 })
 
@@ -953,7 +953,7 @@ router.get('/api/layouts/:rid', async function (ctx) {
 
 
 router.get('/api/sets/:rid/files', async function (ctx) {
-	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], DATA_DIR)
+	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], ctx.request.query)
 	ctx.body = n
 })
 

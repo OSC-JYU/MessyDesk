@@ -2,7 +2,7 @@ const axios = require("axios")
 const path 	= require("path")
 const fs 	= require("fs-extra")
 
-const username = 'root'
+const username = process.env.DB_USER || 'root'
 const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048

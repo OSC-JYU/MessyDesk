@@ -304,14 +304,24 @@ graph.getProjectFiles = async function (rid, me_email) {
 	return result
 }
 
-graph.getSetFiles = async function (set_rid, me_email, data_dir) {
+graph.getSetFiles = async function (set_rid, me_email, params) {
+	if(!isIntegerString(params.skip)) params.skip = 0
+	if(!isIntegerString(params.limit)) params.limit = 20
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
+
+	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
+	var response_count = await web.cypher(count_query)
+
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
 	var response = await web.cypher(query)
 	for (var file of response.result) {
 		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 	}
-	return response.result
+	return { 
+		file_count: response_count.result[0].file_count, 
+		limit: params.limit,
+		skip: params.skip,
+		files: response.result } //response.result
 }
 
 // create Process that is linked to File
@@ -973,19 +983,19 @@ graph.traverse = async function (rid, direction, userRID) {
 	return response.result
 }
 
-graph.getEntityTypes = async function () {
-	var query = 'select type, count(type) as count from Entity group by type order by count desc'
+graph.getEntityTypes = async function (userRID) {
+	var query = `select type, count(type) as count from Entity WHERE owner = "${userRID}" group by type order by count desc`
 	return await web.sql(query)
 }
 
 graph.getEntitiesByType = async function (type) {
 	if(!type) return []
-	var query = `select from Entity where type = "${type}"`
+	var query = `select from Entity where type = "${type}" ORDER by label`
 	return await web.sql(query)
 }
 
 graph.getEntity = async function (rid, userRID) {
-	var query = `MATCH {type: ${type}, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var query = `MATCH {type: Entity, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
 	return await web.sql(query)
 }
 
@@ -1060,6 +1070,10 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 	
 
 
+}
+
+function isIntegerString(value) {
+    return typeof value === "string" && /^-?\d+$/.test(value);
 }
 
 async function getSetFileTypes(set_rid) {

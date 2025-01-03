@@ -61,6 +61,9 @@ ArcadeDB:
  docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.7.1
 
 
+adding users:
+curl -X POST http://localhost:2480/api/v1/server        -d '{ "command": "create user { \"name\": \"messydesk_user\", \"password\": \"MD_USER_PASSWORD\", \"databases\": { \"messydesk\": \"admin\"} }" }'        -H "Content-Type: application/json"        --user root:PASSWORD
+
 
 NATS:
 
