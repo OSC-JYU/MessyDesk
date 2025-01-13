@@ -94,7 +94,7 @@ media.getImageSize = async function(filepath) {
 		return filedata
 	} catch (error) {
 		console.error('Image size reading failed:');
-		return null
+		return filedata
 	}	
 }
 
@@ -192,7 +192,7 @@ media.getTextDescription = async function (filePath, file_type) {
 		} else {
 			var first = data.substring(0, maxCharacters);
 			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
-			return 'lines: ' + linecount + '\n' + 'characters:' + data.length + '\n' + first
+			return first + '\n' + ' -lines: ' + linecount + '\n' + ' -characters:' + data.length
 		}
 
 	  } catch (error) {
@@ -215,8 +215,7 @@ media.getThumbnail = function(filePath) {
 		} else {
 			base = path.join(base, f)
 		}
-		//console.log(p)
-	  	//await fs.access(filePath);
+
 		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
 	  	return src
 	} catch (err) {

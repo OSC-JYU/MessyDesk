@@ -1,7 +1,7 @@
-FROM node:16-alpine
+FROM node:23.3-bookworm-slim
 
 # Install app dependencies
-RUN apk update && apk add bash
+# RUN apt update && apk add bash
 COPY package.json /src/package.json
 RUN cd /src; npm install
 

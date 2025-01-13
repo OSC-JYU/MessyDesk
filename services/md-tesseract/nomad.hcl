@@ -9,6 +9,10 @@ job "MD-tesseract" {
       }
     }
 
+ephemeral_disk {
+  size = 2000
+}
+
     service {
       name     = "md-tesseract"
       port     = "node"

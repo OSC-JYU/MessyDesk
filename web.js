@@ -2,20 +2,29 @@ const axios = require("axios")
 const path 	= require("path")
 const fs 	= require("fs-extra")
 
-const username = 'root'
+const username = process.env.DB_USER || 'root'
 const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.DB_HOST || 'http://localhost'
+const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
 const DB = process.env.DB_NAME || 'messydesk'
 const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 const DATA_DIR = process.env.DATA_DIR || './'
+const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr'
+const SOLR_CORE = process.env.SOLR_CORE || 'messydesk'
 
 console.log(URL)
 
 let web = {}
+
+web.initURL = function(url) {
+	console.log('intializing URL...')
+	console.log(url)
+	console.log(URL)
+	console.log('done intializing URL')
+}
 
 web.checkService = async function(url) {
 	try {
@@ -50,9 +59,6 @@ web.checkDB = async function() {
 	}
 }
 
-web.initSOLR = async function() {
-
-}
 
 web.createDB = async function() {
 	if(!password) {
@@ -70,6 +76,7 @@ web.createDB = async function() {
 	try {
 		await axios.post(url, {command: `create database ${DB}`}, config)
 		await this.createVertexType('Project')
+		await this.createVertexType('Source')
 		await this.createVertexType('User')
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
@@ -181,19 +188,72 @@ web.cypher = async function(query, options) {
 	}
 }
 
+// get node error
+web.getError = async function(rid) {
+	rid = rid.replace('#', '')
+	rid = rid.replace(':', '%3A')	
+	rid = '%23' + rid
+
+	var url = `${SOLR_URL}/${SOLR_CORE}/select?indent=true&q=*:*&fq={!term f=type}error&fq={!term f=error_node}${rid}&wt=json` 
+	console.log(url)
+	try {
+		var response = await axios.get(url)
+		return response.data
+			
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: data, error: e})
+	}
+}
 
 web.solr = async function(data, user_rid) {
+	console.log(user_rid)
+	const query = data.query;
 
-    var url = "http://localhost:8983/solr/messydesk/select?q=" + data.query + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json"
+	//const filters = []; 
+	const params = {
+		q: query,
+		//bq: 'torvalds^5',
+		defType: "edismax",
+		qf: "fulltext^5",
+		pf: "fulltext^5",
+		//pf2: "fulltext^5",
+		//pf3: "fulltext^5",
+		hl: true,
+		"hl.fl": "fulltext",
+		"hl.simple.pre": "<em>",
+		"hl.simple.post": "</em>",
+		"hl.snippets": 3,
+		"hl.fragsize": 100,
+		wt: "json",
+		fl: "description,label,id,owner"
+		
+	};
 
-	console.log(url)
+	const queryString = Object.entries(params)
+	.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+	.join("&");
+
+	// lets handle filters diffrently because that nasty Arcadedb RID format (#425:0)
+	user_rid = user_rid.replace(':', '\\:')
+	user_rid = user_rid.replace('#', '%23')
+	const filters = ["type%3Atext", `owner%3A${user_rid}`]; 
+	var filters_url = filters.join("%20AND%20") // Combine multiple filters if needed
+  
+  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/select?${queryString}`;
+	console.log(finalUrl + '&fq=' + filters_url)
+
+    //var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + ${data.query} + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
+	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id`;
+	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&pf=description^5 label^3 fulltext^2&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id,type&fq=type:text`
+
 	
 	if(!data.query) {		
 		return []
 	} 
 	
 	try {
-		var response = await axios.get(url)
+		var response = await axios.get(finalUrl)
 		return response.data
 		
 		
@@ -205,7 +265,7 @@ web.solr = async function(data, user_rid) {
 
 web.solrDropUserData = async function(userRID) {
 	
-	var url = "http://localhost:8983/solr/messydesk/delete?q=owner:" + userRID + "&wt=json"
+	var url = `${SOLR_URL}/${SOLR_CORE}/delete?q=owner:" + userRID + "&wt=json`
 	try {
 		var response = await axios.get(url)
 		return response.data	
@@ -217,7 +277,7 @@ web.solrDropUserData = async function(userRID) {
 
 web.indexDocuments = async function(data) {
 	if(!options) var options = {}
-	const url = "http://localhost:8983/solr/messydesk/update?commit=true"
+	const url = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`
 
 	try {
 		var response = await axios.post(url, data)
@@ -285,15 +345,16 @@ async function convert2VueFlow(data, options) {
 						//idc: v.r.replace(':','_')
 						}
 				}
-				//if(!node.data.active) inactive_nodes.push(v.r)
-				
-				//node.data.info = v.p.info
-				//if(v.r == options.current) node.data.current = 'yes'
-				//if(options.me && v.r == options.me.rid ) node.data.me = 'yes'
+
 				if(v.p.type) node.data._type = v.p.type
+				if(v.p.node_error) node.data.error = v.p.node_error
+				if(v.p.metadata) node.data.metadata = v.p.metadata
+				if(v.p.service) node.data.service = v.p.service
+				
 				
 				// direct link to thumbnail
-				if(v.p.path) node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+				if(v.t != 'Process' && v.p.path) 
+					node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
 
 				nodes.push(node)
 				vertex_ids.push(v.r)

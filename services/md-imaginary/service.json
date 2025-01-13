@@ -20,13 +20,13 @@
         "width": {
             "name": "width",
             "default": 200,
-            "help": "Size of the image",
+            "help": "Width of the image in pixels",
             "display": "textinput"
         },
         "height": {
             "name": "height",
             "default": 200,
-            "help": "",
+            "help": "Height of the image in pixels",
             "display": "textinput"
         }
     },
@@ -93,7 +93,9 @@
                 "rotate": {
                     "name": "rotate angle (90, 180, 270)",
                     "help": "How much image is rotated.",
-                    "default": 90
+                    "default": 90,
+                    "values":[{"title": "90", "value": 90}, {"title": "180", "value": 180}, {"title": "-90", "value": 270}],
+                    "display": "dropdown"
                 }
             },
             "info": "I rotated image {{rotate}} degrees"

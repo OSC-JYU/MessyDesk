@@ -11,13 +11,17 @@ const media = require("./media.js")
 const timers = require('timers-promises')
 
 const MAX_STR_LENGTH = 2048
-
+const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
+const DB = process.env.DB_NAME || 'messydesk'
+const PORT = process.env.DB_PORT || 2480
+const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 let graph = {}
 
 graph.initDB = async function () {
+	web.initURL(URL)
 	console.log(`ArcadeDB: ${web.getURL()}`)
-	console.log(`Checking database...`)
+	console.log(`Checking database...jooko`)
 	let db_exists = false
 	try {
 		db_exists = await web.checkDB()
@@ -90,8 +94,23 @@ graph.createSet = async function (project_rid, data, me_rid) {
 		console.log('Project not found')
 		throw ('Set creation failed! Project not found!')
 	}
-	
+}
 
+graph.createSource = async function (project_rid, data, me_rid) {
+
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
+	var response = await web.cypher(query)
+	console.log(response)
+	console.log(response.result[0])
+	if (response.result.length == 1) {
+		var source = await this.create('Source', data)
+		var source_rid = source['@rid']
+		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
+		return source
+	} else {
+		console.log('Project not found')
+		throw ('Source creation failed! Project not found!')
+	}
 }
 
 
@@ -108,7 +127,7 @@ graph.dropIndex = async function (userRid) {
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
     const filesQuery = userRid
-        ? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+        ? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
         : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
     const response = await web.sql(filesQuery);
@@ -126,19 +145,23 @@ graph.index = async function (userRid) {
 				console.log(e)
 			}
 		}
-        documents.push({
-            id: item.file['@rid'],
-            label: item.file.label,
-            owner: item.file.ownerRid,
-			node: item.file['@type'],
-			type: item.file.type,
-			description: item.file.description,
-			fulltext: item.file.fulltext,
-        });
-        count++;
+		// must have owner
+		if(userRid || item.ownerRid) {
+			documents.push({
+				id: item.file['@rid'],
+				label: item.file.label || '',
+				owner: userRid || item.ownerRid,
+				node: item.file['@type'],
+				type: item.file.type || '',
+				description: item.file.description || '',
+				fulltext: item.file.fulltext,
+			});
+			count++;
+		}
+
         
-        if (count % 100 === 0) {
-			console.log(documents)
+        if (count % 1000 === 0) {
+			//console.log(documents)
             await web.indexDocuments(documents);
             documents = [];
         }
@@ -150,6 +173,7 @@ graph.index = async function (userRid) {
     }
 
     console.log(`${response.result.length} documents indexed`);
+	return count
 }
 
 graph.getUsers = async function () {
@@ -203,13 +227,14 @@ graph.getProject_backup = async function (rid, me_email) {
 
 	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+		OPTIONAL MATCH (project)-[r_source]->(source:Source)
 		OPTIONAL MATCH (project)-[r_set]->(set:Set)
 		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
 		OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
 		OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
 		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
 		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
-		RETURN  file, set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
+		RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 	const options = {
 		serializer: 'graph',
 		format: 'vueflow'
@@ -262,7 +287,7 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+						project.paths.push('api/thumbnails/' + part.replace(filename, ''))
 					}
 				});
 			}
@@ -279,18 +304,34 @@ graph.getProjectFiles = async function (rid, me_email) {
 	return result
 }
 
-graph.getSetFiles = async function (set_rid, me_email, data_dir) {
+graph.getSetFiles = async function (set_rid, me_email, params) {
+	if(!isIntegerString(params.skip)) params.skip = 0
+	if(!isIntegerString(params.limit)) params.limit = 20
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file`
+
+	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
+	var response_count = await web.cypher(count_query)
+
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File)  WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
 	var response = await web.cypher(query)
+	
+	// thumbnails and entities
 	for (var file of response.result) {
-		file.thumb = file.path.replace(data_dir, '/api/thumbnails').split('/').slice(0, -1).join('/');
+		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		// TODO: do this in one query!
+		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label`
+		var entity_response = await web.cypher(entity_query)
+		file.entities = entity_response.result
 	}
-	return response.result
+	return { 
+		file_count: response_count.result[0].file_count, 
+		limit: params.limit,
+		skip: params.skip,
+		files: response.result } //response.result
 }
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, params, filegraph, me_email) {
+graph.createProcessNode = async function (topic, service, params, filegraph, me_email) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -300,6 +341,8 @@ graph.createProcessNode = async function (topic, params, filegraph, me_email) {
 	var processNode = {}
 	var process_rid = null
 	const process_attrs = { label: topic }
+	process_attrs.service = service.name
+	process_attrs.params = JSON.stringify(params)
 	if(params.info) {
 		process_attrs.info = params.info
 	}
@@ -713,15 +756,21 @@ graph.merge = async function (type, node) {
 
 
 // data = {from:[RID] ,relation: '', to: [RID]}
-graph.connect = async function (from, relation, to, match_by_id) {
+graph.connect = async function (from, relation, to) {
 	var relation_type = ''
 	var attributes = ''
-	if (!match_by_id) {
-		if (!from.match(/^#/)) from = '#' + from
-		if (!to.match(/^#/)) to = '#' + to
+
+	if (!from.match(/^#/)) from = '#' + from
+	if (!to.match(/^#/)) to = '#' + to
+
+	// check for existing link
+	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" RETURN r`
+	console.log(query)
+	var response = await web.cypher(query)
+	if (response.result.length > 0) {
+		throw ('Link already exists!')
 	}
-	//relation = this.checkRelationData(relation)
-	//console.log(relation)
+
 	if (typeof relation == 'object') {
 		relation_type = relation.type
 		if (relation.attributes)
@@ -730,9 +779,6 @@ graph.connect = async function (from, relation, to, match_by_id) {
 		relation_type = relation
 	}
 	var query = `MATCH (from), (to) WHERE id(from) = "${from}" AND id(to) = "${to}" CREATE (from)-[:${relation_type} ${attributes}]->(to) RETURN from, to`
-	if (match_by_id) {
-		query = `MATCH (from), (to) WHERE from.id = "${from}" AND to.id = "${to}" CREATE (from)-[:${relation_type} ${attributes}]->(to) RETURN from, to`
-	}
 
 	return web.cypher(query)
 }
@@ -946,25 +992,50 @@ graph.traverse = async function (rid, direction, userRID) {
 	return response.result
 }
 
-graph.getEntityTypes = async function () {
-	var query = 'select type, count(type) as count from Entity group by type order by count desc'
-	return await web.sql(query)
+graph.getEntityTypes = async function (userRID) {
+	var query = `select type, count(type) AS count, LIST(label) AS labels, LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
+	var types = await web.sql(query)
+	return types.result
 }
 
 graph.getEntitiesByType = async function (type) {
 	if(!type) return []
-	var query = `select from Entity where type = "${type}"`
+	var query = `select from Entity where type = "${type}" ORDER by label`
 	return await web.sql(query)
 }
 
 graph.getEntity = async function (rid, userRID) {
-	var query = `MATCH {type: ${type}, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var query = `MATCH {type: Entity, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
 	return await web.sql(query)
 }
 
-graph.createEntity = async function (type, label,  userRID) {
+graph.getLinkedEntities = async function (rid, userRID) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity['@rid'] AS rid, entity.color AS color, entity.icon AS icon`
+
+	var response = await web.sql(query)
+	return response.result
+}
+
+graph.createEntity = async function (type, label, userRID) {
+	if(!type || type == 'undefined') return
 	var query = `CREATE Vertex Entity set type = "${type}", label = "${label}", owner = "${userRID}"`
 	return await web.sql(query)
+}
+
+graph.linkEntity = async function (rid, vid, userRID) {	
+	if(!rid.match(/^#/)) rid = '#' + rid
+	if(!vid.match(/^#/)) vid = '#' + vid
+	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var response = await web.sql(query)
+	var entity = response.result[0]
+	console.log(entity)
+	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
+	response = await web.sql(query)
+	console.log(response.result)
+	var target = response.result[0]
+	if(!entity || !target) return	
+	await this.connect(vid, 'HAS_ENTITY',rid)
 }
 
 graph.getTags = async function (userRID) {
@@ -1033,6 +1104,10 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 	
 
 
+}
+
+function isIntegerString(value) {
+    return typeof value === "string" && /^-?\d+$/.test(value);
 }
 
 async function getSetFileTypes(set_rid) {

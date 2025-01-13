@@ -5,14 +5,11 @@ import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
 
 import Graph from './graph.js';
-
 import nomad from './nomad.js';
-import services from './services.js';
-import {got} from 'got';
 
 import { connect, RetentionPolicy, AckPolicy } from "nats";
 
-const servers =  "nats://localhost:4222";
+const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
 
 
 
@@ -22,8 +19,9 @@ export let queue = {}
 
 
 queue.init = async function(services) {
+  console.log('NATS: connecting...', NATS_URL)
   this.nc = await connect({
-    servers: [servers],
+    servers: [NATS_URL],
   });
   this.js = this.nc.jetstream();
   this.jsm = await this.js.jetstreamManager();

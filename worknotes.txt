@@ -1,6 +1,7 @@
 
 TODO
 
+- NER objects to search
 - user management OK (initial, no research groups yet)
 
 - sets
@@ -59,6 +60,9 @@ ArcadeDB:
 
  docker run --rm -p 2480:2480 -p 2424:2424 -v messydesk_arcade:/home/arcadedb/databases  -e JAVA_OPTS="-Darcadedb.server.rootPassword=node_master" arcadedata/arcadedb:23.7.1
 
+
+adding users:
+curl -X POST http://localhost:2480/api/v1/server        -d '{ "command": "create user { \"name\": \"messydesk_user\", \"password\": \"MD_USER_PASSWORD\", \"databases\": { \"messydesk\": \"admin\"} }" }'        -H "Content-Type: application/json"        --user root:PASSWORD
 
 
 NATS:
@@ -156,6 +160,7 @@ MD-tesseract          8400
 MD-pdfalto            8500
 MD-finbert-ner        8600
 MD-human              8700
+MD-paddle-ocr-fin     8800
 MD-imaginary          9000
   
 
@@ -262,8 +267,13 @@ schema + copyFields:
 - label (string) -> text
 - fulltext (text_general) -> text
 - text (text_edge_ngram)
+- error_node (string)
+- error (string)
 
 
+
+
+https://solr.apache.org/guide/6_6/the-extended-dismax-query-parser.html
 
 ************************** SOLR ends ************************************
 
@@ -289,6 +299,35 @@ OCR: https://github.com/mauvilsa/tesseract-recognize
 
 
 
+TESTING WITH NGINX
+- ensure that URL paths are working
+
+    location /md {
+        rewrite ^/md/(.*)$ /$1 break;
+        proxy_pass http://localhost:8200;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Optional: Allow WebSocket support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+        error_page 404 /404.html;
+        location = /404.html {
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+        }
+    }
+
+
+sudo setsebool -P httpd_can_network_connect 1
+
 
 MISC:
 
@@ -298,7 +337,14 @@ https://github.com/jagenjo/litegraph.js/
 
 
 
+
+
+
+
 CRUNCHES suggestions:
+
+
+https://demo.verapdf.org/
 
 https://github.com/mattiasw/ExifReader
 

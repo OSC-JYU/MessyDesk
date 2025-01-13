@@ -1,0 +1,25 @@
+{
+    "url": "http://localhost:8900",
+    "id": "md-nextcloud",
+    "type": "source",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"nextcloud",
+    "source_url": "https://nextcloud.com/",
+    
+    "supported_types": ["source"],
+    "supported_formats": [],
+
+    "description": "Open source content collaboration platform.",
+
+
+    "tasks": {
+        "get_directory_content": {
+            "name": "Get list of directory content",
+            "output": "json",
+            "description": "",
+            "info": "",
+            "hidden": true
+        }
+    }
+}
