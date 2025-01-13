@@ -241,6 +241,17 @@ router.delete('/api/index/:rid', async function (ctx) {
 	ctx.body = n
 })
 
+router.post('/api/entities/:rid/vertex/:vid', async function (ctx) {
+	var n = await Graph.linkEntity(ctx.request.params.rid, ctx.request.params.vid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.delete('/api/entities/:rid/vertex/:vid', async function (ctx) {
+	var n = await Graph.unlinkEntity(ctx.request.params.rid, ctx.request.params.vid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+
 router.post('/api/entities', async function (ctx) {
 	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.user.rid)
 	ctx.body = n
@@ -257,19 +268,20 @@ router.get('/api/entities/types/:type', async function (ctx) {
 })
 
 router.get('/api/entities/:rid', async function (ctx) {
-	var n = await Graph.getEntity(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER])
+	var n = await Graph.getEntity(ctx.request.params.rid)
 	ctx.body = n
 })
 
-router.get('/api/tags', async function (ctx) {
-	var n = await Graph.getTags(ctx.request.headers[AUTH_HEADER])
-	ctx.body = n
-})
 
-router.post('/api/tags', async function (ctx) {
-	var n = await Graph.createTag(ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
-	ctx.body = n
-})
+// router.get('/api/tags', async function (ctx) {
+// 	var n = await Graph.getTags(ctx.request.headers[AUTH_HEADER])
+// 	ctx.body = n
+// })
+
+// router.post('/api/tags', async function (ctx) {
+// 	var n = await Graph.createTag(ctx.request.body.label, ctx.request.headers[AUTH_HEADER])
+// 	ctx.body = n
+// })
 
 // data source
 
@@ -1097,9 +1109,11 @@ router.get('/api/documents', async function (ctx) {
 
 router.get('/api/documents/:rid', async function (ctx) {
 	var n = await Graph.getNodeAttributes(ctx.request.params.rid)
+	var entities = await Graph.getLinkedEntities(ctx.request.params.rid, ctx.request.user.rid)
 	var rois = await Graph.getROIs(ctx.request.params.rid)
 	if(n.result && n.result.length) {
 		n.result[0].rois = rois
+		n.result[0].entities = entities
 		ctx.body = n.result[0]
 	} else {
 		ctx.status = 404; 

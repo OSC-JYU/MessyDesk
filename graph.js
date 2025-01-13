@@ -312,10 +312,16 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
 	var response_count = await web.cypher(count_query)
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File)  WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
 	var response = await web.cypher(query)
+	
+	// thumbnails and entities
 	for (var file of response.result) {
 		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		// TODO: do this in one query!
+		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label`
+		var entity_response = await web.cypher(entity_query)
+		file.entities = entity_response.result
 	}
 	return { 
 		file_count: response_count.result[0].file_count, 
@@ -750,15 +756,21 @@ graph.merge = async function (type, node) {
 
 
 // data = {from:[RID] ,relation: '', to: [RID]}
-graph.connect = async function (from, relation, to, match_by_id) {
+graph.connect = async function (from, relation, to) {
 	var relation_type = ''
 	var attributes = ''
-	if (!match_by_id) {
-		if (!from.match(/^#/)) from = '#' + from
-		if (!to.match(/^#/)) to = '#' + to
+
+	if (!from.match(/^#/)) from = '#' + from
+	if (!to.match(/^#/)) to = '#' + to
+
+	// check for existing link
+	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" RETURN r`
+	console.log(query)
+	var response = await web.cypher(query)
+	if (response.result.length > 0) {
+		throw ('Link already exists!')
 	}
-	//relation = this.checkRelationData(relation)
-	//console.log(relation)
+
 	if (typeof relation == 'object') {
 		relation_type = relation.type
 		if (relation.attributes)
@@ -767,9 +779,6 @@ graph.connect = async function (from, relation, to, match_by_id) {
 		relation_type = relation
 	}
 	var query = `MATCH (from), (to) WHERE id(from) = "${from}" AND id(to) = "${to}" CREATE (from)-[:${relation_type} ${attributes}]->(to) RETURN from, to`
-	if (match_by_id) {
-		query = `MATCH (from), (to) WHERE from.id = "${from}" AND to.id = "${to}" CREATE (from)-[:${relation_type} ${attributes}]->(to) RETURN from, to`
-	}
 
 	return web.cypher(query)
 }
@@ -984,8 +993,9 @@ graph.traverse = async function (rid, direction, userRID) {
 }
 
 graph.getEntityTypes = async function (userRID) {
-	var query = `select type, count(type) as count from Entity WHERE owner = "${userRID}" group by type order by count desc`
-	return await web.sql(query)
+	var query = `select type, count(type) AS count, LIST(label) AS labels, LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
+	var types = await web.sql(query)
+	return types.result
 }
 
 graph.getEntitiesByType = async function (type) {
@@ -999,9 +1009,33 @@ graph.getEntity = async function (rid, userRID) {
 	return await web.sql(query)
 }
 
-graph.createEntity = async function (type, label,  userRID) {
+graph.getLinkedEntities = async function (rid, userRID) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity['@rid'] AS rid, entity.color AS color, entity.icon AS icon`
+
+	var response = await web.sql(query)
+	return response.result
+}
+
+graph.createEntity = async function (type, label, userRID) {
+	if(!type || type == 'undefined') return
 	var query = `CREATE Vertex Entity set type = "${type}", label = "${label}", owner = "${userRID}"`
 	return await web.sql(query)
+}
+
+graph.linkEntity = async function (rid, vid, userRID) {	
+	if(!rid.match(/^#/)) rid = '#' + rid
+	if(!vid.match(/^#/)) vid = '#' + vid
+	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var response = await web.sql(query)
+	var entity = response.result[0]
+	console.log(entity)
+	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
+	response = await web.sql(query)
+	console.log(response.result)
+	var target = response.result[0]
+	if(!entity || !target) return	
+	await this.connect(vid, 'HAS_ENTITY',rid)
 }
 
 graph.getTags = async function (userRID) {
