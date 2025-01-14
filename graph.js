@@ -319,7 +319,7 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 	for (var file of response.result) {
 		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 		// TODO: do this in one query!
-		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label`
+		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color`
 		var entity_response = await web.cypher(entity_query)
 		file.entities = entity_response.result
 	}
@@ -992,6 +992,12 @@ graph.traverse = async function (rid, direction, userRID) {
 	return response.result
 }
 
+graph.getEntityTypeSchema = async function (userRID) {
+	var query = `select FROM EntityType WHERE owner = "${userRID}" ORDER by type`
+	var types = await web.sql(query)
+	return types.result
+}
+
 graph.getEntityTypes = async function (userRID) {
 	var query = `select type, count(type) AS count, LIST(label) AS labels, LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
 	var types = await web.sql(query)
@@ -1017,9 +1023,12 @@ graph.getLinkedEntities = async function (rid, userRID) {
 	return response.result
 }
 
-graph.createEntity = async function (type, label, userRID) {
-	if(!type || type == 'undefined') return
-	var query = `CREATE Vertex Entity set type = "${type}", label = "${label}", owner = "${userRID}"`
+graph.createEntity = async function (data, userRID) {
+	if(!data.type || data.type == 'undefined') return
+	if(!data.label || data.label == 'undefined') return
+	if(!data.icon) data.icon = "tag"
+	if(!data.color) data.color = "blue"
+	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
 	return await web.sql(query)
 }
 

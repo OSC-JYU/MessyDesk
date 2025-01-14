@@ -253,12 +253,17 @@ router.delete('/api/entities/:rid/vertex/:vid', async function (ctx) {
 
 
 router.post('/api/entities', async function (ctx) {
-	var n = await Graph.createEntity(ctx.request.body.type, ctx.request.body.label, ctx.request.user.rid)
+	var n = await Graph.createEntity(ctx.request.body, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.get('/api/entities', async function (ctx) {
+	var n = await Graph.getEntityTypes(ctx.request.user.rid)
 	ctx.body = n
 })
 
 router.get('/api/entities/types', async function (ctx) {
-	var n = await Graph.getEntityTypes(ctx.request.user.rid)
+	var n = await Graph.getEntityTypeSchema(ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -267,10 +272,16 @@ router.get('/api/entities/types/:type', async function (ctx) {
 	ctx.body = n
 })
 
+router.get('/api/entities/items', async function (ctx) {
+	var n = await Graph.getEntityItems(ctx.request.body, request.user.rid)
+	ctx.body = n
+})
+
 router.get('/api/entities/:rid', async function (ctx) {
 	var n = await Graph.getEntity(ctx.request.params.rid)
 	ctx.body = n
 })
+
 
 
 // router.get('/api/tags', async function (ctx) {
