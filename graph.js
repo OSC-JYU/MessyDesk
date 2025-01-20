@@ -319,7 +319,7 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 	for (var file of response.result) {
 		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 		// TODO: do this in one query!
-		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color`
+		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
 		var entity_response = await web.cypher(entity_query)
 		file.entities = entity_response.result
 	}
@@ -425,7 +425,8 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_rid, data_dir) {
 
-	if(!ctx.file.description) ctx.file.description = ctx.file.originalname
+	if(!ctx.file.description) ctx.file.description = ''
+	if(!ctx.file.info) ctx.file.info = ''
 	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
 	const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
 		CREATE (file:File 
@@ -435,6 +436,7 @@ graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_
 				label: "${ctx.file.originalname}",
 				original_filename: "${ctx.file.originalname}",
 				description: "${ctx.file.description}",
+				info: "${ctx.file.info}",
 				_active: true
 			}
 		) <- [r:HAS_FILE] - (p) 
@@ -528,12 +530,16 @@ graph.updateFileCount = async function (set_rid) {
 	return count
 }
 
-graph.createProcessFileNode = async function (process_rid, message, description) {
+graph.createProcessFileNode = async function (process_rid, message, description, info) {
 
 	const file_type = message.file.type
 	const extension = message.file.extension
 	const label = message.file.label
-	if(!description) description = label
+	var f_info = ''
+	var f_description = ''
+	if(description) f_description = description
+	if(info) f_info = info
+	//if(!description) description = label
 	let setquery = ''
 	if(message.set) setquery = 'set:"' + message.set + '",'
 	
@@ -543,7 +549,8 @@ graph.createProcessFileNode = async function (process_rid, message, description)
 				type: "${file_type}",
 				extension: "${extension}",
 				label: "${label}",
-				description: "${description}",
+				description: "${f_description}",
+				info: "${f_info}",
 				expand: false,
 				set: null,
 				${setquery}
@@ -784,10 +791,10 @@ graph.connect = async function (from, relation, to) {
 }
 
 
-graph.unconnect = async function (data) {
-	if (!data.from.match(/^#/)) data.from = '#' + data.from
-	if (!data.to.match(/^#/)) data.to = '#' + data.to
-	var query = `MATCH (from)-[r:${data.rel_type}]->(to) WHERE id(from) = "${data.from}" AND id(to) = "${data.to}" DELETE r RETURN from`
+graph.unconnect = async function (from, relation, to) {
+	if (!from.match(/^#/)) from = '#' + from
+	if (!to.match(/^#/)) to = '#' + to
+	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" DELETE r RETURN from`
 	return web.cypher(query)
 }
 
@@ -999,9 +1006,23 @@ graph.getEntityTypeSchema = async function (userRID) {
 }
 
 graph.getEntityTypes = async function (userRID) {
-	var query = `select type, count(type) AS count, LIST(label) AS labels, LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
+	var query = `select type, count(type) AS count, LIST(label) AS labels, icon, color,LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
 	var types = await web.sql(query)
 	return types.result
+}
+
+// TODO: this requires pagination
+graph.getEntityItems = async function (entities, userRID) {
+	var entities_clean = cleanRIDList(entities)
+	if(!entities_clean.length) return []
+	//var query = `select in("HAS_ENTITY") AS items, label, @rid From Entity WHERE owner = "${userRID}" AND @rid IN [${entities_clean.join(',')}]`
+	var query = `match {type:File, as:item}-HAS_ENTITY->{as:entity, where:(@rid IN [${entities_clean.join(',')}] AND owner = "${userRID}")} return  DISTINCT item.label AS label, item.description AS description, item.@rid AS rid, item.path AS path, item.type AS type LIMIT 20`
+	var response = await web.sql(query)
+
+	if(!response.result.length) return []
+	var items = addThumbPaths(response.result)
+
+	return items
 }
 
 graph.getEntitiesByType = async function (type) {
@@ -1017,7 +1038,7 @@ graph.getEntity = async function (rid, userRID) {
 
 graph.getLinkedEntities = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity['@rid'] AS rid, entity.color AS color, entity.icon AS icon`
+	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity.@rid AS rid, entity.color AS color, entity.icon AS icon`
 
 	var response = await web.sql(query)
 	return response.result
@@ -1026,8 +1047,11 @@ graph.getLinkedEntities = async function (rid, userRID) {
 graph.createEntity = async function (data, userRID) {
 	if(!data.type || data.type == 'undefined') return
 	if(!data.label || data.label == 'undefined') return
-	if(!data.icon) data.icon = "tag"
-	if(!data.color) data.color = "blue"
+	var schema = `SELECT color, icon FROM EntityType WHERE type = "${data.type}"`
+	var response = await web.sql(schema)
+	if(!response.result.length) return
+	if(!data.icon) data.icon = response.result[0].icon
+	if(!data.color) data.color = response.result[0].color
 	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
 	return await web.sql(query)
 }
@@ -1047,6 +1071,20 @@ graph.linkEntity = async function (rid, vid, userRID) {
 	await this.connect(vid, 'HAS_ENTITY',rid)
 }
 
+graph.unLinkEntity = async function (rid, vid, userRID) {
+	if(!rid.match(/^#/)) rid = '#' + rid
+	if(!vid.match(/^#/)) vid = '#' + vid
+	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var response = await web.sql(query)
+	var entity = response.result[0]
+	console.log(entity)
+	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
+	response = await web.sql(query)
+	console.log(response.result)
+	var target = response.result[0]
+	if(!entity || !target) return	
+	await this.unconnect(vid, 'HAS_ENTITY',rid)
+}
 graph.getTags = async function (userRID) {
 	var query = `MATCH {type:Tag, as:tag, where:(owner = "${userRID}")} RETURN tag order by tag.label`
 	return await web.sql(query)
@@ -1113,6 +1151,26 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 	
 
 
+}
+
+function addThumbPaths(items) {
+
+	for (var file of items) {
+		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+	}
+	return items
+	
+}
+
+function cleanRIDList(list) {
+	var splitted = list.split(',')
+	var out = []
+	for (var item of splitted) {
+		if (!item.match(/^#/)) item = '#' + item.trim()
+		if(item == '#') continue
+		out.push(item)
+	}
+	return out
 }
 
 function isIntegerString(value) {

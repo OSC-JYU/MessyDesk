@@ -247,7 +247,7 @@ router.post('/api/entities/:rid/vertex/:vid', async function (ctx) {
 })
 
 router.delete('/api/entities/:rid/vertex/:vid', async function (ctx) {
-	var n = await Graph.unlinkEntity(ctx.request.params.rid, ctx.request.params.vid, ctx.request.user.rid)
+	var n = await Graph.unLinkEntity(ctx.request.params.rid, ctx.request.params.vid, ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -273,7 +273,7 @@ router.get('/api/entities/types/:type', async function (ctx) {
 })
 
 router.get('/api/entities/items', async function (ctx) {
-	var n = await Graph.getEntityItems(ctx.request.body, request.user.rid)
+	var n = await Graph.getEntityItems(ctx.request.query.entities, ctx.request.user.rid)
 	ctx.body = n
 })
 
@@ -323,7 +323,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 	file_type = await media.detectType(ctx)
 	
 	if(file_type == 'text') {
-		ctx.file.description = await media.getTextDescription(ctx.file.path)
+		ctx.file.info = await media.getTextDescription(ctx.file.path)
 	}
 
 	var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, file_type, ctx.params.set, DATA_DIR)
@@ -812,14 +812,14 @@ router.post('/api/nomad/process/files', upload.fields([
 				}
 				// else save content to processFileNode
 			} else {
-				var description = ''
+				var info = ''
 				// for text nodes we create a description from the content of the file
 				if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
-					description = await media.getTextDescription(contentFilepath, message.file.type)
+					info = await media.getTextDescription(contentFilepath, message.file.type)
 				}
 
 				const process_rid = message.process['@rid']	
-				const fileNode = await Graph.createProcessFileNode(process_rid, message, description)
+				const fileNode = await Graph.createProcessFileNode(process_rid, message, '', info)
 	
 				await media.uploadFile(contentFilepath, fileNode, DATA_DIR)
 	
@@ -1098,20 +1098,20 @@ router.post('/api/graph/edges/:rid', async function (ctx) {
 	ctx.body = n
 })
 
-router.post('/api/graph/edges/connect/me', async function (ctx) {
-	var me = await Graph.myId(user)
-	ctx.request.body.from = me
-	var n = await Graph.connect(ctx.request.body)
-	ctx.body = n
-})
+// router.post('/api/graph/edges/connect/me', async function (ctx) {
+// 	var me = await Graph.myId(user)
+// 	ctx.request.body.from = me
+// 	var n = await Graph.connect(ctx.request.body)
+// 	ctx.body = n
+// })
 
-router.post('/api/graph/edges/unconnect/me', async function (ctx) {
-	var me = await Graph.myId(user)
-	console.log(me)
-	ctx.request.body.from = me
-	var n = await Graph.unconnect(ctx.request.body)
-	ctx.body = n
-})
+// router.post('/api/graph/edges/unconnect/me', async function (ctx) {
+// 	var me = await Graph.myId(user)
+// 	console.log(me)
+// 	ctx.request.body.from = me
+// 	var n = await Graph.unconnect(ctx.request.body)
+// 	ctx.body = n
+// })
 
 router.get('/api/documents', async function (ctx) {
 	var n = await Graph.getListByType(ctx.request.query)
