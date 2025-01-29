@@ -5,14 +5,14 @@ What happend when user clicks "Crunch"
 
 post('/api/queue/:topic/files/:file_rid'
 
-1.1. Endpoint create a Process node to database.
+1.1. Endpoint creates a Process node to database.
 
 1.2. Based on RID of process node, a directory is created for node
-1.3 Request body is written to a file (params.json)
+1.3 Request body is written to a file (params.json) under that directory
 1.4 UI is updated so that process node is displayd (send2UI)
 
 1.5 IF process has attribute "output_set", then output Set is created
-1.6 UI is updated so that set node is displayd (send2UI)
+1.6 UI is updated so that also Set node is displayd (send2UI)
 
 2. Message is published to stream
 
@@ -20,10 +20,10 @@ nats.publish(topic, JSON.stringify(ctx.request.body))
 
 
 
-3. Stream consumer app gets the Message
+3. Stream consumer app gets the Message (MD-consumers)
 
-3.1 Consumer app cals processing endpoint
-3.1.1 streams file to endpoint with params
+3.1 Consumer app calls processing endpoint
+3.1.1 Consumer app streams file to endpoint with params
 
 3.2 When endpoint responses, the consumer app donwloads files from processing endpoint and send them to MessyDesk 
     post('/api/nomad/process/files')

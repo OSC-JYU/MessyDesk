@@ -298,6 +298,11 @@ router.get('/api/entities/:rid', async function (ctx) {
 
 router.post('/api/projects/:rid/sources', async function (ctx) {
 	var source = await Graph.createSource(ctx.request.params.rid, ctx.request.body, ctx.request.user.rid)
+	const source_rid = source['@rid']
+	// DATA_DIR + '/projects/' + project_rid + '/files/' + source_rid
+	const source_path = path.join(DATA_DIR, 'projects', media.rid2path(ctx.request.params.rid), 'files', media.rid2path(source_rid))
+	await media.createProcessDir(source_path)
+	await Graph.setNodeAttribute(source['@rid'], {key: 'metadata', value: source_path})
 	// make request to nextcloud queu
 	var get_dirs = {
 		id:"md-nextcloud",
@@ -408,6 +413,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 
 // get source file of a file
 router.get('/api/files/:file_rid/source', async function (ctx) {
+	console.log('getting source')
 	try {
 		var source = await Graph.getFileSource(ctx.request.params.file_rid)
 		console.log(source)
@@ -554,6 +560,7 @@ router.post('/api/services/reload', async function (ctx) {
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
+
 	if(file) {
 		var service_list = await services.getServicesForFile(file, ctx.request.query.filter)
 		ctx.body = service_list
@@ -658,38 +665,47 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 	const set_rid = ctx.request.params.set_rid
 	try {
 		const service = services.getServiceAdapterByName(topic)
-		console.log(service)
-		console.log(ctx.request.body.task)
 		var task_name = service.tasks[ctx.request.body.task].name
 		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
-		console.log(set_metadata)
+		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, set_metadata, ctx.request.headers.mail)
 
-		var processNode = await Graph.createSetProcessNode(task_name, ctx.request.body, set_metadata, ctx.request.headers.mail)
-
-		// await media.createProcessDir(processNode.path)
-		// if(service.tasks[ctx.request.body.task].system_params)
-		// 	ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
+		//await media.createProcessDir(processNode.path)
+		//if(service.tasks[ctx.request.body.task].system_params)
+		//	ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
 		
-		// await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
-		// // add node to UI
-		// var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
-		// send2UI(ctx.request.headers.mail, wsdata)
+		//await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
+		// add node to UI
+		var wsdata = {command: 'add', type: 'process', target: '#'+set_rid, node:nodes.process, image:'icons/wait.gif'}
+		send2UI(ctx.request.headers.mail, wsdata)
 
-		// ctx.request.body.process = processNode
-		// ctx.request.body.file = file_metadata
-		// ctx.request.body.target = ctx.request.params.file_rid
-		// ctx.request.body.userId = ctx.headers[AUTH_HEADER]
+		// next we create process nodes for each file in set and put them in queue
+		var set_files = await Graph.getSetFiles(set_rid, ctx.request.headers.mail, {limit:200})
+		
+		for(var file of set_files.files) {
+			var file_metadata = await Graph.getUserFileMetadata(file['@rid'], ctx.request.headers.mail)
+			console.log(file_metadata)
+			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail)
+			await media.createProcessDir(processNode.path)
 
-		// const taskObj = service.tasks[ctx.request.body.task]
-		// console.log(taskObj)
+			await media.writeJSON(ctx.request.body, 'params.json', path.join(path.dirname(processNode.path)))
 
-		//nats.publish(topic, JSON.stringify(ctx.request.body))
+			var msg = JSON.parse(JSON.stringify(ctx.request.body))
+			msg.process = processNode
+			msg.file = file_metadata
+			msg.target = file_metadata['@rid']
+			msg.userId = ctx.request.headers[AUTH_HEADER]
+			msg.output_set = nodes.set['@rid']  // link file to output Set
+			nats.publish(topic, JSON.stringify(msg))
+	
+		}
+		
 		ctx.body = ctx.request.params.set_rid
 
 	} catch(e) {
 		console.log('Queue failed!', e)
 	}
 })
+
 
 // NOMAD
 // nomad endpoints has different authorisation (auth header)
@@ -923,9 +939,11 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 		var error = ctx.request.body.error
 		if(ctx.request.body.message) {
 			var message = ctx.request.body.message
+			var target = message.target
+			
 			var wsdata = {
 				command: 'update', 
-				target: message.process['@rid'] || '',
+				target: target,
 				error: 'error'
 
 			}
@@ -936,7 +954,7 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 			var index_msg = [{
 				type: 'error',
 				id:message.process['@rid'] + '_error', 
-				error_node: message.process['@rid'], 
+				error_node: target, 
 				error: JSON.stringify(error), 
 				message: JSON.stringify(message), 
 				owner: message.userId
@@ -1072,6 +1090,11 @@ router.post('/api/graph/vertices/:rid', async function (ctx) {
 
 router.delete('/api/graph/vertices/:rid', async function (ctx) {
 	var n = await Graph.deleteNode(ctx.request.params.rid, nats)
+	console.log(n)
+	if(n.path) {
+		// TODO: delete path
+		console.log(n.path)
+	}
 	ctx.body = n
 })
 

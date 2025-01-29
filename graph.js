@@ -225,20 +225,38 @@ console.log(query)
 
 graph.getProject_backup = async function (rid, me_email) {
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-		OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
-		OPTIONAL MATCH (project)-[r_source]->(source:Source)
-		OPTIONAL MATCH (project)-[r_set]->(set:Set)
-		OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
-		OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
-		OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
-		OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
-		OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
-		RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
+	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
+	// 	OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
+	// 	OPTIONAL MATCH (project)-[r_source]->(source:Source)
+	// 	OPTIONAL MATCH (project)-[r_set]->(set:Set)
+	// 	OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
+	// 	OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
+	// 	OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
+	// 	OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
+	// 	OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
+	// 	RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
+
+	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
+	// 	OPTIONAL MATCH (project)-[rr]->(file) 
+	// 		WHERE (file.set is NULL OR file.expand = true)
+	// 	OPTIONAL MATCH (file)-[r*]->(child) 
+	// 		WHERE (child:Process OR child:File OR child:Set)
+	// 			AND (child.set is NULL OR child.expand = true)  
+	// 	RETURN  file, r, child`	
+
+		const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
+		OPTIONAL MATCH (project)-[rr]->(file) 
+			
+		OPTIONAL MATCH (file)-[r*]->(child) 
+			WHERE (child:Process OR child:File OR child:Set)
+				 
+		RETURN  file, r, child`	
+
 	const options = {
 		serializer: 'graph',
 		format: 'vueflow'
 	}
+	
 	var result = await web.cypher(query, options)
 	return result
 }
@@ -305,8 +323,8 @@ graph.getProjectFiles = async function (rid, me_email) {
 }
 
 graph.getSetFiles = async function (set_rid, me_email, params) {
-	if(!isIntegerString(params.skip)) params.skip = 0
-	if(!isIntegerString(params.limit)) params.limit = 20
+	if(!params || !isIntegerString(params.skip)) params.skip = 0
+	if(!params || !isIntegerString(params.limit)) params.limit = 20
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
 	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
@@ -384,7 +402,7 @@ graph.createOutputSetNode = async function (label, processNode) {
 }
 
 // Create SetProcess that is linked to Set
-graph.createSetProcessNode = async function (topic, params, filegraph, me_email) {
+graph.createSetProcessNode = async function (topic, service, params, filegraph ) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -394,6 +412,7 @@ graph.createSetProcessNode = async function (topic, params, filegraph, me_email)
 	var processNode = {}
 	var process_rid = null
 	const process_attrs = { label: topic }
+	process_attrs.service = service.name
 	if(params.info) {
 		process_attrs.info = params.info
 	}
@@ -409,9 +428,10 @@ graph.createSetProcessNode = async function (topic, params, filegraph, me_email)
 	// and link it to SetProcess
 	await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
 
-	return process_rid
+	return {process: processNode, set: setNode} //processNode
 
 }
+
 
 graph.createProcessSetNode = async function (process_rid, options) {
 
@@ -637,6 +657,20 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 			set_response.result[0].file.extensions = extensions
 			return set_response.result[0].file
 
+		// check if file is source (not file at all!)
+		} else {
+			var query_source = `MATCH {
+				type: User, 
+				as:p, 
+				where:(id = "${me_email}")}
+			-IS_OWNER->
+				{type:Project, as:project}--> 
+				{type:Source, as:file, where:(@rid = "#${file_rid}")} return file`
+				
+			var source_response = await web.sql(query_source)
+			if(source_response.result[0] && source_response.result[0].file) {
+				return source_response.result[0].file
+			}
 		}
 	}
 		return null
@@ -657,7 +691,7 @@ graph.query = async function (body) {
 }
 
 graph.create = async function (type, data, admin) {
-	console.log(data)
+	console.log('create', type, data)
 	var data_str_arr = []
 	// expression data to string
 	for (var key in data) {
@@ -683,7 +717,7 @@ graph.create = async function (type, data, admin) {
 	if (!data['active']) data_str_arr.push(`active: true`)
 
 	var query = `CREATE (n:${type} {${data_str_arr.join(',')}}) return n`
-	console.log(query)
+	
 	const response = await web.cypher(query)
 	return response.result[0]
 }
@@ -692,7 +726,7 @@ graph.create = async function (type, data, admin) {
 graph.deleteNode = async function (rid, nats) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	// remove node and all children (out nodes) from index
+	// remove node and all children (out nodes) from solr index
 	const q = `TRAVERSE out() FROM ${rid}`
 	var traverse = await web.sql(q)
 	var targets = []
@@ -708,20 +742,23 @@ graph.deleteNode = async function (rid, nats) {
 	}
 	nats.publish(index_msg.id, JSON.stringify(index_msg))
 
-	// delete first children and then node
+	// get path for directory deletion
+	const query_path = `SELECT path FROM ${rid}`
+	var path_result = await web.sql(query_path)
+
+	// delete all children and node
 	var query = `MATCH (n)
 		WHERE id(n) = "${rid}" 
 		OPTIONAL MATCH (n)-[*]->(child)
 		DETACH delete n,child`
 	var response = await web.cypher(query)
-	if (response.result && response.result.length == 1) {
-		var type = response.result[0].type
-		var query_delete = `DELETE FROM ${type} WHERE @rid = "${rid}"`
-		console.log(query_delete)
-		return web.sql(query_delete)
+	
+	if(path_result.result[0] && path_result.result[0].path) {
+		return { path: path_result.result[0].path}	
+	} else {
+		return {path: null}
 	}
 
-	return response
 }
 
 
@@ -1001,6 +1038,7 @@ graph.traverse = async function (rid, direction, userRID) {
 
 graph.getEntityTypeSchema = async function (userRID) {
 	var query = `select FROM EntityType WHERE owner = "${userRID}" ORDER by type`
+	console.log(query)
 	var types = await web.sql(query)
 	return types.result
 }

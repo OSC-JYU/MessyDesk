@@ -76,23 +76,31 @@ services.getServicesForFile = async function(file, filter) {
 
 	const matches = {for_type: [], for_format: []}
 	if(!file) return matches
-	
+	console.log('here', file['@type'])
 	for(var service in this.service_list) {
+
 		
 		// for Sets we compare only extensions
 		if(file['@type'] == 'Set') {
 			if(this.service_list[service].consumers.length > 0) {
 				var service_with_tasks = pickTasks(this.service_list[service], file.extensions)
 				matches.for_format.push(service_with_tasks)
+			}	
+		} else if (file['@type'] == 'Source') {
+			console.log(file.type)
+			console.log(this.service_list[service])
+			if(this.service_list[service].consumers.length > 0) {
+				console.log(file.type)
+				console.log(this.service_list[service])
+				var service_with_tasks = pickTasks(this.service_list[service], file.type)
+				matches.for_format.push(service_with_tasks)
 			}			
+				
 		// for Files we compare first type and then extension
 		} else {
 			// check service for supported types
-			//console.log(this.service_list[service].supported_types)
-			//console.log('comparing types..', file.type)
 			if(this.service_list[service].supported_types.includes(file.type)) {
-				// we take only services that has consumer app listening
-				//console.log('supported types')
+				// we take only services that has consumer app listening (i.e are active services)
 				if(this.service_list[service].consumers.length > 0) {
 					var service_with_tasks = pickTasks(this.service_list[service], [file.extension], filter)
 					matches.for_format.push(service_with_tasks)

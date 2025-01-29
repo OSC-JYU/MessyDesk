@@ -7,7 +7,7 @@ const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
 const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
-const DB = process.env.DB_NAME || 'messydesk'
+const DB = process.env.DB_NAME || 'md_dev'
 const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
