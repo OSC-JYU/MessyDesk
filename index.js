@@ -102,6 +102,9 @@ app.use(serve(path.join(__dirname, '/public')))
 
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
+	console.log(context.request.path)
+	console.log(context.request.headers[AUTH_HEADER])
+
 	if(process.env.MODE === 'development') {
 		//console.log('auth header: ', context.request.headers[AUTH_HEADER])
 		// allow sending AUTH_HEADER for development
@@ -110,7 +113,8 @@ app.use(async function handleError(context, next) {
 			if(process.env.DEV_USER) 
 				context.request.headers[AUTH_HEADER] = process.env.DEV_USER			
 		}
-
+		context.request.user = await Graph.myId(context.request.headers[AUTH_HEADER])
+	} else {
 		context.request.user = await Graph.myId(context.request.headers[AUTH_HEADER])
 	}
 	await next()
@@ -147,7 +151,6 @@ app.use(async function handleError(context, next) {
 		//debug(error.stack);
 	}
 });
-
 
 
 router.all('/ws', async (ctx, next) => {
@@ -793,7 +796,7 @@ router.post('/api/nomad/process/files', upload.fields([
 						target: message.file['@rid']
 					}
 					// direct link to thumbnail
-					wsdata.image = 'api/thumbnails/' + base_path
+					wsdata.image = '/api/thumbnails/' + base_path
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {

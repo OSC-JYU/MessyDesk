@@ -236,21 +236,23 @@ graph.getProject_backup = async function (rid, me_email) {
 	// 	OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
 	// 	RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 
-	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
-	// 	OPTIONAL MATCH (project)-[rr]->(file) 
-	// 		WHERE (file.set is NULL OR file.expand = true)
-	// 	OPTIONAL MATCH (file)-[r*]->(child) 
-	// 		WHERE (child:Process OR child:File OR child:Set)
-	// 			AND (child.set is NULL OR child.expand = true)  
-	// 	RETURN  file, r, child`	
-
-		const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
+	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
 		OPTIONAL MATCH (project)-[rr]->(file) 
-			
+			WHERE (file.set is NULL OR file.expand = true)
 		OPTIONAL MATCH (file)-[r*]->(child) 
 			WHERE (child:Process OR child:File OR child:Set)
-				 
+				AND (child.set is NULL OR child.expand = true)  
 		RETURN  file, r, child`	
+
+		// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
+		// OPTIONAL MATCH (project)-[rr]->(file) 
+			
+		// OPTIONAL MATCH (file)-[r*]->(child) 
+		// 	WHERE (child:Process OR child:File OR child:Set)
+				 
+		// RETURN  file, r, child`	
+
+		console.log(query)
 
 	const options = {
 		serializer: 'graph',
@@ -305,7 +307,7 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						project.paths.push('api/thumbnails/' + part.replace(filename, ''))
+						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
 					}
 				});
 			}
@@ -335,7 +337,7 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 	
 	// thumbnails and entities
 	for (var file of response.result) {
-		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		file.thumb = '/api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 		// TODO: do this in one query!
 		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
 		var entity_response = await web.cypher(entity_query)
@@ -586,10 +588,11 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
 	var update_response = await web.cypher(update)
 
-	// if output of process is a set, then connect file to set also and add attribute "set"
+	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
 		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute(file_rid, {key:"set", value: message.output_set} ) // this attribute is used in project query
+		await this.connect(process_rid, 'PRODUCED', file_rid)
 	// otherwise connect file to process
 	} else {
 		await this.connect(process_rid, 'PRODUCED', file_rid)
@@ -987,7 +990,7 @@ graph.createAttributeCypher = async function (attributes) {
 
 
 graph.myId = async function (user) {
-	if (!user) throw ('user not defined')
+	if (!user) return null
 	var query = `SELECT @rid AS rid, group, access, label, id, active FROM User WHERE id = "${user}"`
 	var response = await web.sql(query)
 	return response.result[0]
@@ -1194,7 +1197,7 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 function addThumbPaths(items) {
 
 	for (var file of items) {
-		file.thumb = 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		file.thumb = '/api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 	}
 	return items
 	

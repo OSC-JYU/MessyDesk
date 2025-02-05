@@ -354,7 +354,7 @@ async function convert2VueFlow(data, options) {
 				
 				// direct link to thumbnail
 				if(v.t != 'Process' && v.p.path) 
-					node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+					node.data.image = path.join('/api/thumbnails', path.dirname(v.p.path))
 
 				nodes.push(node)
 				vertex_ids.push(v.r)
