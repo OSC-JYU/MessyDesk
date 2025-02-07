@@ -1,6 +1,6 @@
 {
     "url": "http://localhost:9000",
-    "id": "thumbnailer",
+    "id": "md-thumbnailer",
     "api_type": "thumbnail",
     "api": "/",
     "name" :"Imaginary",

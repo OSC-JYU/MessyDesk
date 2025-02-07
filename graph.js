@@ -224,6 +224,7 @@ console.log(query)
 
 
 graph.getProject_backup = async function (rid, me_email) {
+	if (!rid.match(/^#/)) rid = '#' + rid
 
 	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
 	// 	OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
@@ -236,13 +237,13 @@ graph.getProject_backup = async function (rid, me_email) {
 	// 	OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
 	// 	RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
-		OPTIONAL MATCH (project)-[rr]->(file) 
-			WHERE (file.set is NULL OR file.expand = true)
-		OPTIONAL MATCH (file)-[r*]->(child) 
-			WHERE (child:Process OR child:File OR child:Set)
-				AND (child.set is NULL OR child.expand = true)  
-		RETURN  file, r, child`	
+	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
+	// 	OPTIONAL MATCH (project)-[rr]->(file) 
+	// 		WHERE (file.set is NULL OR file.expand = true)
+	// 	OPTIONAL MATCH (file)-[r*]->(child) 
+	// 		WHERE (child:Process OR child:File OR child:Set)
+	// 			AND (child.set is NULL OR child.expand = true)  
+	// 	RETURN  file, r, child`	
 
 		// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
 		// OPTIONAL MATCH (project)-[rr]->(file) 
@@ -252,14 +253,20 @@ graph.getProject_backup = async function (rid, me_email) {
 				 
 		// RETURN  file, r, child`	
 
+	const query = `match {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->
+		{type:Project, as:project,where:(@rid=${rid})}.out() 
+		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess") AND set is NULL AND $depth > 0), while:($depth < 10)} return node`
+
+
 		console.log(query)
 
 	const options = {
-		serializer: 'graph',
+		serializer: 'studio',
 		format: 'vueflow'
 	}
 	
-	var result = await web.cypher(query, options)
+	var result = await web.sql2(query, options)
+	result = await getSetThumbnails(me_email, result, rid)
 	return result
 }
 
@@ -316,6 +323,57 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 	return data
 }
 
+
+async function getSetThumbnails(me_email, data, project_rid, data_dir) {
+
+	// order image by file label so that result set would show same images as source set
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[*0..10]->(set:Set)-->(file:File) 
+		WHERE p.id = "${me_email}" AND id(pr) = "${project_rid}"
+		WITH file, set ORDER BY file.label
+	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
+	var response = await web.cypher(query)
+
+	for (var set of data.nodes) {
+		for (var thumbs of response.result) {
+			if (set.data.type === 'Set' && set.data['id'] === thumbs.set) {
+			
+				set.data.paths = []
+				thumbs.paths.forEach(function (part, index) {
+					if (index < 2) {
+						const filename = path.basename(part)
+						set.data.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+					}
+				});
+			}
+		}
+	}
+	return data
+}
+
+
+async function getProjectThumbnails(me_email, data, data_dir) {
+
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
+	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
+	var response = await web.cypher(query)
+
+	for (var project of data) {
+		for (var thumbs of response.result) {
+			if (project['@rid'] === thumbs.project) {
+				project.paths = []
+				thumbs.paths.forEach(function (part, index) {
+					if (index < 2) {
+						const filename = path.basename(part)
+						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+					}
+				});
+			}
+		}
+	}
+	return data
+}
+
+
 graph.getProjectFiles = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
@@ -351,7 +409,7 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 }
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, service, params, filegraph, me_email) {
+graph.createProcessNode = async function (topic, service, params, filegraph, me_email, set_rid) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -365,6 +423,10 @@ graph.createProcessNode = async function (topic, service, params, filegraph, me_
 	process_attrs.params = JSON.stringify(params)
 	if(params.info) {
 		process_attrs.info = params.info
+	}
+	// mark if this is part of set processing = not displayed in UI by default
+	if(set_rid) {
+		process_attrs.set = set_rid
 	}
 
 	processNode = await this.create('Process', process_attrs)

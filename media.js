@@ -203,7 +203,7 @@ media.getTextDescription = async function (filePath, file_type) {
 }
 
 
-media.getThumbnail = function(filePath) {
+media.getThumbnail = async function(filePath) {
 	try {
 		var thumbfile = 'preview.jpg'
 		var base = path.dirname(filePath)
@@ -217,9 +217,17 @@ media.getThumbnail = function(filePath) {
 			base = path.join(base, f)
 		}
 
-		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
-	  	return src
+		let fullPath = path.join(base.replace('/api/thumbnails/', './'), thumbfile)
+
+        // Check if the file exists asynchronously
+        const fileExists = await fs.pathExists(fullPath)
+        if (!fileExists) {
+            fullPath = path.join('images/image_not_found.jpg')
+        }
+		return fs.createReadStream(fullPath)
+
 	} catch (err) {
+		console.log('thumbnail not found')
 		return false;
 	}
 }

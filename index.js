@@ -379,8 +379,8 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		data.target = filegraph['@rid']
 		data.task = 'thumbnail'
 		data.params = {width: 800, type: 'jpeg'}
-		data.id = 'thumbnailer'
-		nats.publish('thumbnailer', JSON.stringify(data))	
+		data.id = 'md-thumbnailer'
+		nats.publish('md-thumbnailer', JSON.stringify(data))	
 
 	} else if(file_type == 'pdf') {
 		var data = {file: filegraph}
@@ -475,7 +475,7 @@ router.get('/api/files/:file_rid', async function (ctx) {
 
 router.get('/api/thumbnails/(.*)', async function (ctx) {
 
-	const src = media.getThumbnail(ctx.request.path.replace('/api/thumbnails/','./'))
+	const src = await media.getThumbnail(ctx.request.path.replace('/api/thumbnails/','./'))
 	ctx.set('Content-Type', 'image/jpeg');
    	ctx.body = src
 })
@@ -535,7 +535,9 @@ router.post('/api/services/:service/consumer/:id', async function (ctx) {
 
 // unregister consumer
 router.delete('/api/services/:service/consumer/:id', async function (ctx) {
+	var adapter = await services.getServiceAdapterByName(ctx.request.params.service)
 	var response = await services.removeConsumer(ctx.request.params.service, ctx.request.params.id)
+	await nomad.stopService(adapter)
 	ctx.body = response
 })
 
@@ -687,7 +689,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 		for(var file of set_files.files) {
 			var file_metadata = await Graph.getUserFileMetadata(file['@rid'], ctx.request.headers.mail)
 			console.log(file_metadata)
-			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail)
+			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail, '#'+set_rid)
 			await media.createProcessDir(processNode.path)
 
 			await media.writeJSON(ctx.request.body, 'params.json', path.join(path.dirname(processNode.path)))
@@ -779,7 +781,7 @@ router.post('/api/nomad/process/files', upload.fields([
 		}
 	
 		// check if this is thumbnail ('role' is for PDF thumbnail via Poppler)
-		if(message.id === 'thumbnailer' || message.role === 'thumbnail') {
+		if(message.id === 'md-thumbnailer' || message.role === 'thumbnail') {
 
 			var filepath = message.file.path
 			const base_path = path.dirname(filepath)
@@ -788,8 +790,8 @@ router.post('/api/nomad/process/files', upload.fields([
 			try {
 				console.log('saving thumbnail to', base_path, filename)
 				await media.saveThumbnail(contentFilepath, base_path, filename)
-				console.log('sending thumbnail WS', filename)
 				if(filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
+					console.log('sending thumbnail WS', filename)
 					var wsdata = {
 						command: 'update', 
 						type: 'image',
@@ -845,7 +847,7 @@ router.post('/api/nomad/process/files', upload.fields([
 				// for images and pdf files we create normal thumbnails
 				if(message.file.type == 'image' || message.file.type == 'pdf') {
 					var th = {
-						id:'thumbnailer', 
+						id:'md-thumbnailer', 
 						task: 'thumbnail', 
 						file: fileNode, 
 						userId: message.userId, 

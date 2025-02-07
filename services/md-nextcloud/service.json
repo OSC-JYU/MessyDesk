@@ -8,7 +8,7 @@
     "source_url": "https://nextcloud.com/",
     
     "supported_types": ["source"],
-    "supported_formats": [],
+    "supported_formats": ["nextcloud"],
 
     "description": "Open source content collaboration platform.",
 
@@ -17,9 +17,15 @@
         "get_directory_content": {
             "name": "Get list of directory content",
             "output": "json",
-            "description": "",
+            "description": "Hidden task for getting directory content info (size and count)",
             "info": "",
-            "hidden": true
+            "filter": "hidden"
+        },
+        "get_files": {
+            "name": "Download files",
+            "output": "json",
+            "description": "Download files from nextcloud",
+            "info": ""
         }
     }
 }

@@ -151,6 +151,41 @@ web.sql = async function(query, options) {
 	//return response.data
 }
 
+web.sql2 = async function(query, options) {
+	if(!options) var options = {}
+	
+	var config = {
+		auth: {
+			username: username,
+			password: password
+		}
+	};
+	const query_data = {
+		command:query,
+		language:'sql'
+	}
+
+	if(options.serializer) query_data.serializer = options.serializer
+
+	try {
+		var response = await axios.post(URL, query_data, config)
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
+		else if(options.serializer == 'studio' && options.format == 'vueflow') {
+			//options.labels = await getSchemaLabels(config)
+			return convert2VueFlow(response.data, options)
+		} else {
+			return response.data
+		}
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: query, error: e})
+	}
+	//var response = await axios.post(URL, query_data, config)
+	//return response.data
+}
+
 web.cypher = async function(query, options) {
 
 	if(!options) var options = {}
@@ -320,7 +355,7 @@ function setParent(vertices, child, parent) {
 
 
 async function convert2VueFlow(data, options) {
-	//console.log(data.result)
+	console.log(data.result)
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []

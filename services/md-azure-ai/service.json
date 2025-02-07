@@ -30,6 +30,28 @@
                     {"role": "system", "content": "Extract following information from text. \n - title\n - author\n - faculty\n - ISBN\n Give result as JSON file in following format: \n { \"title\": \"\", \"author\": \"\", \"faculty\": \"\" }"}
                 ]
             }
+        },
+        "summary": {
+            "name": "Write a short summary",
+            "output": "text",
+            "description": "Write a short summary of the text.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write a short summary from text."}
+                ]
+            }
+        },
+        "descriptive_title": {
+            "name": "Write a descriptive title",
+            "output": "text",
+            "description": "Write a descriptive title of the text.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write a descriptive title of the text."}
+                ]
+            }
         }
     }
 }

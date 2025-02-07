@@ -1,0 +1,46 @@
+{
+
+    "url": "",
+    "id": "md-gemini",
+    "type": "text",
+    "api_type": "elg",
+    "api": "/process",
+    "location": "external",
+    "access": "commercial",
+    "name" :"Google Gemini",
+
+    "supported_types": ["image"],
+    "supported_formats": ["jpg", "png", "jpeg"],
+
+    "description": "Gemini 1.5",
+
+    "params": {
+
+    },
+
+
+    "tasks": {
+        "summary": {
+            "name": "Write image caption",
+            "output": "text",
+            "description": "Write an image caption.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write short image caption."}
+                ]
+            }
+        },
+        "descriptive_title": {
+            "name": "Write a descriptive title",
+            "output": "text",
+            "description": "Write a descriptive title of the text.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write a descriptive title of the text."}
+                ]
+            }
+        }
+    }
+}

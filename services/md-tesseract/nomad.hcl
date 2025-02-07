@@ -1,4 +1,4 @@
-job "MD-tesseract" {
+job "md-tesseract" {
   type = "service"
 
   group "MD-tesseract" {

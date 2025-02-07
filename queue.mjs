@@ -57,6 +57,15 @@ queue.init = async function(services) {
     
       });
       console.log('NATS: created consumer', key)
+      var batch = key + '_batch'
+
+      await this.jsm.consumers.add("PROCESS", {
+        durable_name: batch,
+        ack_policy: AckPolicy.Explicit,
+        filter_subject: `process.${batch}`,
+    
+      });
+      console.log('NATS: created batch consumer', batch)
 
 
     } catch(e) {
@@ -174,7 +183,7 @@ queue.downLoadFile = async function(message, uri, service) {
   try {
     await pipeline(downloadStream, fileWriterStream)
 
-    const topic = 'thumbnailer' 
+    const topic = 'md-thumbnailer' 
     const k_message = {
       key: "md",
       value: JSON.stringify({

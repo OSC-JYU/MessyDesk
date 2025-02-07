@@ -1,4 +1,4 @@
-job "MD-thumbnailer" {
+job "md-thumbnailer" {
   type = "service"
 
   group "MD-image" {
@@ -10,7 +10,7 @@ job "MD-thumbnailer" {
     }
 
     service {
-      name     = "thumbnailer"
+      name     = "md-thumbnailer"
       port     = "node"
       provider = "nomad"
     }

@@ -1,4 +1,4 @@
-job "MD-finbert" {
+job "md-finbert-ner" {
   type = "service"
 
   group "MD-finbert" {

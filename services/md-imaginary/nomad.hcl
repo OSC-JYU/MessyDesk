@@ -1,4 +1,4 @@
-job "MD-imaginary" {
+job "md-imaginary" {
   type = "service"
 
   group "MD-image" {
@@ -18,7 +18,7 @@ job "MD-imaginary" {
     task "md-imaginary" {
       driver = "docker"
         config {
-            image = "nextcloud/aio-imaginary:20240424_101241-latest"
+            image = "docker.io/nextcloud/aio-imaginary:20240424_101241-latest"
             ports = ["node"]
         }
 
