@@ -1,11 +1,11 @@
-job "MD-finbert" {
+job "md-nextcloud" {
   type = "service"
 
-  group "MD-finbert" {
+  group "MD-nextcloud" {
     count = 1
     network {
       port "node" {
-        to = 8600
+        to = 8900
       }
     }
 
@@ -14,15 +14,15 @@ ephemeral_disk {
 }
 
     service {
-      name     = "md-finbert-ner"
+      name     = "md-nextcloud"
       port     = "node"
       provider = "nomad"
     }
 
-    task "md-finbert-ner" {
+    task "md-nextcloud" {
       driver = "docker"
       config {
-        image = "osc.repo.kopla.jyu.fi/messydesk/md-finbert:0.1"
+        image = "osc.repo.kopla.jyu.fi/messydesk/md-nextcloud:0.1"
         ports = ["node"]
       }      
       resources {

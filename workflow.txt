@@ -51,6 +51,9 @@ Image file is sent to image-info service, which return dimensions, type and exif
 If orientation is found and it is not 1, then image is sent to autorotate-endpoint of md-imaginary service. This image is then saved to the same directory as original file but with suffic '_exif_rot'. 
 
 
+PATHS:
 
+	source noden pitää luoda path: /data/projects/PROJEKTI/files/SOURCE/process
+	setProcess noden pitää luoda path: /data/projects/PROJEKTI/files/SOURCE/process/SETPROCESS/files
 
 

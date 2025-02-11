@@ -304,8 +304,9 @@ router.post('/api/projects/:rid/sources', async function (ctx) {
 	const source_rid = source['@rid']
 	// DATA_DIR + '/projects/' + project_rid + '/files/' + source_rid
 	const source_path = path.join(DATA_DIR, 'projects', media.rid2path(ctx.request.params.rid), 'files', media.rid2path(source_rid))
-	await media.createProcessDir(source_path)
-	await Graph.setNodeAttribute(source['@rid'], {key: 'metadata', value: source_path})
+	source.path = source_path
+	await media.createProcessDir(source.path)
+	await Graph.setNodeAttribute(source['@rid'], {key: 'path', value: source.path})
 	// make request to nextcloud queu
 	var get_dirs = {
 		id:"md-nextcloud",
@@ -575,8 +576,7 @@ router.get('/api/services/files/:rid', async function (ctx) {
 })
 
 
-// add to queue
-
+// single queue
 router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 
 	const topic = ctx.request.params.topic 
@@ -663,24 +663,20 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 	}
 })
 
-
+// set queue
 router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 
-	const topic = ctx.request.params.topic 
+	const topic = ctx.request.params.topic
 	const set_rid = ctx.request.params.set_rid
 	try {
 		const service = services.getServiceAdapterByName(topic)
 		var task_name = service.tasks[ctx.request.body.task].name
 		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
 		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, set_metadata, ctx.request.headers.mail)
-
-		//await media.createProcessDir(processNode.path)
-		//if(service.tasks[ctx.request.body.task].system_params)
-		//	ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
 		
 		//await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
-		var wsdata = {command: 'add', type: 'process', target: '#'+set_rid, node:nodes.process, image:'icons/wait.gif'}
+		var wsdata = {command: 'add', type: 'process', target: '#'+set_rid, node:nodes.process, set_node:nodes.set,image:'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)
 
 		// next we create process nodes for each file in set and put them in queue
@@ -700,11 +696,54 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 			msg.target = file_metadata['@rid']
 			msg.userId = ctx.request.headers[AUTH_HEADER]
 			msg.output_set = nodes.set['@rid']  // link file to output Set
-			nats.publish(topic, JSON.stringify(msg))
+			nats.publish(topic + '_batch', JSON.stringify(msg))
 	
 		}
 		
 		ctx.body = ctx.request.params.set_rid
+
+	} catch(e) {
+		console.log('Queue failed!', e)
+	}
+})
+
+router.post('/api/queue/:topic/sources/:rid', async function (ctx) {
+
+	const topic = ctx.request.params.topic
+	const source_rid = ctx.request.params.rid
+	try {
+		const service = services.getServiceAdapterByName(topic)
+		var task_name = service.tasks[ctx.request.body.task].name
+		var source_metadata = await Graph.getUserFileMetadata(source_rid, ctx.request.headers.mail)
+		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, source_metadata, ctx.request.headers.mail)
+		
+		//await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
+		// add node to UI
+		var wsdata = {command: 'add', type: 'process', target: '#'+source_rid, node:nodes.process, set_node:nodes.set,image:'icons/wait.gif'}
+		send2UI(ctx.request.headers.mail, wsdata)
+		console.log('source process..')
+
+		// // next we create process nodes for each file in set and put them in queue
+		var source_files = await Graph.getSourceFiles(source_rid, ctx.request.headers.mail)
+		
+		for(var file of source_files) {
+			console.log('*************')
+			console.log(file)
+
+			var msg = JSON.parse(JSON.stringify(ctx.request.body))
+			msg.task = ctx.request.body.task
+			msg.process = nodes.process
+			msg.source = source_metadata
+			msg.file = file
+			//msg.target = file_metadata['@rid']
+			msg.userId = ctx.request.headers[AUTH_HEADER]
+			msg.output_set = nodes.set['@rid']  // link file to output Set
+			console.log(msg)
+			nats.publish(topic + '_batch', JSON.stringify(msg))
+	
+		}
+		
+		ctx.body = ctx.request.params.rid
 
 	} catch(e) {
 		console.log('Queue failed!', e)
@@ -819,6 +858,9 @@ router.post('/api/nomad/process/files', upload.fields([
 					} else {
 						// nextcloud directory info
 						await Graph.setNodeAttribute(message.file['@rid'], {key: 'metadata', value: info_json})
+						var filepath = message.file.path
+						const base_path = path.dirname(filepath)
+						await media.uploadFile(contentFilepath, {path: message.file.path + '/source.json'})
 						var wsdata = {
 							command: 'update', 
 							type: message.file.type, 

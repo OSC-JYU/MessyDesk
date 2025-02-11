@@ -1,4 +1,4 @@
-job "MD-poppler" {
+job "md-poppler" {
   type = "service"
 
   group "MD-image" {

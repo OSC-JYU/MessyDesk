@@ -72,7 +72,7 @@ One more repository is needed:
 
 Let's start thumbnailer and simple image manipulation service (rotate, scale etc.)
 
-    NAME=thumbnailer node api-imaginary.mjs
+    NAME=md-thumbnailer node api-imaginary.mjs
 
 And then in another terminal:
 

@@ -57,8 +57,8 @@ queue.init = async function(services) {
     
       });
       console.log('NATS: created consumer', key)
-      var batch = key + '_batch'
 
+      var batch = key + '_batch'
       await this.jsm.consumers.add("PROCESS", {
         durable_name: batch,
         ack_policy: AckPolicy.Explicit,

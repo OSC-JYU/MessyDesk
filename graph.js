@@ -255,7 +255,7 @@ graph.getProject_backup = async function (rid, me_email) {
 
 	const query = `match {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
-		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess") AND set is NULL AND $depth > 0), while:($depth < 10)} return node`
+		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND set is NULL AND $depth > 0), while:($depth < 10)} return node`
 
 
 		console.log(query)
@@ -408,6 +408,28 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 		files: response.result } //response.result
 }
 
+graph.getSourceFiles = async function (source_rid, me_email, params) {
+
+	try {
+		var files = []
+		if (!source_rid.match(/^#/)) source_rid = '#' + source_rid
+	
+		const query = `MATCH {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
+		var response = await web.sql(query)
+	
+		var source_file = await media.readJSON(path.join(response.result[0].path, 'source.json'))
+		var source_json = JSON.parse(source_file)
+		if(source_json.files) {
+			files = source_json.files
+		}
+	
+		return files
+	} catch (error) {
+		console.log(error)
+	}
+
+}
+
 // create Process that is linked to File
 graph.createProcessNode = async function (topic, service, params, filegraph, me_email, set_rid) {
 
@@ -444,6 +466,45 @@ graph.createProcessNode = async function (topic, service, params, filegraph, me_
 
 }
 
+// Create SetProcess and output Set 
+graph.createSetProcessNode = async function (topic, service, params, filegraph ) {
+
+	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
+	//params.topic = topic
+	var file_rid = filegraph['@rid']
+	
+	// create process node
+	var processNode = {}
+	var process_rid = null
+	const process_attrs = { label: topic }
+	process_attrs.service = service.name
+	if(params.info) {
+		process_attrs.info = params.info
+	}
+
+	processNode = await this.create('SetProcess', process_attrs)
+	process_rid = processNode['@rid']
+	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
+	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	// update process path to record
+	const update = `MATCH (p:SetProcess) WHERE id(p) = "${process_rid}" SET p.path = "${processNode.path}" RETURN p`
+	var update_response = await web.cypher(update)
+	
+
+	// finally, connect SetProcess node to source Set node
+	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+	// create process output Set
+	var setNode = await this.create('Set', {path: processNode.path})
+	// and link it to SetProcess
+	await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+
+
+	return {process: processNode, set: setNode} //processNode
+
+}
+
+
+
 graph.createOutputSetNode = async function (label, processNode) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
@@ -465,36 +526,6 @@ graph.createOutputSetNode = async function (label, processNode) {
 
 }
 
-// Create SetProcess that is linked to Set
-graph.createSetProcessNode = async function (topic, service, params, filegraph ) {
-
-	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
-	//params.topic = topic
-	var file_rid = filegraph['@rid']
-	
-	// create process node
-	var processNode = {}
-	var process_rid = null
-	const process_attrs = { label: topic }
-	process_attrs.service = service.name
-	if(params.info) {
-		process_attrs.info = params.info
-	}
-
-	processNode = await this.create('SetProcess', process_attrs)
-	process_rid = processNode['@rid']
-	
-
-	// finally, connect process node to file node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-	// create process output Set
-	var setNode = await this.create('Set', {})
-	// and link it to SetProcess
-	await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
-
-	return {process: processNode, set: setNode} //processNode
-
-}
 
 
 graph.createProcessSetNode = async function (process_rid, options) {
@@ -626,8 +657,10 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	//if(!description) description = label
 	let setquery = ''
 	if(message.set) setquery = 'set:"' + message.set + '",'
+	var type = 'Process'
+	if(message.source) type = 'SetProcess'
 	
-	const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
+	const query = `MATCH (p:${type}) WHERE id(p) = "${process_rid}" 
 		CREATE (file:File 
 			{
 				type: "${file_type}",
@@ -642,6 +675,8 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 			}
 		) 
 		RETURN file, p.path as process_path`
+		console.log(query)
+		
 	var response = await web.cypher(query)
 	console.log(response)
 
