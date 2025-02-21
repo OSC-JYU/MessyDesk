@@ -23,6 +23,7 @@ let nats
 let positions
 
 const DATA_DIR = process.env.DATA_DIR || 'data'
+const API_URL = process.env.API_URL || '/'
 
 const connections = new Map();
 
@@ -121,7 +122,7 @@ app.use(async function handleError(context, next) {
 });
 
 const upload = multer({
-	dest: './uploads/',
+	dest: './data/uploads/',
 	fileSize: 1048576
 });
 
@@ -836,7 +837,7 @@ router.post('/api/nomad/process/files', upload.fields([
 						target: message.file['@rid']
 					}
 					// direct link to thumbnail
-					wsdata.image = '/api/thumbnails/' + base_path
+					wsdata.image = API_URL + 'api/thumbnails/' + base_path
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {
