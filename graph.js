@@ -18,6 +18,8 @@ const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 let graph = {}
 
+const entityTypes = ['Tag','Person', 'Location', 'Theme', 'Quality']
+
 graph.initDB = async function () {
 	web.initURL(URL)
 	console.log(`ArcadeDB: ${web.getURL()}`)
@@ -194,7 +196,19 @@ graph.createUser = async function (data) {
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
 	var user = await this.create('User', data, true)
+	await this.initUserData(user)
 	return user
+}
+
+graph.initUserData = async function (user) {
+	// create entity types
+	await this.createEntityTypes(user['@rid'])
+}
+
+graph.createEntityTypes = async function (userRID) {	
+	for(var type of entityTypes) {
+		await this.create('EntityType', {owner: userRID, type: type})
+	}
 }
 
 graph.getProject_old = async function (rid, me_email) {
@@ -476,7 +490,7 @@ graph.createSetProcessNode = async function (topic, service, params, filegraph )
 	// create process node
 	var processNode = {}
 	var process_rid = null
-	const process_attrs = { label: topic }
+	const process_attrs = { label: topic, path:'' }
 	process_attrs.service = service.name
 	if(params.info) {
 		process_attrs.info = params.info
@@ -484,11 +498,11 @@ graph.createSetProcessNode = async function (topic, service, params, filegraph )
 
 	processNode = await this.create('SetProcess', process_attrs)
 	process_rid = processNode['@rid']
-	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
-	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	//var file_path = filegraph.path.split('/').slice(0, -1).join('/')
+	//processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
 	// update process path to record
-	const update = `MATCH (p:SetProcess) WHERE id(p) = "${process_rid}" SET p.path = "${processNode.path}" RETURN p`
-	var update_response = await web.cypher(update)
+	//const update = `MATCH (p:SetProcess) WHERE id(p) = "${process_rid}" SET p.path = "${processNode.path}" RETURN p`
+	//var update_response = await web.cypher(update)
 	
 
 	// finally, connect SetProcess node to source Set node

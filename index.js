@@ -341,22 +341,22 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 
 	// ************** EXIF FIX **************
 	// if file has EXIF orientation, then we need to rotate it
-	if(file_info && file_info.rotate) {
+	// if(file_info && file_info.rotate) {
 
-		var rotatedata = {
-			id:"md-imaginary",
-			task:"rotate",
-			params: {rotate:`${file_info.rotate}`, stripmeta:'true', task:"rotate"},
-			info:"I auto-rotated image based on EXIF orientation.",
-		}
-		fetch(`http://localhost:3000/api/queue/md-imaginary/files/${filegraph['@rid'].replace('#','')}`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify(rotatedata)
-		})
-	}
+	// 	var rotatedata = {
+	// 		id:"md-imaginary",
+	// 		task:"rotate",
+	// 		params: {rotate:`${file_info.rotate}`, stripmeta:'true', task:"rotate"},
+	// 		info:"I auto-rotated image based on EXIF orientation.",
+	// 	}
+	// 	fetch(`http://localhost:3000/api/queue/md-imaginary/files/${filegraph['@rid'].replace('#','')}`, {
+	// 		method: 'POST',
+	// 		headers: {
+	// 			'Content-Type': 'application/json'
+	// 		},
+	// 		body: JSON.stringify(rotatedata)
+	// 	})
+	// }
 
 	// ************** EXIF FIX ends**************
 
@@ -674,7 +674,6 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
 		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, set_metadata, ctx.request.headers.mail)
 		
-		//await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
 		// add node to UI
 		var wsdata = {command: 'add', type: 'process', target: '#'+set_rid, node:nodes.process, set_node:nodes.set,image:'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)

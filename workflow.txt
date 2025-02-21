@@ -1,5 +1,5 @@
 
-What happend when user clicks "Crunch"
+What happens when user clicks "Crunch"
 
 1. Request is made to queue endpoint
 
@@ -55,5 +55,16 @@ PATHS:
 
 	source noden pitää luoda path: /data/projects/PROJEKTI/files/SOURCE/process
 	setProcess noden pitää luoda path: /data/projects/PROJEKTI/files/SOURCE/process/SETPROCESS/files
+
+
+What happens when user click "Crunc" on Set (batch processing)?
+
+
+1. Request is made to queue endpoint
+
+post('/api/queue/:topic/files/:file_rid'
+
+1.1. Endpoint creates a Process node to database.
+
 
 

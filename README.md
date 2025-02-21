@@ -60,9 +60,9 @@ Start back end (Docker):
 Now we should have backend running. We need also some services and UI.
 
 
-### Consumer apps (service adapters)
+### Service adapters
 
-Consumer apps are links between MessyDesk backend and services..
+Service adapters are links between MessyDesk backend and services.
 
 One more repository is needed:
 
@@ -79,7 +79,7 @@ And then in another terminal:
     NAME=md-imaginary node api-imaginary.mjs
     
 
-Now we have also two consumer application and two nomad jobs, thumbnailer and imaginary library for image manipulation.
+Now we have also two service adapter application that listens  and two nomad jobs, thumbnailer and imaginary library for image manipulation.
 
 
 ### Frontend:
