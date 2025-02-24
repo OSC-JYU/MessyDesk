@@ -25,6 +25,9 @@ let positions
 const DATA_DIR = process.env.DATA_DIR || 'data'
 const API_URL = process.env.API_URL || '/'
 
+const AUTH_HEADER = 'mail'
+const AUTH_NAME = 'displayname'
+
 const connections = new Map();
 
 (async () => {
@@ -64,8 +67,6 @@ process.on( 'SIGINT', async function() {
   })
 
 
-const AUTH_HEADER = 'mail'
-
 // LOGGING
 require('winston-daily-rotate-file');
 
@@ -89,7 +90,12 @@ const logger = winston.createLogger({
 
 logger.info('MessyDesk started');
 // LOGGING ENDS
-var visitors = []
+
+// open endpoints
+const openEndpoints = [
+	'/api/sso',
+	'/api/permissions/request'
+]
 
 
 const app = new Koa();
@@ -103,8 +109,6 @@ app.use(serve(path.join(__dirname, '/public')))
 
 // check that user has rights to use app
 app.use(async function handleError(context, next) {
-	console.log(context.request.path)
-	console.log(context.request.headers[AUTH_HEADER])
 
 	if(process.env.MODE === 'development') {
 		//console.log('auth header: ', context.request.headers[AUTH_HEADER])
@@ -131,8 +135,10 @@ const upload = multer({
 app.use(async function handleError(context, next) {
 
 	try {
-		if(!context.request.user) context.status = 401
-		else await next();
+		if(!context.request.user && !openEndpoints.includes(context.request.path) && context.request.path) 
+			context.status = 401
+		else 
+			await next();
 	} catch (error) {
 		context.status = 500;
 		var error_msg = error
@@ -169,9 +175,48 @@ router.all('/ws', async (ctx, next) => {
   })
 
 
+// these two routes are the only endpoints that doesn't require user permissions
+// return user's email (sso)
+router.get('/api/sso', function (ctx) {
+	ctx.body = {mail:ctx.headers[AUTH_HEADER], name:ctx.headers[AUTH_NAME]}
+})
+
+// allow users to ask user permissions
+router.post('/api/permissions/request', async function (ctx) { // "/p/r" = /permissions/request
+	console.log(ctx.headers)
+	const userId = ctx.headers[AUTH_HEADER] 
+	var userName = ctx.headers[AUTH_NAME] 
+	if(!userName) userName = userId
+
+	if(userId) {
+		try {
+			const query = `SELECT FROM Request WHERE id = "${userId}"`
+			var res = await web.sql(query)
+			if(res.result.length > 0) throw new Error('Already requested')
+			await Graph.createWithSQL('Request', {
+				id: userId,
+				label: userName,
+				date: '[TIMESTAMP]'
+			})
+			//await mailer.sendUserRequest(userId)
+		
+		} catch (error) {
+			console.log('User request failed: ', userId, error)
+			logger.error({
+				user:userId,
+				message: error.message,
+				error: error
+			});
+			throw error
+		}
+	}
+	ctx.body = {status: 'ok'}
+})
+
+
+// NEEDS AUTH
 router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
-	console.log(ctx.request.user)
 })
 
 router.get('/api/settings', function (ctx) {
@@ -597,7 +642,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		if(service.tasks[ctx.request.body.task].system_params)
 			ctx.request.body.params = service.tasks[ctx.request.body.task].system_params
 		
-		await media.writeJSON(ctx.request.body, 'params.json', path.join(DATA_DIR, path.dirname(processNode.path)))
+		await media.writeJSON(ctx.request.body, 'params.json', path.join(path.dirname(processNode.path)))
 		// add node to UI
 		var wsdata = {command: 'add', type: 'process', target: '#'+file_rid, node:processNode, image:'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)

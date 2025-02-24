@@ -84,9 +84,10 @@ web.createDB = async function() {
 		await this.createVertexType('SetProcess')
 		await this.createVertexType('ROI')
 		await this.createVertexType('Entity')
+		await this.createVertexType('Request')
 		
 		//await this.createVertexType('Person')
-		// development user
+		// development/default user
 		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
@@ -355,7 +356,7 @@ function setParent(vertices, child, parent) {
 
 
 async function convert2VueFlow(data, options) {
-	console.log(data.result)
+
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []

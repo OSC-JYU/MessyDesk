@@ -16,6 +16,8 @@ const DB = process.env.DB_NAME || 'messydesk'
 const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
+const API_URL = process.env.API_URL || '/'
+
 let graph = {}
 
 const entityTypes = ['Tag','Person', 'Location', 'Theme', 'Quality']
@@ -224,7 +226,7 @@ graph.getProject = async function (rid, me_email) {
 	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
 				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
 				RETURN file`
-console.log(query)
+
 	const options = {
 		serializer: 'graph',
 		format: 'cytoscape',
@@ -232,7 +234,7 @@ console.log(query)
 	}
 	
 	var result = await web.sql(query, options)
-	console.log(result)
+
 	return result
 }
 
@@ -272,7 +274,7 @@ graph.getProject_backup = async function (rid, me_email) {
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND set is NULL AND $depth > 0), while:($depth < 10)} return node`
 
 
-		console.log(query)
+	
 
 	const options = {
 		serializer: 'studio',
@@ -391,7 +393,7 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 graph.getProjectFiles = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
-	console.log(query)
+	
 	var result = await web.cypher(query)
 	return result
 }
@@ -767,7 +769,7 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content
 			const extensions = await getSetFileTypes(file_rid)
-			console.log('extensions', extensions)
+			//console.log('extensions', extensions)
 			set_response.result[0].file.extensions = extensions
 			return set_response.result[0].file
 
@@ -815,7 +817,8 @@ graph.create = async function (type, data, admin) {
 				data_str_arr.push(`${key}:[${data[key]}]`)
 			} else if (typeof data[key] == 'string') {
 				if (data[key].length > MAX_STR_LENGTH) throw ('Too long data!')
-				data_str_arr.push(`${key}:"${data[key].replace(/"/g, '\\"')}"`)
+				if (data[key] == '[TIMESTAMP]') data_str_arr.push(`${key}: date()`)
+				else data_str_arr.push(`${key}:"${data[key].replace(/"/g, '\\"')}"`)
 			} else {
 				data_str_arr.push(`${key}:${data[key]}`)
 			}
@@ -836,6 +839,38 @@ graph.create = async function (type, data, admin) {
 	return response.result[0]
 }
 
+graph.createWithSQL = async function (type, data, admin) {
+	console.log('create', type, data)
+	var data_str_arr = []
+	// expression data to string
+	for (var key in data) {
+		if (data[key]) {
+			if (Array.isArray(data[key]) && data[key].length > 0) {
+				data[key] = data[key].map(i => `'${i}'`).join(',')
+				data_str_arr.push(`${key}:[${data[key]}]`)
+			} else if (typeof data[key] == 'string') {
+				if (data[key].length > MAX_STR_LENGTH) throw ('Too long data!')
+				if (data[key] == '[TIMESTAMP]') data_str_arr.push(`${key}: date()`)
+				else data_str_arr.push(`${key}:"${data[key].replace(/"/g, '\\"')}"`)
+			} else {
+				data_str_arr.push(`${key}:${data[key]}`)
+			}
+		}
+	}
+	// set some system attributes to all Users
+	if (type === 'User') {
+		if(!admin) throw ('You are not admin!')
+		if (!data['group']) data_str_arr.push(`group: "user"`) // default user group for all persons
+		if (!data['access']) data_str_arr.push(`access: "user"`) // default access for all persons
+	}
+	// _active
+	if (!data['active']) data_str_arr.push(`active: true`)
+
+	var query = `CREATE VERTEX ${type} CONTENT {${data_str_arr.join(',')}}`
+	
+	const response = await web.sql(query)
+	return response.result[0]
+}
 
 graph.deleteNode = async function (rid, nats) {
 	if (!rid.match(/^#/)) rid = '#' + rid
@@ -1168,7 +1203,7 @@ graph.getEntityItems = async function (entities, userRID) {
 	var entities_clean = cleanRIDList(entities)
 	if(!entities_clean.length) return []
 	//var query = `select in("HAS_ENTITY") AS items, label, @rid From Entity WHERE owner = "${userRID}" AND @rid IN [${entities_clean.join(',')}]`
-	var query = `match {type:File, as:item}-HAS_ENTITY->{as:entity, where:(@rid IN [${entities_clean.join(',')}] AND owner = "${userRID}")} return  DISTINCT item.label AS label, item.description AS description, item.@rid AS rid, item.path AS path, item.type AS type LIMIT 20`
+	var query = `match {type:File, as:item}-HAS_ENTITY->{as:entity, where:(@rid IN [${entities_clean.join(',')}] AND owner = "${userRID}")} return  DISTINCT item.label AS label, item.info AS info, item.description AS description, item.@rid AS rid, item.path AS path, item.type AS type LIMIT 20`
 	var response = await web.sql(query)
 
 	if(!response.result.length) return []
@@ -1308,7 +1343,7 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 function addThumbPaths(items) {
 
 	for (var file of items) {
-		file.thumb = '/api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 	}
 	return items
 	

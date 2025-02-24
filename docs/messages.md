@@ -26,6 +26,6 @@ Messages send to NATS stream includes:
         target: '#31:8',
         task: 'thumbnail',
         params: { width: 800, type: 'jpeg', size: 200 },
-        id: 'thumbnailer',
+        id: 'md-thumbnailer',
         thumb_name: 'thumbnail.jpg'
     }
