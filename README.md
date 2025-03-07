@@ -56,6 +56,10 @@ Start back end (Docker):
 
     MODE=development DB_PASSWORD=node_master node index.js
 
+If using podman:
+
+    MODE=development DB_PASSWORD=node_master PODMAN=true node index.js
+
 
 Now we should have backend running. We need also some services and UI.
 

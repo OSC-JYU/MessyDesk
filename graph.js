@@ -17,6 +17,7 @@ const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 const API_URL = process.env.API_URL || '/'
+const AUTH_HEADER = 'mail'
 
 let graph = {}
 
@@ -445,6 +446,64 @@ graph.getSourceFiles = async function (source_rid, me_email, params) {
 	}
 
 }
+
+// Creates process and output Set nodes and creates queue messages
+graph.createQueueMessages =  async function(service, request, user_id) {
+	var url_params = request.params
+	var data = request.body
+
+	if(!user_id) {
+		user_id = request.headers[AUTH_HEADER]
+	}
+
+	var messages = []
+	var message = structuredClone(data)
+	var task_name = service.tasks[data.task].name
+
+	var file_metadata = await this.getUserFileMetadata(url_params.file_rid, user_id)
+
+	var processNode = await this.createProcessNode(task_name, service, data, file_metadata, user_id)
+
+	await media.createProcessDir(processNode.path)
+	if(service.tasks[data.task].system_params)
+		message.params = service.tasks[data.task].system_params
+	
+	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
+
+	// do we need info about "parent" file?
+	if(service.tasks[data.task].source) {
+		var source = await this.getFileSource(url_params.file_rid)
+		if(source) {
+			var source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
+			message.source = source_metadata
+		}
+	}
+	message.process = processNode
+	message.file = file_metadata
+	message.target = url_params.file_rid
+	message.userId = user_id
+
+	// ROI request must be handled separately
+	if(url_params.roi) {
+		// we can work with ROIs only if we have width and height of file
+		if(file_metadata.metadata) var metadata = file_metadata.metadata
+		if(metadata && metadata.width && metadata.height) {
+			var rois = await this.getROIs(url_params.file_rid)
+			var roi_message = structuredClone(message)
+			for(var roi of rois) {
+				media.ROIPercentagesToPixels(roi, roi_message)
+				messages.push(roi_message)
+			}	
+		}
+
+	} else {
+		messages.push(message)
+	}
+
+	return messages
+}
+
+
 
 // create Process that is linked to File
 graph.createProcessNode = async function (topic, service, params, filegraph, me_email, set_rid) {
@@ -1255,7 +1314,8 @@ graph.linkEntity = async function (rid, vid, userRID) {
 	console.log(response.result)
 	var target = response.result[0]
 	if(!entity || !target) return	
-	await this.connect(vid, 'HAS_ENTITY',rid)
+	var linked = await this.connect(vid, 'HAS_ENTITY',rid)
+	return linked
 }
 
 graph.unLinkEntity = async function (rid, vid, userRID) {

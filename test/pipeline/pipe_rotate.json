@@ -1,0 +1,18 @@
+{"pipeline": [
+  { 
+    "id": "md-imaginary", 
+    "task":"rotate", 
+    "params": {
+      "rotate":90, 
+      "task": "rotate"
+    }
+  },
+  { 
+    "id": "md-imaginary", 
+    "task":"rotate", 
+    "params": {
+      "rotate":180, 
+      "task": "rotate"
+    }
+  }
+]}
