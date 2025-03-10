@@ -624,27 +624,18 @@ router.get('/api/services/files/:rid', async function (ctx) {
 // pipeline queue for single file
 router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 
-
-	for(var pipeline of ctx.request.body.pipeline) {
-		var service = services.getServiceAdapterByName(pipeline.id)
-		var request = {
-			params: {
-				file_rid: ctx.request.params.file_rid,
-				topic: pipeline.id
-			},
-			body: {
-				task: pipeline.task,
-				params: pipeline.params
-			}	
-		}
-		var messages = await Graph.createQueueMessages(service, request, ctx.request.headers[AUTH_HEADER])
-
+	let messages = []
+	
+	var requests = await Graph.createRequestsFromPipeline(ctx.request.body, ctx.request.params.file_rid, ctx.request.params.roi)
+	
+	for(var request of requests) {
+		var service = services.getServiceAdapterByName(request.params.topic)
+		messages = await Graph.createQueueMessages(service, request, ctx.request.headers[AUTH_HEADER])
 		for(var msg of messages) {
 			var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
 			send2UI(ctx.request.headers.mail, wsdata)
-			nats.publish(pipeline.id, JSON.stringify(msg))
+			nats.publish(request.params.topic, JSON.stringify(msg))
 		}
-		
 	}
 
 	ctx.body = messages
@@ -923,9 +914,9 @@ router.post('/api/nomad/process/files', upload.fields([
 							target: fileNode['@rid'],
 							params:{task:'info'}
 						}
-						console.log(info)
+						//console.log(info)
 						nats.publish(info.id, JSON.stringify(info))
-						console.log('published info task', info)
+						console.log(`published info task\nservice: ${info.id}\ntarget: ${info.target}`)
 					}
 				} 
 
@@ -938,7 +929,7 @@ router.post('/api/nomad/process/files', upload.fields([
 						userId: message.userId, 
 						target: fileNode['@rid']
 					}
-					console.log('publishing index message', JSON.stringify(index_msg, null, 2))
+					console.log(`published info task\nservice: ${info.id}\ntarget: ${info.target}`)
 					nats.publish(index_msg.id, JSON.stringify(index_msg))					
 				}
 
@@ -974,13 +965,36 @@ router.post('/api/nomad/process/files', upload.fields([
 					//console.log(wsdata)
 					send2UI(message.userId, wsdata)
 				}
-			}
 
 
+				// finally check if there is pipeline in message
+				if(message.pipeline && message.pipeline.length > 0) {
+					// if file_count and file_total are integers and they are equal, then call pipeline
+					if(Number.isInteger(message.file_count) && Number.isInteger(message.file_total) && message.file_total == message.file_count) {
+						console.log('\n\n\n\n--------------PIPELINE detected')
+						console.log(message.file_total, message.file_count)
+						console.log('pipeline target: ', fileNode['@rid'])
+						console.log(message.pipeline)
 
+						let messages = []
+	
+						var requests = await Graph.createRequestsFromPipeline(message, fileNode['@rid'].replace('#', ''))
+						
+						for(var request of requests) {
+							var service = services.getServiceAdapterByName(request.params.topic)
+							messages = await Graph.createQueueMessages(service, request, ctx.request.headers[AUTH_HEADER])
+							for(var msg of messages) {
+								var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
+								send2UI(ctx.request.headers.mail, wsdata)
+								nats.publish(request.params.topic, JSON.stringify(msg))
+							}
+						}
 
+					}
 		
+				}
 
+			}
 
 		// something went wrong in file processing	
 		} else {
@@ -991,6 +1005,8 @@ router.post('/api/nomad/process/files', upload.fields([
 	} catch(e) {
 		console.log(e)
 	}
+
+
 	ctx.body = 's'
 })
 
