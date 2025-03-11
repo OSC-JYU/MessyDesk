@@ -621,6 +621,13 @@ router.get('/api/services/files/:rid', async function (ctx) {
 	}
 })
 
+
+router.post('/api/notify', async function (ctx) {
+	//if(ctx.request.user.access == 'admin') {
+		var n = await Graph.index()
+		ctx.body = n
+	//}
+})
 // pipeline queue for single file
 router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 
@@ -656,6 +663,10 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		for(var msg of messages) {	
 			// add Process node to UI
 			var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
+			// there is output Set node, then add it too to UI
+			if(msg.set_node) {
+				wsdata.set_node = msg.set_node
+			}
 			send2UI(ctx.request.headers.mail, wsdata)
 			// send message to queue
 			nats.publish(topic, JSON.stringify(msg))
@@ -686,7 +697,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 		send2UI(ctx.request.headers.mail, wsdata)
 
 		// next we create process nodes for each file in set and put them in queue
-		var set_files = await Graph.getSetFiles(set_rid, ctx.request.headers.mail, {limit:200})
+		var set_files = await Graph.getSetFiles(set_rid, ctx.request.headers.mail, {limit:'500'})
 		
 		for(var file of set_files.files) {
 			var file_metadata = await Graph.getUserFileMetadata(file['@rid'], ctx.request.headers.mail)
@@ -1018,28 +1029,36 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 		if(ctx.request.body.message) {
 			var message = ctx.request.body.message
 			var target = message.target
-			
-			var wsdata = {
-				command: 'update', 
-				target: target,
-				error: 'error'
 
+			if(message.task == 'index') {
+
+			} else {
+	
+				var wsdata = {
+					command: 'update', 
+					target: message.process['@rid'],
+					error: 'error'
+	
+				}
+				// write error to node, send update to UI and index error
+				var targetNode = target
+				if(message.process && message.process['@rid']) targetNode = message.process['@rid']
+				await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'})
+				console.log('ERROR')
+				console.log(message)
+				await send2UI(message.userId, wsdata)
+	
+				var index_msg = [{
+					type: 'error',
+					id:message.process['@rid'] + '_error', 
+					error_node: target, 
+					error: JSON.stringify(error), 
+					message: JSON.stringify(message), 
+					owner: message.userId
+				}]
+				await web.indexDocuments(index_msg)		
 			}
-			// write error to node, send update to UI and index error
-			var targetNode = target
-			if(message.process && message.process['@rid']) targetNode = message.process['@rid']
-			await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'})
-			await send2UI(message.userId, wsdata)
-
-			var index_msg = [{
-				type: 'error',
-				id:message.process['@rid'] + '_error', 
-				error_node: target, 
-				error: JSON.stringify(error), 
-				message: JSON.stringify(message), 
-				owner: message.userId
-			}]
-			await web.indexDocuments(index_msg)				
+		
 		
 		}
 

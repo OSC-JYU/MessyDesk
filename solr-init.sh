@@ -19,6 +19,24 @@ curl -X POST -H 'Content-type:application/json' \
     }
   }'
 
+curl -X POST -H 'Content-type:application/json' \
+  http://localhost:8983/solr/messydesk/schema \
+  --data-binary '{
+    "add-field-type": {
+      "name": "text_ngram",
+      "class": "solr.TextField",
+      "positionIncrementGap": "100",
+      "analyzer": {
+        "tokenizer": { "class": "solr.StandardTokenizerFactory" },
+        "filters": [
+          { "class": "solr.LowerCaseFilterFactory" },
+          { "class": "solr.ShingleFilterFactory", "minShingleSize": "2", "maxShingleSize": "2", "outputUnigrams": "true" },
+          { "class": "solr.NGramFilterFactory", "minGramSize": "3", "maxGramSize": "10" }
+        ]
+      }
+    }
+  }'
+
 curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"node",
     "type":"string",
@@ -66,7 +84,7 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
 
   curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"fulltext",
-    "type":"text_edge_ngram",
+    "type":"text_ngram",
     "stored":true,
     "indexed":true
   }

@@ -21,7 +21,7 @@ const AUTH_HEADER = 'mail'
 
 let graph = {}
 
-const entityTypes = ['Tag','Person', 'Location', 'Theme', 'Quality']
+const entityTypes = ['Tag','Person', 'Location', 'Theme', 'Quality', 'Date']
 
 graph.initDB = async function () {
 	web.initURL(URL)
@@ -345,7 +345,7 @@ async function getSetThumbnails(me_email, data, project_rid, data_dir) {
 
 	// order image by file label so that result set would show same images as source set
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[*0..10]->(set:Set)-->(file:File) 
-		WHERE p.id = "${me_email}" AND id(pr) = "${project_rid}"
+		WHERE p.id = "${me_email}" AND id(pr) = "${project_rid}" AND file.type = "image"
 		WITH file, set ORDER BY file.label
 	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
 	var response = await web.cypher(query)
@@ -506,6 +506,16 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 			message.source = source_metadata
 		}
 	}
+
+	// if output of task is "Set", then create Set node and link it to Process node
+	if(service.tasks[data.task].output_set) {
+		var setNode = await this.createOutputSetNode(service.tasks[data.task].output_set, processNode)
+		//wsdata = {command: 'add', type: 'set', target: processNode['@rid'], node:setNode}
+		message.output_set = setNode['@rid']
+		message.set_node = setNode
+		//send2UI(ctx.request.headers.mail, wsdata)
+	}
+
 	message.process = processNode
 	message.file = file_metadata
 	message.target = url_params.file_rid
