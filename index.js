@@ -164,12 +164,13 @@ router.all('/ws', async (ctx, next) => {
 	if (ctx.ws) {
 	  const ws = await ctx.ws()
 	  const userId = ctx.headers[AUTH_HEADER] 
+	  console.log(userId)
   
 	  // Store WebSocket connection with user ID
 	  connections.set(userId, ws);
 	  ws.on('message', function message(data) {
 		//console.log('received: %s', data);
-		positions.updateProjectNodePosition(JSON.parse(data))
+		positions.updateProjectNodePosition(JSON.parse(data), userId)
 	  });
 	}
   })
@@ -539,6 +540,8 @@ router.get('/api/process/(.*)', async function (ctx) {
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
 	console.log('creating project', me)
+	if(!ctx.request.body.label) throw new Error('label required')
+		
 	var n = await Graph.createProject(ctx.request.body, me.rid)
 	console.log('project created')
 	console.log(n)
@@ -1087,7 +1090,7 @@ router.post('/api/layouts', async function (ctx) {
 
 router.get('/api/layouts/:rid', async function (ctx) {
 	//var me = await Graph.myId(ctx.request.headers[AUTH_HEADER])
-	var n = await positions.getLayoutByTarget(ctx.request.params.rid)
+	var n = await positions.getLayoutByTarget(ctx.request.headers[AUTH_HEADER])
 	ctx.body = n
 })
 

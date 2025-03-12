@@ -6,34 +6,30 @@ const COMMON_LAYOUTS = ['projects']
 
 export let layout = {}
 
-layout.setLayout = async function (layout) {
-	const { target, data } = layout
-	if (!target || !data) throw new Error('data missing')
+layout.setLayout = async function (layout, userId) {
 
-	const filename = COMMON_LAYOUTS.includes(target)
-		? `layout_${target}-${target}.json`
-		: `layout_${target.replace(/^#/, '')}.json`
+	if (!userId) throw new Error('data missing')
 
-	const filePath = path.resolve('./layouts', filename)
-	const fileData = JSON.stringify(data)
+	const filename = `layout_${userId}.json`
+
+	const filePath = path.resolve('./data/layouts', filename)
+	const fileData = JSON.stringify(layout)
 
 	await fsPromises.writeFile(filePath, fileData, 'utf8')
 }
 
-layout.updateProjectNodePosition = async function (node) {
-	var layout = await this.getLayoutByTarget('projects')
+layout.updateProjectNodePosition = async function (node, userId) {
+
+	var layout = await this.getLayoutByTarget(userId)
     if(node.position) layout[node.id] = node.position
 
-	await this.setLayout({target:'projects',data: layout})
+	await this.setLayout(layout, userId)
 }
 
-layout.getLayoutByTarget = async function (target) {
+layout.getLayoutByTarget = async function (userId) {
 
-	const filename = COMMON_LAYOUTS.includes(target)
-		? `layout_${target}-${target}.json`
-		: `layout_${target.replace(/^#/, '')}.json`
-
-	const filePath = path.resolve('./layouts', filename)
+	const filename = `layout_${userId}.json`
+	const filePath = path.resolve('./data/layouts', filename)
 	try {
 		const locations = await fsPromises.readFile(filePath, 'utf8')
 		return JSON.parse(locations)

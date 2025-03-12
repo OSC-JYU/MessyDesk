@@ -331,7 +331,7 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+						project.paths.push(API_URL + 'api/thumbnails/' + part.replace(filename, '') + 'thumbnail.jpg')
 					}
 				});
 			}
@@ -339,7 +339,6 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 	}
 	return data
 }
-
 
 async function getSetThumbnails(me_email, data, project_rid, data_dir) {
 
@@ -358,30 +357,7 @@ async function getSetThumbnails(me_email, data, project_rid, data_dir) {
 				thumbs.paths.forEach(function (part, index) {
 					if (index < 2) {
 						const filename = path.basename(part)
-						set.data.paths.push('/api/thumbnails/' + part.replace(filename, ''))
-					}
-				});
-			}
-		}
-	}
-	return data
-}
-
-
-async function getProjectThumbnails(me_email, data, data_dir) {
-
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
-	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
-	var response = await web.cypher(query)
-
-	for (var project of data) {
-		for (var thumbs of response.result) {
-			if (project['@rid'] === thumbs.project) {
-				project.paths = []
-				thumbs.paths.forEach(function (part, index) {
-					if (index < 2) {
-						const filename = path.basename(part)
-						project.paths.push('/api/thumbnails/' + part.replace(filename, ''))
+						set.data.paths.push(API_URL + 'api/thumbnails/' + part.replace(filename, '') + 'thumbnail.jpg')
 					}
 				});
 			}
@@ -412,7 +388,7 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 	
 	// thumbnails and entities
 	for (var file of response.result) {
-		file.thumb = '/api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+		file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 		// TODO: do this in one query!
 		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
 		var entity_response = await web.cypher(entity_query)

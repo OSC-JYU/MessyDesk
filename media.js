@@ -94,6 +94,7 @@ media.createDataDir = async function(data_dir) {
 		//await fs.ensureDir(data_dir)
 		await fs.ensureDir(path.join(data_dir, 'projects'))
 		await fs.ensureDir(path.join(data_dir, 'uploads'))
+		await fs.ensureDir(path.join(data_dir, 'layouts'))
 	} catch(e) {
 		throw('Could not create data directory!' + e.message)
 	}
