@@ -87,6 +87,17 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 	// Finalize the archive
 	archive.finalize();
   }
+// NOTE: this removes parent directory! (the basename is stripper away)
+  media.deleteNodePath = async function(dir) {
+	try {
+		var p = path.dirname(dir)
+		if(p == 'data/projects' || p == 'data/projects/') throw('Protecting projects dir!')
+		await fs.remove(p)
+	} catch(e) {
+		console.log('error deleting node data directory. ' + e)
+		//throw('Could not delete directory!' + e.message)
+	}	
+}
 
 
 media.createDataDir = async function(data_dir) {

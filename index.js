@@ -193,7 +193,9 @@ router.post('/api/permissions/request', async function (ctx) { // "/p/r" = /perm
 		try {
 			const query = `SELECT FROM Request WHERE id = "${userId}"`
 			var res = await web.sql(query)
-			if(res.result.length > 0) throw new Error('Already requested')
+			const query2 = `SELECT FROM User WHERE id = "${userId}"`
+			var res2 = await web.sql(query)
+			if(res.result.length > 0 || res2.result.length > 0) throw new Error('Already requested')
 			await Graph.createWithSQL('Request', {
 				id: userId,
 				label: userName,
@@ -539,12 +541,9 @@ router.get('/api/process/(.*)', async function (ctx) {
 
 router.post('/api/projects', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
-	console.log('creating project', me)
 	if(!ctx.request.body.label) throw new Error('label required')
-		
 	var n = await Graph.createProject(ctx.request.body, me.rid)
-	console.log('project created')
-	console.log(n)
+
 	await media.createProjectDir(n, DATA_DIR)
 	ctx.body = n
 })
@@ -567,6 +566,11 @@ router.get('/api/projects', async function (ctx) {
 
 router.get('/api/projects/:rid', async function (ctx) {
 	var n = await Graph.getProject_backup(ctx.request.params.rid, ctx.request.headers.mail)
+	ctx.body = n
+})
+
+router.delete('/api/projects/:rid', async function (ctx) {
+	var n = await Graph.deleteProject(ctx.request.params.rid, ctx.request.headers.mail, nats)
 	ctx.body = n
 })
 

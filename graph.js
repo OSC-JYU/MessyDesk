@@ -18,10 +18,19 @@ const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
 const API_URL = process.env.API_URL || '/'
 const AUTH_HEADER = 'mail'
+const DEFAULT_USER = 'local.user@localhost'
 
 let graph = {}
 
-const entityTypes = ['Tag','Person', 'Location', 'Theme', 'Quality', 'Date']
+const entityTypes = [
+	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
+	{type:'Person', icon:'account', color:'red', label:'Person'},
+	{type:'Location', icon:'map-marker', color:'green', label:'Location'},
+	{type:'Theme', icon:'shape', color:'yellow', label:'Theme'},
+	{type:'Quality', icon:'message-alert', color:'orange', label:'Quality'},
+	{type:'Date', icon:'calendar-range', color:'grey', label:'Date'}
+]
+
 
 graph.initDB = async function () {
 	web.initURL(URL)
@@ -40,11 +49,14 @@ graph.initDB = async function () {
 		try {
 			console.log('Database not found, creating...')
 			await web.createDB()
+			await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 		} catch (e) {
+			console.log(e)
 			console.log(`Could not init database. \nTrying again in 10 secs...`)
 			await timers.setTimeout(10000)
 			try {
 				await web.createDB()
+				await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 			} catch (e) {
 				console.log(`Could not init database. \nIs Arcadedb running at ${web.getURL()}?`)
 				throw ('Could not init database. exiting...')
@@ -82,6 +94,14 @@ graph.createProject = async function (data, me_rid) {
 	}
 	return project
 
+}
+
+graph.deleteProject = async function (project_rid, me_rid, nats) {
+	const query = `MATCH {type:User, as:user, where:(id = '${me_rid}')}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
+	var response = await web.sql(query)
+	if(response.result.length == 1) {
+		await this.deleteNode(response.result[0]['rid'], nats)
+	}
 }
 
 graph.createSet = async function (project_rid, data, me_rid) {
@@ -191,7 +211,9 @@ graph.getUsers = async function () {
 graph.createUser = async function (data) {
 	// check that email is valid
 	if(!data.id) throw ('Email not defined!')
-	if (!data.id.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)) throw ('Invalid email address!')
+	if(data.id !== DEFAULT_USER) { // default user has no valid email...
+		if (!data.id.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/)) throw ('Invalid email address!')
+	}
 
 	// email must be unique
 	const query = `MATCH (p:User) WHERE p.id = "${data.id}" RETURN count(p) as users`
@@ -210,7 +232,7 @@ graph.initUserData = async function (user) {
 
 graph.createEntityTypes = async function (userRID) {	
 	for(var type of entityTypes) {
-		await this.create('EntityType', {owner: userRID, type: type})
+		await this.create('EntityType', {owner: userRID, type: type.type, icon: type.icon, color: type.color, label: type.label})
 	}
 }
 
@@ -942,6 +964,9 @@ graph.createWithSQL = async function (type, data, admin) {
 graph.deleteNode = async function (rid, nats) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
+	var parent = await this.getNodeAttributes(rid)
+	if(parent.result.length == 0) throw ('Node not found')
+	
 	// remove node and all children (out nodes) from solr index
 	const q = `TRAVERSE out() FROM ${rid}`
 	var traverse = await web.sql(q)
@@ -949,6 +974,9 @@ graph.deleteNode = async function (rid, nats) {
 	for(var node of traverse.result) {
 		console.log(node)
 		targets.push({id: node['@rid']})
+		// remove of path is only necessary for setProcess nodes TODO: make smarter
+		if(node['path'])
+			await media.deleteNodePath(node['path'])
 	}
 
 	var index_msg = {
@@ -968,6 +996,15 @@ graph.deleteNode = async function (rid, nats) {
 		OPTIONAL MATCH (n)-[*]->(child)
 		DETACH delete n,child`
 	var response = await web.cypher(query)
+
+	const node_path = parent.result[0].path
+	const is_project = parent.result[0]['@type'] == 'Project'
+	if(node_path)
+		await media.deleteNodePath(node_path)
+	// project node has no path
+	if(is_project) {
+		await media.deleteNodePath(path.join('data', 'projects', media.rid2path(rid), 'files')) // must add 'files' so that it does not remove the whole project directory
+	}
 	
 	if(path_result.result[0] && path_result.result[0].path) {
 		return { path: path_result.result[0].path}	

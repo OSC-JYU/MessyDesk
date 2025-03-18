@@ -84,11 +84,12 @@ web.createDB = async function() {
 		await this.createVertexType('SetProcess')
 		await this.createVertexType('ROI')
 		await this.createVertexType('Entity')
+		await this.createVertexType('EntityType')
 		await this.createVertexType('Request')
 		
 		//await this.createVertexType('Person')
 		// development/default user
-		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
+		//await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
