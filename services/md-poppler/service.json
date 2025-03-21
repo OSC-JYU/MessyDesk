@@ -21,18 +21,22 @@
                 "task": "pdf2text"
             },
             "output": "store",
+            "output_set": "texts of PDF",
             "name": "Extract text from PDF",
             "description": "This will extract text from searchable PDF and output a .txt file from. <br/>Note that this is does <b>not</b> do Optical Character Regonition. ",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 5
                 }
-            }
+            },
+            "info": "Text from page {{firstPageToConvert}} to {{lastPageToConvert}} "
         },
         "pdf2images": {
             "params": {
@@ -47,13 +51,16 @@
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 5
                 }
-            }           
+            },
+            "info": "Images from page {{firstPageToConvert}} to {{lastPageToConvert}} "           
         },
         "pdfimages": {
             "params": {
@@ -68,13 +75,16 @@
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": ""
+                    "help": "",
+                    "default": 5
                 }
-            }            
+            },
+            "info": "Pages as images from page {{firstPageToConvert}} to {{lastPageToConvert}} "            
         }
     }
 }

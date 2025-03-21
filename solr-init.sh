@@ -84,7 +84,7 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
 
   curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "name":"fulltext",
-    "type":"text_ngram",
+    "type":"text_edge_ngram",
     "stored":true,
     "indexed":true
   }

@@ -24,11 +24,11 @@ let graph = {}
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
-	{type:'Person', icon:'account', color:'red', label:'Person'},
+	{type:'Person', icon:'account', color:'rgb(17, 138, 42)', label:'Person'},
 	{type:'Location', icon:'map-marker', color:'green', label:'Location'},
-	{type:'Theme', icon:'shape', color:'yellow', label:'Theme'},
+	{type:'Theme', icon:'shape', color:'rgb(129, 19, 138)', label:'Theme'},
 	{type:'Quality', icon:'message-alert', color:'orange', label:'Quality'},
-	{type:'Date', icon:'calendar-range', color:'grey', label:'Date'}
+	{type:'Date', icon:'calendar-range', color:'rgb(43, 95, 98)', label:'Date'}
 ]
 
 
@@ -222,12 +222,26 @@ graph.createUser = async function (data) {
 		
 	var user = await this.create('User', data, true)
 	await this.initUserData(user)
+
+	// commands to make demo projects
+	var demo1 = `http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" '${data.id}'`
+	user.demos = demo1
+
 	return user
 }
 
 graph.initUserData = async function (user) {
-	// create entity types
+	// create entity (tag) types
 	await this.createEntityTypes(user['@rid'])
+
+	// Create Desks
+	//-tee Desk:
+	//http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" 'mail:local.user@localhost' 
+	//await web.internal({label: 'DEMO 1', description: 'Käännellään kuvia'}, user['id'])
+
+	// create demo Projects
+	//await web.runPipeline(pipeline, user['id'])
+	//http POST :8200/api/pipeline/files/82:6 @pipeline.json 'mail:ari.hayrinen@jyu.fi'
 }
 
 graph.createEntityTypes = async function (userRID) {	

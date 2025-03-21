@@ -14,6 +14,7 @@ const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 const DATA_DIR = process.env.DATA_DIR || './'
 const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr'
 const SOLR_CORE = process.env.SOLR_CORE || 'messydesk'
+const INTERNAL_URL = process.env.INTERNAL_URL || 'http://localhost:8200'
 
 console.log(URL)
 
@@ -107,6 +108,35 @@ web.createDB = async function() {
 		throw(e)
 	}
 }
+
+
+// web.runPipeline = async function(pipeline, userID) {
+// 	const {got} = await import('got')
+// 	var url = INTERNAL_URL + '/api/pipeline/run'
+
+
+// 	try {
+// 		var response = await got.post(url, data).json()
+// 		return response.result
+		
+// 	} catch(e) {
+// 		console.log(e.message)
+// 		throw({message: "Error on database check"})
+// 	}
+// }
+
+// web.internal = async function(url, data) {
+// 	const {got} = await import('got')
+// 	url = INTERNAL_URL + url
+// 	try {
+// 		var response = await got.post(url, data).json()
+// 		return response.result
+		
+// 	} catch(e) {
+// 		console.log(e.message)
+// 		throw({message: "Error on internal call! ", url})
+// 	}
+// }
 
 web.createVertexType = async function(type) {
 	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`

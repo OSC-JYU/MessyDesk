@@ -440,6 +440,7 @@ router.post('/api/projects/:rid/upload/:set?', upload.single('file'), async func
 		data.params = {
 			firstPageToConvert: '1',
 			lastPageToConvert: '1',
+			resolutionXYAxis: '80',
 			task: 'pdf2images'
 		},
 		data.role = 'thumbnail'

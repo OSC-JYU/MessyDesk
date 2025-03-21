@@ -311,9 +311,18 @@ media.getThumbnail = async function(filePath) {
 		let fullPath = path.join(base.replace('/api/thumbnails/', './'), thumbfile)
 
         // Check if the file exists asynchronously
-        const fileExists = await fs.pathExists(fullPath)
+        var fileExists = await fs.pathExists(fullPath)
         if (!fileExists) {
-            fullPath = path.join('images/image_not_found.jpg')
+			// for pdf there are no smaller thumbnails currently
+			if(f == 'thumbnail.jpg') {
+				thumbfile = 'preview.jpg'
+				fullPath = path.join(base.replace('/api/thumbnails/', './'), 'preview.jpg')
+				var fileExists = await fs.pathExists(fullPath)
+			}
+			if (!fileExists) {
+				fullPath = path.join('images/image_not_found.jpg')
+			}
+			
         }
 		return fs.createReadStream(fullPath)
 
@@ -322,6 +331,8 @@ media.getThumbnail = async function(filePath) {
 		return false;
 	}
 }
+
+
 function NERsummary(data) {
 	try {
 
