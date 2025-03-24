@@ -59,7 +59,7 @@ else:
 
 # 2. Add files to Desk
 
-
+# TEXT IMAGE
 files = {"file": ("demo_text_fin.jpg", open("test/files/text_fin.jpg", "rb"), "image/jpeg")}
 
 url = f"http://localhost:8200/api/projects/{data_json['@rid'].replace('#','')}/upload"
@@ -76,6 +76,7 @@ else:
     image2 = upload_json['@rid'].replace('#','')
 
 
+# CAT IMAGE
 files = {"file": ("kissa.jpg", open("test/files/kissa.jpg", "rb"), "image/jpeg")}
 
 url = f"http://localhost:8200/api/projects/{data_json['@rid'].replace('#','')}/upload"
@@ -91,6 +92,10 @@ else:
     print(upload_json['@rid'])
     image1 = upload_json['@rid'].replace('#','')
 
+## add description to image
+
+url = f"http://localhost:8200/api/graph/vertices/{image1.replace('#','')}"
+upload_response = requests.post(url, json={"key": "description", "value": "Kissalla on aina hyvä aloittaa."}, auth=auth)
 
 
 

@@ -512,7 +512,7 @@ router.get('/api/files/:file_rid/source', async function (ctx) {
 
 router.get('/api/files/:file_rid', async function (ctx) {
 	try {
-		var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+		var file_metadata = await Graph.getUserFileMetadata(Graph.sanitizeRID(ctx.request.params.file_rid), ctx.request.headers.mail)
 
 		const src = fs.createReadStream(file_metadata.path)
 		if(file_metadata.type =='pdf') {
@@ -565,7 +565,7 @@ router.post('/api/projects', async function (ctx) {
 router.post('/api/projects/:rid/sets', async function (ctx) {
 	var me = await Graph.myId(ctx.request.headers.mail)
 	console.log('creating set')
-	var set = await Graph.createSet(ctx.request.params.rid, ctx.request.body, me.rid)
+	var set = await Graph.createSet(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.body, me.rid)
 	console.log('Set created')
 	console.log(set)
 	ctx.body = set
@@ -578,17 +578,17 @@ router.get('/api/projects', async function (ctx) {
 
 
 router.get('/api/projects/:rid', async function (ctx) {
-	var n = await Graph.getProject_backup(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await Graph.getProject_backup(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail)
 	ctx.body = n
 })
 
 router.delete('/api/projects/:rid', async function (ctx) {
-	var n = await Graph.deleteProject(ctx.request.params.rid, ctx.request.headers.mail, nats)
+	var n = await Graph.deleteProject(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail, nats)
 	ctx.body = n
 })
 
 router.get('/api/projects/:rid/files', async function (ctx) {
-	var n = await Graph.getProjectFiles(ctx.request.params.rid, ctx.request.headers.mail)
+	var n = await Graph.getProjectFiles(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail)
 	ctx.body = n.result
 })
 
@@ -631,7 +631,7 @@ router.post('/api/services/reload', async function (ctx) {
 
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
-	var file = await Graph.getUserFileMetadata(ctx.request.params.rid, ctx.request.headers.mail)
+	var file = await Graph.getUserFileMetadata(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail)
 
 	if(file) {
 		var service_list = await services.getServicesForFile(file, ctx.request.query.filter)
@@ -651,9 +651,12 @@ router.post('/api/notify', async function (ctx) {
 // pipeline queue for single file
 router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 
+	const clean_rid = Graph.sanitizeRID(ctx.request.params.file_rid)
+	var clean_roi = ''
+	if(ctx.request.params.roi) clean_roi = Graph.sanitizeRID(ctx.request.params.roi)
 	let messages = []
 	
-	var requests = await Graph.createRequestsFromPipeline(ctx.request.body, ctx.request.params.file_rid, ctx.request.params.roi)
+	var requests = await Graph.createRequestsFromPipeline(ctx.request.body, clean_rid, clean_roi)
 	
 	for(var request of requests) {
 		var service = services.getServiceAdapterByName(request.params.topic)
@@ -674,8 +677,8 @@ router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 // single queue
 router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 
-	const topic = ctx.request.params.topic 
 	try {
+		const topic = ctx.request.params.topic
 		const service = services.getServiceAdapterByName(topic)
 		var messages = await Graph.createQueueMessages(service, ctx.request)
 		console.log(messages)
@@ -705,7 +708,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 
 	const topic = ctx.request.params.topic
-	const set_rid = ctx.request.params.set_rid
+	const set_rid = Graph.sanitizeRID(ctx.request.params.set_rid)
 	try {
 		const service = services.getServiceAdapterByName(topic)
 		var task_name = service.tasks[ctx.request.body.task].name
@@ -713,7 +716,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, set_metadata, ctx.request.headers.mail)
 		
 		// add node to UI
-		var wsdata = {command: 'add', type: 'process', target: '#'+set_rid, node:nodes.process, set_node:nodes.set,image:API_URL + 'icons/wait.gif'}
+		var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set,image:API_URL + 'icons/wait.gif'}
 		send2UI(ctx.request.headers.mail, wsdata)
 
 		// next we create process nodes for each file in set and put them in queue
@@ -722,7 +725,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 		for(var file of set_files.files) {
 			var file_metadata = await Graph.getUserFileMetadata(file['@rid'], ctx.request.headers.mail)
 			console.log(file_metadata)
-			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail, '#'+set_rid)
+			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail, set_rid)
 			await media.createProcessDir(processNode.path)
 
 			await media.writeJSON(ctx.request.body, 'params.json', path.join(path.dirname(processNode.path)))
@@ -747,7 +750,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 router.post('/api/queue/:topic/sources/:rid', async function (ctx) {
 
 	const topic = ctx.request.params.topic
-	const source_rid = ctx.request.params.rid
+	const source_rid = Graph.sanitizeRID(ctx.request.params.rid)
 	try {
 		const service = services.getServiceAdapterByName(topic)
 		var task_name = service.tasks[ctx.request.body.task].name
@@ -814,7 +817,8 @@ router.post('/api/nomad/service/:name/create', async function (ctx) {
 
 // endpoint for consumer apps to get file to be processed
 router.get('/api/nomad/files/:file_rid', async function (ctx) {
-	var file_metadata = await Graph.getUserFileMetadata(ctx.request.params.file_rid, ctx.request.headers.mail)
+	const clean_rid = Graph.sanitizeRID(ctx.request.params.file_rid)
+	var file_metadata = await Graph.getUserFileMetadata(clean_rid, ctx.request.headers.mail)
     const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path));
 	if(file_metadata.type =='pdf') {
 		ctx.set('Content-Disposition', `inline; filename=${file_metadata.label}`);
@@ -1095,7 +1099,7 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 // get node error
 router.get('/api/errors/:rid', async function (ctx) {
 
-	var n = await web.getError(ctx.request.params.rid)
+	var n = await web.getError(Graph.sanitizeRID(ctx.request.params.rid))
 	ctx.body = n
 })
 
@@ -1113,13 +1117,13 @@ router.get('/api/layouts/:rid', async function (ctx) {
 
 
 router.get('/api/sets/:rid/files', async function (ctx) {
-	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], ctx.request.query)
+	var n = await Graph.getSetFiles(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers[AUTH_HEADER], ctx.request.query)
 	ctx.body = n
 })
 
 
 router.get('/api/sets/:rid/files/zip', async function (ctx) {
-	var n = await Graph.getSetFiles(ctx.request.params.rid, ctx.request.headers[AUTH_HEADER], ctx.request.query)
+	var n = await Graph.getSetFiles(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers[AUTH_HEADER], ctx.request.query)
 
 	var fileList = []
 	n.files.forEach(file => {
@@ -1171,7 +1175,7 @@ router.get('/api/schemas/:schema', async function (ctx) {
 router.get('/api/graph/traverse/:rid/:direction', async function (ctx) {
 
 	try {
-		var traverse = await Graph.traverse(ctx.request.params.rid, ctx.request.params.direction, ctx.request.user.rid)
+		var traverse = await Graph.traverse(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.params.direction, ctx.request.user.rid)
 		console.log(traverse)
 		if(!traverse) {
 			console.log('ei muka ole')
@@ -1206,16 +1210,17 @@ router.post('/api/graph/vertices', async function (ctx) {
 
 router.get('/api/graph/vertices/:rid', async function (ctx) {
 	//var n = await Graph.getDataWithSchema(ctx.request.params.rid)
-	var n = await Graph.getNode(ctx.request.params.rid, ctx.request.user.rid)
+	var n = await Graph.getNode(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.user.rid)
 	ctx.body = n
 })
 
 router.post('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.setNodeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	var clean_rid = Graph.sanitizeRID(ctx.request.params.rid)
+	var n = await Graph.setNodeAttribute(clean_rid, ctx.request.body)
 	if(ctx.request.body.key && ctx.request.body.key == 'description') {
 		var wsdata = {
 			command: 'update', 
-			target: '#' + ctx.request.params.rid, 
+			target: clean_rid, 
 			description: ctx.request.body.value
 		}
 		send2UI(ctx.request.user.id, wsdata)	
@@ -1224,7 +1229,7 @@ router.post('/api/graph/vertices/:rid', async function (ctx) {
 })
 
 router.delete('/api/graph/vertices/:rid', async function (ctx) {
-	var n = await Graph.deleteNode(ctx.request.params.rid, nats)
+	var n = await Graph.deleteNode(Graph.sanitizeRID(ctx.request.params.rid), nats)
 	console.log(n)
 	if(n.path) {
 		// TODO: delete path
@@ -1234,7 +1239,7 @@ router.delete('/api/graph/vertices/:rid', async function (ctx) {
 })
 
 router.post('/api/graph/vertices/:rid/rois', async function (ctx) {
-	var n = await Graph.createROIs('#' + ctx.request.params.rid, ctx.request.body)
+	var n = await Graph.createROIs(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.body)
 	ctx.body = n
 })
 
@@ -1247,12 +1252,12 @@ router.post('/api/graph/edges', async function (ctx) {
 })
 
 router.delete('/api/graph/edges/:rid', async function (ctx) {
-	var n = await Graph.deleteEdge('#' + ctx.request.params.rid)
+	var n = await Graph.deleteEdge(Graph.sanitizeRID(ctx.request.params.rid))
 	ctx.body = n
 })
 
 router.post('/api/graph/edges/:rid', async function (ctx) {
-	var n = await Graph.setEdgeAttribute('#' + ctx.request.params.rid, ctx.request.body)
+	var n = await Graph.setEdgeAttribute(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.body)
 	ctx.body = n
 })
 
@@ -1277,9 +1282,10 @@ router.get('/api/documents', async function (ctx) {
 })
 
 router.get('/api/documents/:rid', async function (ctx) {
-	var n = await Graph.getNodeAttributes(ctx.request.params.rid)
-	var entities = await Graph.getLinkedEntities(ctx.request.params.rid, ctx.request.user.rid)
-	var rois = await Graph.getROIs(ctx.request.params.rid)
+	var clean_rid = Graph.sanitizeRID(ctx.request.params.rid)
+	var n = await Graph.getNodeAttributes(clean_rid)
+	var entities = await Graph.getLinkedEntities(clean_rid, ctx.request.user.rid)
+	var rois = await Graph.getROIs(clean_rid)
 	if(n.result && n.result.length) {
 		n.result[0].rois = rois
 		n.result[0].entities = entities

@@ -1479,16 +1479,15 @@ graph.sanitizeRID = function(rid) {
         throw new Error("Invalid RID format");
     }
     
-    // Extract and convert components to ensure they are non-negative integers
-    const clusterId = parseInt(match[1], 10);
-    const recordId = parseInt(match[2], 10);
+    // Extract and validate components
+    const clusterId = match[1];
+    const recordId = match[2];
     
-    if (clusterId < 0 || recordId < 0) {
-        throw new Error("Cluster ID and Record ID must be non-negative integers");
+    if (!/^[0-9]+$/.test(clusterId) || !/^[0-9]+$/.test(recordId)) {
+        throw new Error("Cluster ID and Record ID must be positive integers");
     }
     
-    // Return sanitized RID in a normalized format
-    return `#${clusterId}:${recordId}`;
+	return rid
 }
 
 

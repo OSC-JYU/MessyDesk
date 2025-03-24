@@ -30,7 +30,7 @@
   {
     "id": "md-tesseract",
     "task": "image2text",
-    "description": "Yritetään ottaa teksti irti kyljellään olevasta kuvasta\n\nKuten huomaat, OCR:rräyksessä Kuvan orientaatio on oleellinen. Erityisesti EXIF -data oleva orientaatioinfo saattaa aiheuttaa yllätyksiä.",
+    "description": "Yritetään ottaa teksti irti kyljellään olevasta kuvasta\n\nKuten huomaat, OCR:rräyksessä kuvan orientaatio on oleellinen. Erityisesti EXIF -tiedoissa oleva orientaatio saattaa aiheuttaa yllätyksiä.",
     "info": "I tried to detect text in image assuming language fin. ",
     "params": {
       "lang": "fin",
