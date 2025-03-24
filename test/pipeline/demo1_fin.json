@@ -1,0 +1,52 @@
+{"pipeline": [
+  { 
+    "id": "md-imaginary", 
+    "task":"rotate", 
+    "description":"Kuvia ja tekstiä voi prosessoida eri työkaluilla. MessyDeskin nimi näille työkaluille on 'Crunchers' eli rouskuttelijat.\n\nTämä rouskuttelija käänsi kuvaa 90 astetta.",
+    "inof":"I rotated image 90 degrees.",
+    "params": {
+      "rotate":90, 
+      "task": "rotate"
+    },
+    "out": {
+      "description": "Hyvä kuva!"
+    },
+    "pipeline": [
+      {
+    	"id": "md-imaginary",
+      "task": "flip",
+      "description": "Kuvan käsittelyä voi jatkaa edellisen rouskuttelijan tuloksen pohjalta.\n\nFlipataanpas kuva.",
+      "info": "I flipped image.",
+      "params": {
+        "task": "flip"	
+      }
+    }
+    ]
+
+  },
+
+
+  { 
+    "id": "md-imaginary", 
+    "task":"rotate", 
+    "description":"MessyDeskin käyttöliittymän ideana on se, että aineiston käsittely vaatii usein ketjun operaatioita. Tällaisen näkymän kautta nuo ketjut on helppo toteuttaa ja myös helppo hahmottaa jälkikäteen.",
+    "info": "I rotated image 180 degrees.",
+    "params": {
+      "rotate":180, 
+      "task": "rotate"
+    },
+
+    "pipeline": [
+        {
+        "id": "md-imaginary",
+          "task": "blur",
+          "description": "Itsedokumentoivuus onkin yksi keskeisiä MessyDeskin ominaisuuksia. Sinun ei tarvitse tehdä erillisiä muistiinpanoja siitä, miten olet aineistoasi käsitellyt. \n\nKaikki tekemäsi näkyy tässä näkymässä, kuten tämä blurraus.",
+          "info":"I blurred image by 20.",
+          "params": {
+            "sigma": 20,
+            "task": "blur"	
+          }
+        }
+      ] 
+  }
+]}

@@ -1,0 +1,42 @@
+{"pipeline": [
+  { 
+    "id": "md-imaginary", 
+    "task":"rotate", 
+    "description":".\n\nTämä rouskuttelija käänsi kuvaa 90 astetta.",
+    "inof":"I rotated image 90 degrees.",
+    "params": {
+      "rotate":90, 
+      "task": "rotate"
+    },
+    "out": {
+      "description": "Hyvä kuva!"
+    },
+
+    "pipeline": [
+      {
+    	"id": "md-tesseract",
+      "task": "image2text",
+      "description": "Tesseract on yksi työkalu tekstin tunnistamiseen kuvasta.\n\nKokeillaan!",
+      "info": "I tried to detect text in image assuming language fin. ",
+      "params": {
+        "lang": "fin",
+        "task": "image2text"	
+      }
+      }	  
+    ]
+  },
+
+
+  {
+    "id": "md-tesseract",
+    "task": "image2text",
+    "description": "Yritetään ottaa teksti irti kyljellään olevasta kuvasta\n\nKuten huomaat, OCR:rräyksessä Kuvan orientaatio on oleellinen. Erityisesti EXIF -data oleva orientaatioinfo saattaa aiheuttaa yllätyksiä.",
+    "info": "I tried to detect text in image assuming language fin. ",
+    "params": {
+      "lang": "fin",
+      "task": "image2text"	
+    }
+    }
+
+
+]}

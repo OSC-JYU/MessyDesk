@@ -222,6 +222,18 @@ router.get('/api', function (ctx) {
 	ctx.body = 'MessyDesk API'
 })
 
+router.get('/api/permissions/request', async function (ctx) {
+	const query = `SELECT FROM Request`
+	var res = await web.sql(query)		
+	ctx.body = res.result
+})
+
+router.delete('/api/permissions/request/:rid', async function (ctx) {
+	const query = `DELETE FROM Request WHERE @rid = ${Graph.sanitizeRID(ctx.params.rid)}`
+	var res = await web.sql(query)		
+	ctx.body = res
+})
+
 router.get('/api/settings', function (ctx) {
 	ctx.body = {
 		info: 'MessyDesk API',

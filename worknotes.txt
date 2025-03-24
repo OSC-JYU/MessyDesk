@@ -222,11 +222,10 @@ Set configs via API
   curl -X POST -H 'Content-Type: application/json' \
   -d '{
     "replace-field": {
-      "name":"text",
-      "type":"text_general",
+      "name":"fulltext",
+      "type":"text_edge_ngram",
       "stored":true,
-      "indexed":true,
-      "multiValued":false
+      "indexed":true
     }
   }' \
   "http://localhost:8983/solr/messydesk/schema"

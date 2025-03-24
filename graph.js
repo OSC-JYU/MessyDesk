@@ -993,12 +993,15 @@ graph.deleteNode = async function (rid, nats) {
 			await media.deleteNodePath(node['path'])
 	}
 
-	var index_msg = {
-		id:'solr', 
-		task: 'delete', 
-		target: targets
+	if(nats) {
+		var index_msg = {
+			id:'solr', 
+			task: 'delete', 
+			target: targets
+		}
+		nats.publish(index_msg.id, JSON.stringify(index_msg))
 	}
-	nats.publish(index_msg.id, JSON.stringify(index_msg))
+
 
 	// get path for directory deletion
 	const query_path = `SELECT path FROM ${rid}`
@@ -1459,6 +1462,39 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 
 }
 
+
+graph.sanitizeRID = function(rid) {
+
+    if (typeof rid !== "string") {
+        throw new Error("RID must be a string");
+    }
+    
+	if (!rid.match(/^#/)) rid = '#' + rid.trim()
+
+    // Regular expression to match valid RIDs
+    const ridPattern = /^#(\d+):(\d+)$/;
+    const match = rid.match(ridPattern);
+    
+    if (!match) {
+        throw new Error("Invalid RID format");
+    }
+    
+    // Extract and convert components to ensure they are non-negative integers
+    const clusterId = parseInt(match[1], 10);
+    const recordId = parseInt(match[2], 10);
+    
+    if (clusterId < 0 || recordId < 0) {
+        throw new Error("Cluster ID and Record ID must be non-negative integers");
+    }
+    
+    // Return sanitized RID in a normalized format
+    return `#${clusterId}:${recordId}`;
+}
+
+
+
+
+
 function addThumbPaths(items) {
 
 	for (var file of items) {
@@ -1467,6 +1503,8 @@ function addThumbPaths(items) {
 	return items
 	
 }
+
+
 
 function cleanRIDList(list) {
 	var splitted = list.split(',')
