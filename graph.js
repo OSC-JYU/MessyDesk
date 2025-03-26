@@ -106,10 +106,11 @@ graph.deleteProject = async function (project_rid, me_rid, nats) {
 
 graph.createSet = async function (project_rid, data, me_rid) {
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
-	var response = await web.cypher(query)
-	console.log(response)
-	console.log(response.result[0])
+	//const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
+	const query = `MATCH {type:User, as:p, where:(@rid = ${me_rid})}-IS_OWNER->{type:Project, as:pr, where:(@rid = ${project_rid})} RETURN pr`
+
+	var response = await web.sql(query)
+
 	if (response.result.length == 1) {
 		var set = await this.create('Set', data)
 		var set_rid = set['@rid']
@@ -413,7 +414,7 @@ graph.getProjectFiles = async function (rid, me_email) {
 
 graph.getSetFiles = async function (set_rid, me_email, params) {
 	if(!params || !isIntegerString(params.skip)) params.skip = 0
-	if(!params || !isIntegerString(params.limit)) params.limit = 20
+	if(!params || !isIntegerString(params.limit)) params.limit = 10
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
 	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
@@ -483,6 +484,16 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 		requests.push(request)
 	}
 	return requests
+}
+
+
+graph.getQueueName = function(service, request, topic) {
+	var data = request.body
+	var batch = service.tasks[data.task].batch
+	if(batch) {
+		return topic + '_batch'
+	}
+	return topic	
 }
 
 // Creates process and output Set nodes and creates queue messages

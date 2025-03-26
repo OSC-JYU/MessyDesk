@@ -23,7 +23,7 @@
             "output": "store",
             "output_set": "texts of PDF",
             "name": "Extract text from PDF",
-            "description": "This will extract text from searchable PDF and output a .txt file from. <br/>Note that this is does <b>not</b> do Optical Character Regonition. ",
+            "description": "This will extract text from searchable PDF and output a .txt file per page. Note that this is does NOT do Optical Character Regonition. ",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
@@ -46,6 +46,7 @@
             },
             "output": "store",
             "output_set": "PDF as images",
+            "batch": true,
             "name": "Render PDF as images",
             "description": "Renders pages as image files in any resolution.",
             "params_help": {
@@ -70,6 +71,7 @@
             },
             "output": "store",
             "output_set": "images of PDF",
+            "batch": true,
             "name": "Extract images from PDF (png)",
             "description": "Extract images from PDF as png files.",
             "params_help": {

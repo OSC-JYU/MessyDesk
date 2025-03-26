@@ -681,7 +681,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		const topic = ctx.request.params.topic
 		const service = services.getServiceAdapterByName(topic)
 		var messages = await Graph.createQueueMessages(service, ctx.request)
-		console.log(messages)
+		const queue = Graph.getQueueName(service, ctx.request, topic)
 
 		for(var msg of messages) {	
 			// add Process node to UI
@@ -692,7 +692,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 			}
 			send2UI(ctx.request.headers.mail, wsdata)
 			// send message to queue
-			nats.publish(topic, JSON.stringify(msg))
+			nats.publish(queue, JSON.stringify(msg))
 		}
 
 		ctx.body = ctx.request.params.file_rid
@@ -1057,10 +1057,10 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 			if(message.task == 'index') {
 
 			} else {
-	
+				if(message.process && message.process['@rid']) target = message.process['@rid']
 				var wsdata = {
 					command: 'update', 
-					target: message.process['@rid'],
+					target: target,
 					error: 'error'
 	
 				}
@@ -1074,7 +1074,7 @@ router.post('/api/nomad/process/files/error', async function (ctx) {
 	
 				var index_msg = [{
 					type: 'error',
-					id:message.process['@rid'] + '_error', 
+					id: target + '_error', 
 					error_node: target, 
 					error: JSON.stringify(error), 
 					message: JSON.stringify(message), 
