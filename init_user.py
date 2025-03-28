@@ -18,8 +18,6 @@ parser = argparse.ArgumentParser(description="Send a POST request to create a pr
 parser.add_argument("mail", help="Email for authentication")
 args = parser.parse_args()
 
-# Define the authentication (HTTPie format 'mail:password' translates to Basic Auth)
-auth = ("mail", args.mail)
 
 # 1. Create Desk
 
@@ -33,13 +31,19 @@ data = {
 }
 
 # Define the headers (optional, depending on API requirements)
+headers_auth = {
+    "mail": args.mail
+}
+
+
 headers = {
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "mail": args.mail
 }
 
 
 # Make the POST request
-response = requests.post(url, json=data, headers=headers, auth=auth)
+response = requests.post(url, json=data, headers=headers)
 
 # Print response
 print("Status Code:", response.status_code)
@@ -64,7 +68,7 @@ files = {"file": ("demo_text_fin.jpg", open("test/files/text_fin.jpg", "rb"), "i
 
 url = f"http://localhost:8200/api/projects/{data_json['@rid'].replace('#','')}/upload"
 
-upload_response = requests.post(url, files=files, auth=auth)
+upload_response = requests.post(url, files=files, headers=headers_auth)
 upload_json = json.loads(upload_response.text)
 
 if 'error' in upload_json:
@@ -81,7 +85,7 @@ files = {"file": ("kissa.jpg", open("test/files/kissa.jpg", "rb"), "image/jpeg")
 
 url = f"http://localhost:8200/api/projects/{data_json['@rid'].replace('#','')}/upload"
 
-upload_response = requests.post(url, files=files, auth=auth)
+upload_response = requests.post(url, files=files, headers=headers_auth)
 upload_json = json.loads(upload_response.text)
 
 if 'error' in upload_json:
@@ -95,7 +99,7 @@ else:
 ## add description to image
 
 url = f"http://localhost:8200/api/graph/vertices/{image1.replace('#','')}"
-upload_response = requests.post(url, json={"key": "description", "value": "Kissalla on aina hyvä aloittaa."}, auth=auth)
+upload_response = requests.post(url, json={"key": "description", "value": "Kissalla on aina hyvä aloittaa."}, headers=headers)
 
 
 
@@ -106,7 +110,7 @@ with open('test/pipeline/demo1_ocr_fin.json', 'r') as file:
 
 url = f"http://localhost:8200/api/pipeline/files/{image2}"
 
-pipeline_response = requests.post(url, json=pipeline_json, headers=headers, auth=auth)
+pipeline_response = requests.post(url, json=pipeline_json, headers=headers)
 
 print(pipeline_response.text)
 
@@ -117,7 +121,7 @@ with open('test/pipeline/demo1_fin.json', 'r') as file:
 
 url = f"http://localhost:8200/api/pipeline/files/{image1}"
 
-pipeline_response = requests.post(url, json=pipeline_json, headers=headers, auth=auth)
+pipeline_response = requests.post(url, json=pipeline_json, headers=headers)
 
 print(pipeline_response.text)
 
