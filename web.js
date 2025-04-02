@@ -7,7 +7,7 @@ const password = process.env.DB_PASSWORD
 
 const MAX_STR_LENGTH = 2048
 const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
-const DB = process.env.DB_NAME || 'md_dev'
+const DB = process.env.DB_NAME || 'messydesk'
 const PORT = process.env.DB_PORT || 2480
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
@@ -279,48 +279,39 @@ web.solr = async function(data, user_rid) {
 
 	//const filters = []; 
 	const params = {
-		q: query,
-		//bq: 'torvalds^5',
-		defType: "edismax",
-		qf: "fulltext^5",
-		pf: "fulltext^5",
-		//pf2: "fulltext^5",
-		//pf3: "fulltext^5",
-		hl: true,
-		"hl.fl": "fulltext",
-		"hl.simple.pre": "<em>",
-		"hl.simple.post": "</em>",
-		"hl.snippets": 3,
-		"hl.fragsize": 100,
-		wt: "json",
-		fl: "description,label,id,owner"
+		params:{
+			q: query,
+			defType: "edismax",
+			qf: "fulltext^5",
+			pf: "fulltext^5",
+			hl: true,
+			"hl.fl": "fulltext",
+			"hl.simple.pre": "<em>",
+			"hl.simple.post": "</em>",
+			"hl.snippets": 3,
+			"hl.fragsize": 100,
+			wt: "json",
+			fl: "description,label,id,owner",
+			fq: `owner:${user_rid}`
+			
+
+		}
 		
 	};
 
-	const queryString = Object.entries(params)
-	.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
-	.join("&");
 
-	// lets handle filters diffrently because that nasty Arcadedb RID format (#425:0)
-	user_rid = user_rid.replace(':', '\\:')
-	user_rid = user_rid.replace('#', '%23')
-	const filters = ["type%3Atext", `owner%3A${user_rid}`]; 
-	var filters_url = filters.join("%20AND%20") // Combine multiple filters if needed
-  
-  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/select?${queryString}`;
-	console.log(finalUrl + '&fq=' + filters_url)
 
-    //var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + ${data.query} + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
-	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id`;
-	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&pf=description^5 label^3 fulltext^2&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id,type&fq=type:text`
+  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/query?fq=type:text`;
 
-	
+	//console.log(JSON.stringify(params, null, 2))
+
 	if(!data.query) {		
 		return []
 	} 
 	
 	try {
-		var response = await axios.get(finalUrl)
+		var response = await axios.get(finalUrl, params)
+		console.log(response.data)
 		return response.data
 		
 		

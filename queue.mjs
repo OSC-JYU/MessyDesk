@@ -38,7 +38,7 @@ queue.init = async function(services) {
       ack_policy: AckPolicy.Explicit,
       filter_subject: `process.solr`,  
     })
-    console.log('SOLR consumer created')
+    console.log('NATS: created default consumer solr')
   } catch(e) {
     console.log(e)
     console.log('NATS ERROR: could not create SOLR consumer! exiting...')

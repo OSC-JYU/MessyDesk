@@ -185,6 +185,19 @@ add core:
 
   solr create_core -c messydesk
 
+remove all docs:
+
+  curl http://localhost:8983/solr/messydesk/update?commit=true -d '<delete><query>*:*</query></delete>'
+
+query:
+
+  curl "http://localhost:8983/solr/messydesk/query" -d '
+  {
+    params: {
+      q: "kuhasalo",defType: "edismax", qf: "fulltext^5", pf:"fulltext^5", fq: "owner:tupsu@v.com", wt: "json"
+    }
+  }'
+
 Set configs via API
 
 - add field

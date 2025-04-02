@@ -277,7 +277,7 @@ router.post('/api/users', async function (ctx) {
 })
 
 router.post('/api/search', async function (ctx) {
-	var n = await web.solr(ctx.request.body, ctx.request.user.rid)
+	var n = await web.solr(ctx.request.body, ctx.request.user.id)
 	ctx.body = n
 })
 
@@ -302,6 +302,16 @@ router.post('/api/index/:rid', async function (ctx) {
 
 router.delete('/api/index/:rid', async function (ctx) {
 	var n = await Graph.indexRemove(ctx.request.body, ctx.request.params.rid, ctx.request.user.rid)
+	ctx.body = n
+})
+
+router.get('/api/prompts', async function (ctx) {
+	var n = await Graph.getPrompts(ctx.request.user.id)
+	ctx.body = n
+})
+
+router.post('/api/prompts', async function (ctx) {
+	var n = await Graph.savePrompt(ctx.request.body, ctx.request.user.id)
 	ctx.body = n
 })
 
@@ -632,9 +642,10 @@ router.post('/api/services/reload', async function (ctx) {
 // get services for certain file
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail)
+	var prompts = await Graph.getPrompts(ctx.request.user.id)
 
 	if(file) {
-		var service_list = await services.getServicesForFile(file, ctx.request.query.filter)
+		var service_list = await services.getServicesForFile(file, ctx.request.query.filter, ctx.request.user, prompts)
 		ctx.body = service_list
 	} else {
 		ctx.body = []

@@ -221,12 +221,13 @@ graph.createUser = async function (data) {
 	var response = await web.cypher(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
+	data['service_groups'] = []
 	var user = await this.create('User', data, true)
 	await this.initUserData(user)
 
 	// commands to make demo projects
-	var demo1 = `http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" '${data.id}'`
-	user.demos = demo1
+	//var demo1 = `http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" '${data.id}'`
+	//user.demos = demo1
 
 	return user
 }
@@ -243,6 +244,35 @@ graph.initUserData = async function (user) {
 	// create demo Projects
 	//await web.runPipeline(pipeline, user['id'])
 	//http POST :8200/api/pipeline/files/82:6 @pipeline.json 'mail:ari.hayrinen@jyu.fi'
+}
+
+
+graph.getPrompts = async function (userID) {
+
+	const query = `SELECT FROM Prompt WHERE owner = "public" OR owner = "${userID}" ORDER BY label`
+	var response = await web.sql(query)
+	return response.result
+}
+
+graph.savePrompt = async function (prompt, userID) {
+	
+	prompt.content = prompt.content.replace(/\n/g, '\\n')
+	prompt.description = prompt.description.replace(/\n/g, '\\n')
+	
+	if(prompt['@rid']) {
+		var query =  `UPDATE Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}" WHERE @rid = ${prompt['@rid']}`	
+
+		var response = await web.sql(query)
+		return response.result
+
+	} else {
+		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", type = "${prompt.type}", owner = "${userID}"`
+		
+		var response = await web.sql(query)
+		return response.result
+	}
+
+
 }
 
 graph.createEntityTypes = async function (userRID) {	
@@ -309,7 +339,7 @@ graph.getProject_backup = async function (rid, me_email) {
 
 	const query = `match {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
-		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND set is NULL AND $depth > 0), while:($depth < 10)} return node`
+		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 10)} return node`
 
 
 	
@@ -486,11 +516,11 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 	return requests
 }
 
-
+// Some services have long processing time (especially PDF services), so we need to add those to batch queue
+// These services have 'batch' property in service.json
 graph.getQueueName = function(service, request, topic) {
 	var data = request.body
-	var batch = service.tasks[data.task].batch
-	if(batch) {
+	if(service.tasks[data.task] && service.tasks[data.task].batch) {
 		return topic + '_batch'
 	}
 	return topic	
@@ -500,6 +530,10 @@ graph.getQueueName = function(service, request, topic) {
 graph.createQueueMessages =  async function(service, request, user_id) {
 	var url_params = request.params
 	var data = request.body
+	console.log("****** CREATEQUEUE MESSAGE ******")
+	console.log(data)
+	console.log(service)
+	console.log("****** END CREATEQUEUE MESSAGE ******")
 
 	if(!user_id) {
 		user_id = request.headers[AUTH_HEADER]
@@ -507,7 +541,16 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 
 	var messages = []
 	var message = structuredClone(data)
-	var task_name = service.tasks[data.task].name
+	var task_name = ''
+	// LLM services have tasks defined in prompts
+	if(service.external_tasks) {
+		message.external = 'yes'
+		message.info = data.info
+		message.params = data.system_params
+		task_name = data.name	
+	} else {
+		task_name = service.tasks[data.task].name
+	}
 
 	var file_metadata = await this.getUserFileMetadata(url_params.file_rid, user_id)
 	if(!file_metadata) {
@@ -516,13 +559,13 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 	var processNode = await this.createProcessNode(task_name, service, data, file_metadata, user_id)
 
 	await media.createProcessDir(processNode.path)
-	if(service.tasks[data.task].system_params)
+	if(service.tasks[data.task] && service.tasks[data.task].system_params)
 		message.params = service.tasks[data.task].system_params
 	
 	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
 
 	// do we need info about "parent" file?
-	if(service.tasks[data.task].source) {
+	if(service.tasks[data.task] && service.tasks[data.task].source) {
 		var source = await this.getFileSource(url_params.file_rid)
 		if(source) {
 			var source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
@@ -531,7 +574,7 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 	}
 
 	// if output of task is "Set", then create Set node and link it to Process node
-	if(service.tasks[data.task].output_set) {
+	if(service.tasks[data.task] && service.tasks[data.task].output_set) {
 		var setNode = await this.createOutputSetNode(service.tasks[data.task].output_set, processNode)
 		//wsdata = {command: 'add', type: 'set', target: processNode['@rid'], node:setNode}
 		message.output_set = setNode['@rid']
@@ -1269,7 +1312,7 @@ graph.createAttributeCypher = async function (attributes) {
 
 graph.myId = async function (user) {
 	if (!user) return null
-	var query = `SELECT @rid AS rid, group, access, label, id, active FROM User WHERE id = "${user}"`
+	var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE id = "${user}"`
 	var response = await web.sql(query)
 	return response.result[0]
 }

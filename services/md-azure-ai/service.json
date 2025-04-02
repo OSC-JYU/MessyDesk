@@ -14,6 +14,10 @@
 
     "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
 
+    "service_groups": ["AZURE-AI","OSC"],
+
+    "external_tasks": "prompts",
+
     "params": {
 
     },

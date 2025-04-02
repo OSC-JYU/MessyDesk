@@ -63,30 +63,6 @@
             }
         },
 
-        "image2hocr": {
-            "name": "Image to HOCR",
-            "output": "hocr",
-            "description": "Create an HOCR document (recommended)",
-            "params": {
-                "lang": "en"
-            },
-            "params_help": {
-                "lang": {
-                    "name": "language",
-                    "help": "Define the language of the text",
-                    "values": [
-                        {"value":"eng", "title":"English"},
-                        {"value":"deu", "title":"Deutch"},
-                        {"value":"fin", "title":"Suomi"},
-                        {"value":"fi_frak_nlf", "title":"Fraktur (fin) by NLF"},
-                        {"value":"frk", "title":"Fraktur (deu)"}
-                        ],
-                    "display":"checkbox",
-                    "multi":true
-                }
-            },
-            "info": "I tried to detect text in image assuming language {{lang}}. I created an editable HOCR document."
-        },
 
         "orientation_detection": {
             "name": "Detect page orientation",
