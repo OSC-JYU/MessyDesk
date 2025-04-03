@@ -8,6 +8,7 @@
     
     "supported_types": ["pdf"],
     "supported_formats": ["pdf"],
+    "set_disabled": 1,
 
     "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
 
@@ -46,7 +47,7 @@
             },
             "output": "store",
             "output_set": "PDF as images",
-            "batch": true,
+            "always_batch": true,
             "name": "Render PDF as images",
             "description": "Renders pages as image files in any resolution.",
             "params_help": {
@@ -71,7 +72,7 @@
             },
             "output": "store",
             "output_set": "images of PDF",
-            "batch": true,
+            "always_batch": true,
             "name": "Extract images from PDF (png)",
             "description": "Extract images from PDF as png files.",
             "params_help": {

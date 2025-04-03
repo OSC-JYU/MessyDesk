@@ -299,8 +299,6 @@ web.solr = async function(data, user_rid) {
 		
 	};
 
-
-
   	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/query?fq=type:text`;
 
 	//console.log(JSON.stringify(params, null, 2))

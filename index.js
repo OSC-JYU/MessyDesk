@@ -639,13 +639,13 @@ router.post('/api/services/reload', async function (ctx) {
 	}
 })
 
-// get services for certain file
+// get services for certain node
 router.get('/api/services/files/:rid', async function (ctx) {
 	var file = await Graph.getUserFileMetadata(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers.mail)
 	var prompts = await Graph.getPrompts(ctx.request.user.id)
 
 	if(file) {
-		var service_list = await services.getServicesForFile(file, ctx.request.query.filter, ctx.request.user, prompts)
+		var service_list = await services.getServicesForNode(file, ctx.request.query.filter, ctx.request.user, prompts)
 		ctx.body = service_list
 	} else {
 		ctx.body = []
@@ -691,7 +691,7 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 	try {
 		const topic = ctx.request.params.topic
 		const service = services.getServiceAdapterByName(topic)
-		var messages = await Graph.createQueueMessages(service, ctx.request)
+		var messages = await Graph.createQueueMessages(service, ctx.request.body, ctx.request.params.file_rid, ctx.request.headers.mail, ctx.request.params.roi)
 		const queue = Graph.getQueueName(service, ctx.request, topic)
 
 		for(var msg of messages) {	
@@ -721,6 +721,7 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 	const topic = ctx.request.params.topic
 	const set_rid = Graph.sanitizeRID(ctx.request.params.set_rid)
 	try {
+		console.log('****************** set queue ******************')
 		const service = services.getServiceAdapterByName(topic)
 		var task_name = service.tasks[ctx.request.body.task].name
 		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)

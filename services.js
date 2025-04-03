@@ -73,31 +73,32 @@ services.getServices = function () {
 }
 
 
-services.getServicesForFile = async function(file, filter, user, prompts) {
+services.getServicesForNode = async function(node, filter, user, prompts) {
 
 	const matches = {for_type: [], for_format: []}
-	if(!file) return matches
-	console.log('here', file['@type'])
+	if(!node) return matches
+	console.log('here', node['@type'])
 
 	for(var service in this.service_list) {
 
 		
 		// for Sets we compare only extensions
-		if(file['@type'] == 'Set') {
+		if(node['@type'] == 'Set') {
+			// check if service is disabled for Sets
+			if(this.service_list[service].set_disabled) {
+				continue
+			}
 			if(this.service_list[service].consumers.length > 0) {
-				var service_with_tasks = pickTasks(this.service_list[service], file.extensions, filter, user, prompts, file.type)
+				
+				var service_with_tasks = pickTasks(this.service_list[service], node.extensions, filter, user, prompts, node['@type'])
 				if(service_with_tasks) {
 					matches.for_format.push(service_with_tasks)
 				}
 			}	
 		// services for data sources like Nextcloud
-		} else if (file['@type'] == 'Source') {
-			console.log(file.type)
-			console.log(this.service_list[service])
+		} else if (node['@type'] == 'Source') {
 			if(this.service_list[service].consumers.length > 0) {
-				console.log(file.type)
-				console.log(this.service_list[service])
-				var service_with_tasks = pickTasks(this.service_list[service], file.type, filter, user, prompts, file.type)
+				var service_with_tasks = pickTasks(this.service_list[service], node.type, filter, user, prompts, node.type)
 				if(service_with_tasks) {
 					matches.for_format.push(service_with_tasks)
 				}
@@ -106,10 +107,10 @@ services.getServicesForFile = async function(file, filter, user, prompts) {
 		// for Files we compare first type and then extension
 		} else {
 			// check service for supported types
-			if(this.service_list[service].supported_types.includes(file.type)) {
+			if(this.service_list[service].supported_types.includes(node.type)) {
 				// we take only services that has consumer app listening (i.e are active services)
 				if(this.service_list[service].consumers.length > 0) {
-					var service_with_tasks = pickTasks(this.service_list[service], [file.extension], filter, user, prompts, file.type)
+					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], filter, user, prompts, node.type)
 					if(service_with_tasks) {
 						matches.for_format.push(service_with_tasks)
 					}
@@ -123,7 +124,7 @@ services.getServicesForFile = async function(file, filter, user, prompts) {
 }
 
 
-pickTasks = function(service, extensions, filter, user, prompts, file_type) {
+pickTasks = function(service, extensions, filter, user, prompts, node_type) {
 
 	const service_object = JSON.parse(JSON.stringify(service))
 	service_object.tasks = {}
@@ -138,14 +139,22 @@ pickTasks = function(service, extensions, filter, user, prompts, file_type) {
 
 	// LLM services have tasks defined in prompts
 	if(service_object.external_tasks) {
-		service_object.tasks = promptsToTasks(prompts, file_type)
+		service_object.tasks = promptsToTasks(prompts, node_type, extensions, service_object)
 		return service_object
 	}
 
 	for(var task in service.tasks) {
 
+		// task can be disabled/enabled by service_groups
 		if(service.tasks[task].service_groups) {
 			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+				continue
+			}
+		}
+		
+		// task can be disabled for Sets
+		if(node_type == 'Set') {
+			if(service.tasks[task].set_disabled) {
 				continue
 			}
 		}
@@ -187,17 +196,28 @@ filterTask = function(filter, task) {
 
 }
 
-promptsToTasks = function(prompts, file_type) {
+promptsToTasks = function(prompts, type, extensions, service) {
 
 	var tasks = {}
 
-	for(var prompt of prompts) {
-		prompt.system_params = {prompts: {content: prompt.content}}
-		
-		if(prompt.type == file_type) {
-			tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+	// if type is Set, we return all tasks that have supported formats
+	if(type == 'Set') {
+		for(var prompt of prompts) {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(service.supported_types.includes(prompt.type)) {
+					tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+				}
+			}
+		}
+	} else {
+		for(var prompt of prompts) {
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(type == prompt.type) {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			}	
 		}
 	}
+
 	return tasks
 }
 

@@ -310,39 +310,10 @@ graph.getProject = async function (rid, me_email) {
 graph.getProject_backup = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}" 
-	// 	OPTIONAL MATCH (project)-[rr]->(file:File) WHERE file.set is NULL
-	// 	OPTIONAL MATCH (project)-[r_source]->(source:Source)
-	// 	OPTIONAL MATCH (project)-[r_set]->(set:Set)
-	// 	OPTIONAL MATCH (set)-[r_setfile]->(setfile:File) WHERE setfile.expand = true
-	// 	OPTIONAL MATCH (set)-[r_setprocess]->(setp:SetProcess)
-	// 	OPTIONAL MATCH (setp)-[r_setprocess_set]->(setps:Set)
-	// 	OPTIONAL MATCH (setfile)-[r3*]->(setchild) 
-	// 	OPTIONAL MATCH (file)-[r2*]->(child2) WHERE (child2:Process OR child2:File OR child2:Set) AND (child2.set is NULL OR child2.expand = true) 
-	// 	RETURN  file, source,  set, r2, child2, r_setfile, setfile, r3, setchild, r_setprocess, setp, r_setprocess_set, setps`
-
-	// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
-	// 	OPTIONAL MATCH (project)-[rr]->(file) 
-	// 		WHERE (file.set is NULL OR file.expand = true)
-	// 	OPTIONAL MATCH (file)-[r*]->(child) 
-	// 		WHERE (child:Process OR child:File OR child:Set)
-	// 			AND (child.set is NULL OR child.expand = true)  
-	// 	RETURN  file, r, child`	
-
-		// const query = `MATCH (p:User)-[:IS_OWNER]->(project:Project) WHERE  id(project) = "#${rid}"  AND p.id = "${me_email}"  
-		// OPTIONAL MATCH (project)-[rr]->(file) 
-			
-		// OPTIONAL MATCH (file)-[r*]->(child) 
-		// 	WHERE (child:Process OR child:File OR child:Set)
-				 
-		// RETURN  file, r, child`	
-
 	const query = `match {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 10)} return node`
 
-
-	
 
 	const options = {
 		serializer: 'studio',
@@ -353,6 +324,7 @@ graph.getProject_backup = async function (rid, me_email) {
 	result = await getSetThumbnails(me_email, result, rid)
 	return result
 }
+
 
 
 graph.getProjects = async function (me_email, data_dir) {
@@ -520,19 +492,19 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 // These services have 'batch' property in service.json
 graph.getQueueName = function(service, request, topic) {
 	var data = request.body
-	if(service.tasks[data.task] && service.tasks[data.task].batch) {
+	if(service.tasks[data.task] && service.tasks[data.task].always_batch) {
 		return topic + '_batch'
 	}
 	return topic	
 }
 
 // Creates process and output Set nodes and creates queue messages
-graph.createQueueMessages =  async function(service, request, user_id) {
-	var url_params = request.params
-	var data = request.body
+graph.createQueueMessages =  async function(service, body, node_rid, user_id, roi) {
+
+	var data = body
 	console.log("****** CREATEQUEUE MESSAGE ******")
 	console.log(data)
-	console.log(service)
+
 	console.log("****** END CREATEQUEUE MESSAGE ******")
 
 	if(!user_id) {
@@ -552,12 +524,12 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 		task_name = service.tasks[data.task].name
 	}
 
-	var file_metadata = await this.getUserFileMetadata(url_params.file_rid, user_id)
-	if(!file_metadata) {
-		throw new Error('File not found: '+ url_params.file_rid )
+	var node_metadata = await this.getUserFileMetadata(node_rid, user_id)
+	if(!node_metadata) {
+		throw new Error('File not found: '+ node_rid )
 	}
-	var processNode = await this.createProcessNode(task_name, service, data, file_metadata, user_id)
 
+	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_id)
 	await media.createProcessDir(processNode.path)
 	if(service.tasks[data.task] && service.tasks[data.task].system_params)
 		message.params = service.tasks[data.task].system_params
@@ -566,7 +538,7 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 
 	// do we need info about "parent" file?
 	if(service.tasks[data.task] && service.tasks[data.task].source) {
-		var source = await this.getFileSource(url_params.file_rid)
+		var source = await this.getFileSource(node_rid)
 		if(source) {
 			var source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
 			message.source = source_metadata
@@ -576,30 +548,27 @@ graph.createQueueMessages =  async function(service, request, user_id) {
 	// if output of task is "Set", then create Set node and link it to Process node
 	if(service.tasks[data.task] && service.tasks[data.task].output_set) {
 		var setNode = await this.createOutputSetNode(service.tasks[data.task].output_set, processNode)
-		//wsdata = {command: 'add', type: 'set', target: processNode['@rid'], node:setNode}
 		message.output_set = setNode['@rid']
 		message.set_node = setNode
-		//send2UI(ctx.request.headers.mail, wsdata)
 	}
 
 	message.process = processNode
-	message.file = file_metadata
-	message.target = url_params.file_rid
+	message.file = node_metadata
+	message.target = node_rid
 	message.userId = user_id
 
 	// ROI request must be handled separately
-	if(url_params.roi) {
+	if(roi) {
 		// we can work with ROIs only if we have width and height of file
-		if(file_metadata.metadata) var metadata = file_metadata.metadata
+		if(node_metadata.metadata) var metadata = node_metadata.metadata
 		if(metadata && metadata.width && metadata.height) {
-			var rois = await this.getROIs(url_params.file_rid)
+			var rois = await this.getROIs(node_rid)
 			var roi_message = structuredClone(message)
 			for(var roi of rois) {
 				media.ROIPercentagesToPixels(roi, roi_message)
 				messages.push(roi_message)
 			}	
 		}
-
 	} else {
 		messages.push(message)
 	}

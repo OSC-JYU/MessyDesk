@@ -17,6 +17,7 @@
     "service_groups": ["GEMINI-AI","OSC"],
 
     "external_tasks": "prompts",
+    "set_disabled": 1,
 
     "params": {
 
