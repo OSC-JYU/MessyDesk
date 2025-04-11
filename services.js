@@ -231,11 +231,13 @@ checkService = function(array, service) {
 
 }
 
-// note: consumer here means consumer application, not NATS consumers
+// note: consumer here means service adapter, not NATS consumers
 services.addConsumer = async function(service, id) {
-	console.log(service)
-console.log(this.service_list)
+console.log(service, id)
 	if(this.service_list[service]) {
+		if(this.service_list[service].consumers.includes(id)) {
+			return {status: 'consumer already exists', name: service}
+		}
 		this.service_list[service].consumers.push(id)
 		return this.service_list[service]
 	}

@@ -3,7 +3,7 @@
     "id": "md-imaginary", 
     "task":"rotate", 
     "description":"Kuvia ja tekstiä voi prosessoida eri työkaluilla. MessyDeskin nimi näille työkaluille on 'Crunchers' eli rouskuttelijat.\n\nTämä rouskuttelija käänsi kuvaa 90 astetta.",
-    "inof":"I rotated image 90 degrees.",
+    "info":"I rotated image 90 degrees.",
     "params": {
       "rotate":90, 
       "task": "rotate"

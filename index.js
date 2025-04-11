@@ -671,7 +671,7 @@ router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 	
 	for(var request of requests) {
 		var service = services.getServiceAdapterByName(request.params.topic)
-		messages = await Graph.createQueueMessages(service, request, ctx.request.headers[AUTH_HEADER])
+		messages = await Graph.createQueueMessages(service, request.body, ctx.request.params.file_rid, ctx.request.headers.mail)
 		for(var msg of messages) {
 			var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
 			send2UI(ctx.request.headers.mail, wsdata)
@@ -683,7 +683,11 @@ router.post('/api/pipeline/files/:file_rid/:roi?', async function (ctx) {
 
 })
 
-
+router.get('/api/queue/:topic/status', async function (ctx) {
+	const topic = ctx.request.params.topic
+	const status = await nats.getQueueStatus(topic)
+	ctx.body = status
+})
 
 // single queue
 router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
@@ -813,7 +817,7 @@ router.get('/api/nomad/status', async function (ctx) {
 
 
 // endpoint for consumer apps for starting their work horses
-router.post('/api/nomad/service/:name/create', async function (ctx) {
+router.post('/api/nomad/service/:name', async function (ctx) {
 	// reload all service adapters
 	//await services.loadServiceAdapters()
 	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
@@ -826,6 +830,21 @@ router.post('/api/nomad/service/:name/create', async function (ctx) {
 		ctx.body = {error:e}
 	}
 })
+
+router.delete('/api/nomad/service/:name', async function (ctx) {
+	// reload all service adapters
+	//await services.loadServiceAdapters()
+	var adapter = await services.getServiceAdapterByName(ctx.request.params.name)
+	try {
+		var service = await nomad.stopService(adapter)
+		ctx.body = service
+	} catch(e) {
+		console.log(e)
+		ctx.status = 500
+		ctx.body = {error:e}
+	}
+})
+
 
 // endpoint for consumer apps to get file to be processed
 router.get('/api/nomad/files/:file_rid', async function (ctx) {
@@ -926,6 +945,13 @@ router.post('/api/nomad/process/files', upload.fields([
 				} catch(e) {
 					console.log('file metadata failed!', e.message)
 				}
+				// if this is response file then we save it to the process node directory and not in the graph
+			} else if (message.file.type == 'response') {
+				var process_rid = message.process['@rid']
+				var process_dir = path.dirname(message.process.path)
+				await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'})
+				await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path})
+				
 				// else save content to processFileNode
 			} else {
 				var info = ''
@@ -1029,7 +1055,7 @@ router.post('/api/nomad/process/files', upload.fields([
 						
 						for(var request of requests) {
 							var service = services.getServiceAdapterByName(request.params.topic)
-							messages = await Graph.createQueueMessages(service, request, ctx.request.headers[AUTH_HEADER])
+							messages = await Graph.createQueueMessages(service, request.body, fileNode['@rid'].replace('#', ''),ctx.request.headers[AUTH_HEADER])
 							for(var msg of messages) {
 								var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
 								send2UI(ctx.request.headers.mail, wsdata)

@@ -10,6 +10,7 @@ import nomad from './nomad.js';
 import { connect, RetentionPolicy, AckPolicy } from "nats";
 
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
+const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
 
 
@@ -203,3 +204,23 @@ queue.downLoadFile = async function(message, uri, service) {
   }
 }
 
+queue.getQueueStatus = async function(topic) {
+  try {
+    const url = NATS_URL_STATUS + '/jsz?consumers=true'
+    const queues = {}
+  
+    const response = await fetch(url)
+    const data = await response.json()
+    for(var stream of data.account_details[0].stream_detail[0].consumer_detail) {
+      if(stream.name == topic || stream.name == topic + '_batch') {
+        queues[stream.name] = stream
+      }
+    }
+
+    return queues
+    
+  } catch(e) {
+    console.log(e)
+    console.log('Queue status failed!')
+  }
+}

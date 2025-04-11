@@ -28,7 +28,8 @@ const entityTypes = [
 	{type:'Location', icon:'map-marker', color:'green', label:'Location'},
 	{type:'Theme', icon:'shape', color:'rgb(129, 19, 138)', label:'Theme'},
 	{type:'Quality', icon:'message-alert', color:'orange', label:'Quality'},
-	{type:'Date', icon:'calendar-range', color:'rgb(43, 95, 98)', label:'Date'}
+	{type:'Date', icon:'calendar-range', color:'rgb(43, 95, 98)', label:'Date'},
+	{type:'Organisation', icon:'warehouse', color:'rgb(40, 19, 163)', label:'Organisation'}
 ]
 
 

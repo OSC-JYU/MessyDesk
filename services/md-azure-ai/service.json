@@ -9,8 +9,8 @@
     "access": "commercial",
     "name" :"Azure AI",
 
-    "supported_types": ["text"],
-    "supported_formats": ["txt"],
+    "supported_types": ["text", "image"],
+    "supported_formats": ["txt", "png", "jpg", "jpeg"],
 
     "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
 

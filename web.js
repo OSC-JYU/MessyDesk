@@ -87,6 +87,7 @@ web.createDB = async function() {
 		await this.createVertexType('Entity')
 		await this.createVertexType('EntityType')
 		await this.createVertexType('Request')
+		await this.createVertexType('Prompt')
 		
 		//await this.createVertexType('Person')
 		// development/default user
