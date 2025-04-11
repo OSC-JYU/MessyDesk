@@ -1,4 +1,4 @@
-job "MD-poppler" {
+job "md-poppler" {
   type = "service"
 
   group "MD-image" {
@@ -17,15 +17,18 @@ job "MD-poppler" {
 
     task "md-poppler" {
       driver = "docker"
-        config {
-            image = "osc.repo.kopla.jyu.fi/messydesk/md-poppler:0.1"
-            ports = ["node"]
-            auth {
-              username = ""
-              password = ""
-            }
-        }
-
+      config {
+          image = "osc.repo.kopla.jyu.fi/messydesk/md-poppler:25.4.8"
+          ports = ["node"]
+          auth {
+            username = ""
+            password = ""
+          }
+      }
+      resources {
+        memory = 1000  # Memory in MB
+        cpu    = 500  # CPU shares (500 = 50% of 1 CPU)
+      }
     }
   }
 }

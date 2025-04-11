@@ -60,6 +60,17 @@ nomad.createService = async function(service) {
 	}
 }
 
+nomad.stopService = async function(service) {
+	console.log('stopping service ', service.id)
+	if(service) {
+		console.log(URL + '/job/' + service.id + '?purge=true')
+		var response_stop = await axios.delete(URL + '/job/' + service.id + '?purge=true')
+		return response_stop.data
+	} else {
+		throw(`nomad.hcl not found for "${service.id}"!`)
+	}
+}
+
 nomad.getService = async function(service) {
 	const url = URL + `/service/${service}`
 	var response = await axios.get(url)
@@ -78,13 +89,6 @@ nomad.getServiceURL = async function(service) {
 	return service_url
 }
 
-nomad.stopService = async function(service) {
-	if(service) {
-		var response_stop = await axios.delete(URL + '/job/' + service)
-		return response_stop.data
-	} else {
-		throw(`nomad.hcl not found for "${service.id}"!`)
-	}
-}
+
 
 module.exports = nomad

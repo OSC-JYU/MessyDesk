@@ -9,10 +9,14 @@
     "access": "commercial",
     "name" :"Azure AI",
 
-    "supported_types": ["text"],
-    "supported_formats": ["txt"],
+    "supported_types": ["text", "image"],
+    "supported_formats": ["txt", "png", "jpg", "jpeg"],
 
     "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
+
+    "service_groups": ["AZURE-AI","OSC"],
+
+    "external_tasks": "prompts",
 
     "params": {
 
@@ -28,6 +32,28 @@
             "system_params": {
                 "prompts": [
                     {"role": "system", "content": "Extract following information from text. \n - title\n - author\n - faculty\n - ISBN\n Give result as JSON file in following format: \n { \"title\": \"\", \"author\": \"\", \"faculty\": \"\" }"}
+                ]
+            }
+        },
+        "summary": {
+            "name": "Write a short summary",
+            "output": "text",
+            "description": "Write a short summary of the text.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write a short summary from text."}
+                ]
+            }
+        },
+        "descriptive_title": {
+            "name": "Write a descriptive title",
+            "output": "text",
+            "description": "Write a descriptive title of the text.",
+
+            "system_params": {
+                "prompts": [
+                    {"role": "system", "content": "Write a descriptive title of the text."}
                 ]
             }
         }

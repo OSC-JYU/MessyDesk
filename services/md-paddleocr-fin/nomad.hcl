@@ -1,4 +1,4 @@
-job "MD-paddleocr-fin" {
+job "md-paddleocr-fin" {
   type = "service"
 
   group "MD-paddleocr" {

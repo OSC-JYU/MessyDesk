@@ -51,6 +51,7 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 		}
 
 		this.service_list = await markRegisteredAdapter(servicesObject)
+		this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
 		return this.service_list
 
 	} catch (error) {
@@ -72,30 +73,47 @@ services.getServices = function () {
 }
 
 
-services.getServicesForFile = async function(file, filter) {
+services.getServicesForNode = async function(node, filter, user, prompts) {
 
 	const matches = {for_type: [], for_format: []}
-	if(!file) return matches
-	
+	if(!node) return matches
+	console.log('here', node['@type'])
+
 	for(var service in this.service_list) {
+
 		
 		// for Sets we compare only extensions
-		if(file['@type'] == 'Set') {
+		if(node['@type'] == 'Set') {
+			// check if service is disabled for Sets
+			if(this.service_list[service].set_disabled) {
+				continue
+			}
 			if(this.service_list[service].consumers.length > 0) {
-				var service_with_tasks = pickTasks(this.service_list[service], file.extensions)
-				matches.for_format.push(service_with_tasks)
+				
+				var service_with_tasks = pickTasks(this.service_list[service], node.extensions, filter, user, prompts, node['@type'])
+				if(service_with_tasks) {
+					matches.for_format.push(service_with_tasks)
+				}
+			}	
+		// services for data sources like Nextcloud
+		} else if (node['@type'] == 'Source') {
+			if(this.service_list[service].consumers.length > 0) {
+				var service_with_tasks = pickTasks(this.service_list[service], node.type, filter, user, prompts, node.type)
+				if(service_with_tasks) {
+					matches.for_format.push(service_with_tasks)
+				}
 			}			
+				
 		// for Files we compare first type and then extension
 		} else {
 			// check service for supported types
-			//console.log(this.service_list[service].supported_types)
-			//console.log('comparing types..', file.type)
-			if(this.service_list[service].supported_types.includes(file.type)) {
-				// we take only services that has consumer app listening
-				//console.log('supported types')
+			if(this.service_list[service].supported_types.includes(node.type)) {
+				// we take only services that has consumer app listening (i.e are active services)
 				if(this.service_list[service].consumers.length > 0) {
-					var service_with_tasks = pickTasks(this.service_list[service], [file.extension], filter)
-					matches.for_format.push(service_with_tasks)
+					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], filter, user, prompts, node.type)
+					if(service_with_tasks) {
+						matches.for_format.push(service_with_tasks)
+					}
 				}
 			} 
 		}
@@ -106,11 +124,40 @@ services.getServicesForFile = async function(file, filter) {
 }
 
 
-pickTasks = function(service, extensions, filter) {
+pickTasks = function(service, extensions, filter, user, prompts, node_type) {
 
 	const service_object = JSON.parse(JSON.stringify(service))
 	service_object.tasks = {}
+
+	// if service has service groups, check if user has access to any of them
+	// if not, return empty object
+	if(service_object.service_groups) {
+		if(!service_object.service_groups.some(value => user.service_groups.includes(value))) {
+			return 
+		}
+	}
+
+	// LLM services have tasks defined in prompts
+	if(service_object.external_tasks) {
+		service_object.tasks = promptsToTasks(prompts, node_type, extensions, service_object)
+		return service_object
+	}
+
 	for(var task in service.tasks) {
+
+		// task can be disabled/enabled by service_groups
+		if(service.tasks[task].service_groups) {
+			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+				continue
+			}
+		}
+		
+		// task can be disabled for Sets
+		if(node_type == 'Set') {
+			if(service.tasks[task].set_disabled) {
+				continue
+			}
+		}
 
 		// if task has its own supported formats then compare to file extension
 		if(service.tasks[task].supported_formats) {
@@ -149,6 +196,31 @@ filterTask = function(filter, task) {
 
 }
 
+promptsToTasks = function(prompts, type, extensions, service) {
+
+	var tasks = {}
+
+	// if type is Set, we return all tasks that have supported formats
+	if(type == 'Set') {
+		for(var prompt of prompts) {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(service.supported_types.includes(prompt.type)) {
+					tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+				}
+			}
+		}
+	} else {
+		for(var prompt of prompts) {
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(type == prompt.type) {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			}	
+		}
+	}
+
+	return tasks
+}
+
 checkService = function(array, service) {
 	// check if service already exists
 	for (const obj of array) {
@@ -159,10 +231,13 @@ checkService = function(array, service) {
 
 }
 
-// note: consumer here means consumer application, not NATS consumers
+// note: consumer here means service adapter, not NATS consumers
 services.addConsumer = async function(service, id) {
-
+console.log(service, id)
 	if(this.service_list[service]) {
+		if(this.service_list[service].consumers.includes(id)) {
+			return {status: 'consumer already exists', name: service}
+		}
 		this.service_list[service].consumers.push(id)
 		return this.service_list[service]
 	}
@@ -177,7 +252,7 @@ services.removeConsumer = async function(service, id) {
 		this.service_list[service].consumers = arr 
 		return this.service_list[service]
 	}
-	return {error: 'service not found', name: service}
+	return {error: 'service not found for deletion', name: service}
 }
 
 services.getServiceAdapterByName = function(name) {

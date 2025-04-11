@@ -56,13 +56,17 @@ Start back end (Docker):
 
     MODE=development DB_PASSWORD=node_master node index.js
 
+If using podman:
+
+    MODE=development DB_PASSWORD=node_master PODMAN=true node index.js
+
 
 Now we should have backend running. We need also some services and UI.
 
 
-### Consumer apps (service adapters)
+### Service adapters
 
-Consumer apps are links between MessyDesk backend and services..
+Service adapters are links between MessyDesk backend and services.
 
 One more repository is needed:
 
@@ -72,14 +76,14 @@ One more repository is needed:
 
 Let's start thumbnailer and simple image manipulation service (rotate, scale etc.)
 
-    NAME=thumbnailer node api-imaginary.mjs
+    NAME=md-thumbnailer node api-imaginary.mjs
 
 And then in another terminal:
 
     NAME=md-imaginary node api-imaginary.mjs
     
 
-Now we have also two consumer application and two nomad jobs, thumbnailer and imaginary library for image manipulation.
+Now we have also two service adapter application that listens  and two nomad jobs, thumbnailer and imaginary library for image manipulation.
 
 
 ### Frontend:

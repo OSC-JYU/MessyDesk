@@ -1,3 +1,3 @@
 {
-  "ignore": ["data","media","uploads", "layouts", "test"]
+  "ignore": ["data","media","uploads", "layouts", "test", "init_user.py"]
 }

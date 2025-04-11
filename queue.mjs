@@ -10,6 +10,7 @@ import nomad from './nomad.js';
 import { connect, RetentionPolicy, AckPolicy } from "nats";
 
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
+const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
 
 
@@ -38,7 +39,7 @@ queue.init = async function(services) {
       ack_policy: AckPolicy.Explicit,
       filter_subject: `process.solr`,  
     })
-    console.log('SOLR consumer created')
+    console.log('NATS: created default consumer solr')
   } catch(e) {
     console.log(e)
     console.log('NATS ERROR: could not create SOLR consumer! exiting...')
@@ -57,6 +58,15 @@ queue.init = async function(services) {
     
       });
       console.log('NATS: created consumer', key)
+
+      var batch = key + '_batch'
+      await this.jsm.consumers.add("PROCESS", {
+        durable_name: batch,
+        ack_policy: AckPolicy.Explicit,
+        filter_subject: `process.${batch}`,
+    
+      });
+      console.log('NATS: created batch consumer', batch)
 
 
     } catch(e) {
@@ -174,7 +184,7 @@ queue.downLoadFile = async function(message, uri, service) {
   try {
     await pipeline(downloadStream, fileWriterStream)
 
-    const topic = 'thumbnailer' 
+    const topic = 'md-thumbnailer' 
     const k_message = {
       key: "md",
       value: JSON.stringify({
@@ -194,3 +204,23 @@ queue.downLoadFile = async function(message, uri, service) {
   }
 }
 
+queue.getQueueStatus = async function(topic) {
+  try {
+    const url = NATS_URL_STATUS + '/jsz?consumers=true'
+    const queues = {}
+  
+    const response = await fetch(url)
+    const data = await response.json()
+    for(var stream of data.account_details[0].stream_detail[0].consumer_detail) {
+      if(stream.name == topic || stream.name == topic + '_batch') {
+        queues[stream.name] = stream
+      }
+    }
+
+    return queues
+    
+  } catch(e) {
+    console.log(e)
+    console.log('Queue status failed!')
+  }
+}

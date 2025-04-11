@@ -14,6 +14,7 @@ const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 const DATA_DIR = process.env.DATA_DIR || './'
 const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr'
 const SOLR_CORE = process.env.SOLR_CORE || 'messydesk'
+const INTERNAL_URL = process.env.INTERNAL_URL || 'http://localhost:8200'
 
 console.log(URL)
 
@@ -84,10 +85,13 @@ web.createDB = async function() {
 		await this.createVertexType('SetProcess')
 		await this.createVertexType('ROI')
 		await this.createVertexType('Entity')
+		await this.createVertexType('EntityType')
+		await this.createVertexType('Request')
+		await this.createVertexType('Prompt')
 		
 		//await this.createVertexType('Person')
-		// development user
-		await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
+		// development/default user
+		//await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
 		// const commands = [
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
 		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
@@ -105,6 +109,35 @@ web.createDB = async function() {
 		throw(e)
 	}
 }
+
+
+// web.runPipeline = async function(pipeline, userID) {
+// 	const {got} = await import('got')
+// 	var url = INTERNAL_URL + '/api/pipeline/run'
+
+
+// 	try {
+// 		var response = await got.post(url, data).json()
+// 		return response.result
+		
+// 	} catch(e) {
+// 		console.log(e.message)
+// 		throw({message: "Error on database check"})
+// 	}
+// }
+
+// web.internal = async function(url, data) {
+// 	const {got} = await import('got')
+// 	url = INTERNAL_URL + url
+// 	try {
+// 		var response = await got.post(url, data).json()
+// 		return response.result
+		
+// 	} catch(e) {
+// 		console.log(e.message)
+// 		throw({message: "Error on internal call! ", url})
+// 	}
+// }
 
 web.createVertexType = async function(type) {
 	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`
@@ -140,6 +173,41 @@ web.sql = async function(query, options) {
 		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
 			options.labels = await getSchemaLabels(config)
 			return convert2CytoScapeJs(response.data, options)
+		} else {
+			return response.data
+		}
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: query, error: e})
+	}
+	//var response = await axios.post(URL, query_data, config)
+	//return response.data
+}
+
+web.sql2 = async function(query, options) {
+	if(!options) var options = {}
+	
+	var config = {
+		auth: {
+			username: username,
+			password: password
+		}
+	};
+	const query_data = {
+		command:query,
+		language:'sql'
+	}
+
+	if(options.serializer) query_data.serializer = options.serializer
+
+	try {
+		var response = await axios.post(URL, query_data, config)
+		//if(query && query.toLowerCase().includes('create')) return response.data
+		if(!options.serializer) return response.data
+
+		else if(options.serializer == 'studio' && options.format == 'vueflow') {
+			//options.labels = await getSchemaLabels(config)
+			return convert2VueFlow(response.data, options)
 		} else {
 			return response.data
 		}
@@ -212,48 +280,37 @@ web.solr = async function(data, user_rid) {
 
 	//const filters = []; 
 	const params = {
-		q: query,
-		//bq: 'torvalds^5',
-		defType: "edismax",
-		qf: "fulltext^5",
-		pf: "fulltext^5",
-		//pf2: "fulltext^5",
-		//pf3: "fulltext^5",
-		hl: true,
-		"hl.fl": "fulltext",
-		"hl.simple.pre": "<em>",
-		"hl.simple.post": "</em>",
-		"hl.snippets": 3,
-		"hl.fragsize": 100,
-		wt: "json",
-		fl: "description,label,id,owner"
+		params:{
+			q: query,
+			defType: "edismax",
+			qf: "fulltext^5",
+			pf: "fulltext^5",
+			hl: true,
+			"hl.fl": "fulltext",
+			"hl.simple.pre": "<em>",
+			"hl.simple.post": "</em>",
+			"hl.snippets": 3,
+			"hl.fragsize": 100,
+			wt: "json",
+			fl: "description,label,id,owner",
+			fq: `owner:${user_rid}`
+			
+
+		}
 		
 	};
 
-	const queryString = Object.entries(params)
-	.map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
-	.join("&");
+  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/query?fq=type:text`;
 
-	// lets handle filters diffrently because that nasty Arcadedb RID format (#425:0)
-	user_rid = user_rid.replace(':', '\\:')
-	user_rid = user_rid.replace('#', '%23')
-	const filters = ["type%3Atext", `owner%3A${user_rid}`]; 
-	var filters_url = filters.join("%20AND%20") // Combine multiple filters if needed
-  
-  	const finalUrl = `${SOLR_URL}/${SOLR_CORE}/select?${queryString}`;
-	console.log(finalUrl + '&fq=' + filters_url)
+	//console.log(JSON.stringify(params, null, 2))
 
-    //var url = `${SOLR_URL}/${SOLR_CORE}/select?q=" + ${data.query} + "&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&wt=json`
-	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id`;
-	//var url = `${SOLR_URL}/${SOLR_CORE}/select?q=${data.query}&defType=edismax&qf=description label fulltext&pf=description^5 label^3 fulltext^2&hl=true&hl.fl=fulltext&hl.simple.pre=<em>&hl.simple.post=</em>&hl.snippets=3&hl.fragsize=100&wt=json&fl=description,label,id,type&fq=type:text`
-
-	
 	if(!data.query) {		
 		return []
 	} 
 	
 	try {
-		var response = await axios.get(finalUrl)
+		var response = await axios.get(finalUrl, params)
+		console.log(response.data)
 		return response.data
 		
 		
@@ -320,7 +377,7 @@ function setParent(vertices, child, parent) {
 
 
 async function convert2VueFlow(data, options) {
-	//console.log(data.result)
+
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
 	var nodes = []
@@ -354,7 +411,7 @@ async function convert2VueFlow(data, options) {
 				
 				// direct link to thumbnail
 				if(v.t != 'Process' && v.p.path) 
-					node.data.image = path.join('api/thumbnails', path.dirname(v.p.path))
+					node.data.image = path.join('/api/thumbnails', path.dirname(v.p.path))
 
 				nodes.push(node)
 				vertex_ids.push(v.r)

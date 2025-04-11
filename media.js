@@ -4,6 +4,7 @@ const path 			= require('path');
 const stream 		= require('stream');
 const fs 			= require('fs-extra');
 const sizeOf		= require('image-size');
+const archiver 		= require('archiver');
 
 
 const TYPES = ['image', 'text'] 
@@ -11,10 +12,100 @@ const TYPES = ['image', 'text']
 
 let media = {}
 
+
+media.ROIPercentagesToPixels = function(roi, message) {
+	const areaWidth = Math.round(roi.rel_coordinates.width/100*metadata.width)
+	const areaheight = Math.round(roi.rel_coordinates.height/100*metadata.height)
+	const top = Math.round(roi.rel_coordinates.top/100*metadata.height)
+	const left = Math.round(roi.rel_coordinates.left/100*metadata.width)
+
+	message.params.left = left 
+	message.params.top = top 
+	message.params.areawidth = areaWidth 
+	message.params.areaheight = areaheight 
+}
+
+media.zipFilesAndStream2 = async function(fileList, ctx) {
+	// Create a new archive (zip) with no compression (store mode)
+	const archive = archiver('zip', {
+	  zlib: { level: 0 } // 0 means no compression, just store
+	});
+  
+	// Set the response headers for streaming the zip file
+	ctx.set('Content-Type', 'application/zip');
+	ctx.set('Content-Disposition', 'attachment; filename="files.zip"');
+  
+	// Pipe the archive output to the response stream
+	archive.pipe(ctx.res);
+  
+	// Add files to the archive
+	fileList.forEach(filePath => {
+	  const fullPath = path.resolve(filePath);
+	  if (fs.existsSync(fullPath)) {
+		// Add each file to the zip as a file entry
+		archive.file(fullPath, { name: path.basename(filePath) });
+	  } else {
+		console.error(`File not found: ${fullPath}`);
+	  }
+	});
+
+
+	// Finalize the archive (this step is necessary to finish zipping)
+	archive.finalize();
+
+	// Handle potential errors
+	archive.on('error', (err) => {
+		ctx.status = 500;
+		ctx.body = { error: 'An error occurred during zipping' };
+	  });
+  
+  }
+
+  media.createZip = function(files, ctx) {
+	const archive = archiver('zip', { zlib: { level: 9 } });
+	const zipName = 'files.zip';
+  
+	// Set the response headers
+	ctx.attachment(zipName);
+	ctx.set("Content-Type", "application/zip");
+  
+	// Pipe the archive data to the response
+	archive.pipe(ctx.res);
+  
+	// Add files to the archive
+	files.forEach((file) => {
+	  const filePath = path.resolve(file);
+	  const fileName = path.basename(file);
+  
+	  if (fs.existsSync(filePath)) {
+		archive.file(filePath, { name: fileName });
+	  } else {
+		console.error(`File not found: ${filePath}`);
+	  }
+	});
+  
+	// Finalize the archive
+	archive.finalize();
+  }
+// NOTE: this removes parent directory! (the basename is stripper away)
+  media.deleteNodePath = async function(dir) {
+	try {
+		var p = path.dirname(dir)
+		if(p == 'data/projects' || p == 'data/projects/') throw('Protecting projects dir!')
+		await fs.remove(p)
+	} catch(e) {
+		console.log('error deleting node data directory. ' + e)
+		//throw('Could not delete directory!' + e.message)
+	}	
+}
+
+
 media.createDataDir = async function(data_dir) {
 	try {
 		//await fs.ensureDir(data_dir)
 		await fs.ensureDir(path.join(data_dir, 'projects'))
+		await fs.ensureDir(path.join(data_dir, 'uploads'))
+		await fs.ensureDir(path.join(data_dir, 'layouts'))
 	} catch(e) {
 		throw('Could not create data directory!' + e.message)
 	}
@@ -192,7 +283,8 @@ media.getTextDescription = async function (filePath, file_type) {
 		} else {
 			var first = data.substring(0, maxCharacters);
 			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
-			return first + '\n' + ' -lines: ' + linecount + '\n' + ' -characters:' + data.length
+			//return first + '\n' + ' -lines: ' + linecount + '\n' + ' -characters:' + data.length
+			return first 
 		}
 
 	  } catch (error) {
@@ -202,7 +294,7 @@ media.getTextDescription = async function (filePath, file_type) {
 }
 
 
-media.getThumbnail = function(filePath) {
+media.getThumbnail = async function(filePath) {
 	try {
 		var thumbfile = 'preview.jpg'
 		var base = path.dirname(filePath)
@@ -216,12 +308,31 @@ media.getThumbnail = function(filePath) {
 			base = path.join(base, f)
 		}
 
-		const src = fs.createReadStream(path.join(base.replace('/api/thumbnails/','./'), thumbfile));
-	  	return src
+		let fullPath = path.join(base.replace('/api/thumbnails/', './'), thumbfile)
+
+        // Check if the file exists asynchronously
+        var fileExists = await fs.pathExists(fullPath)
+        if (!fileExists) {
+			// for pdf there are no smaller thumbnails currently
+			if(f == 'thumbnail.jpg') {
+				thumbfile = 'preview.jpg'
+				fullPath = path.join(base.replace('/api/thumbnails/', './'), 'preview.jpg')
+				var fileExists = await fs.pathExists(fullPath)
+			}
+			if (!fileExists) {
+				fullPath = path.join('images/image_not_found.jpg')
+			}
+			
+        }
+		return fs.createReadStream(fullPath)
+
 	} catch (err) {
+		console.log('thumbnail not found')
 		return false;
 	}
 }
+
+
 function NERsummary(data) {
 	try {
 

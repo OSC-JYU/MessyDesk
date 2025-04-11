@@ -1,4 +1,4 @@
-job "MD-pdf2json" {
+job "md-pdf2json" {
   type = "service"
 
   group "MD-pdf" {
