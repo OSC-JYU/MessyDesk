@@ -14,10 +14,11 @@ let media = {}
 
 
 media.ROIPercentagesToPixels = function(roi, message) {
-	const areaWidth = Math.round(roi.rel_coordinates.width/100*metadata.width)
-	const areaheight = Math.round(roi.rel_coordinates.height/100*metadata.height)
-	const top = Math.round(roi.rel_coordinates.top/100*metadata.height)
-	const left = Math.round(roi.rel_coordinates.left/100*metadata.width)
+
+	const areaWidth = Math.round(roi.width/100 * message.file.metadata.width)
+	const areaheight = Math.round(roi.height/100 * message.file.metadata.height)
+	const top = Math.round(roi.top/100 * message.file.metadata.height)
+	const left = Math.round(roi.left/100 * message.file.metadata.width)
 
 	message.params.left = left 
 	message.params.top = top 

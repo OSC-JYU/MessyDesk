@@ -567,6 +567,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 			var roi_message = structuredClone(message)
 			for(var roi of rois) {
 				media.ROIPercentagesToPixels(roi, roi_message)
+				console.log(roi_message)
 				messages.push(roi_message)
 			}	
 		}
@@ -740,6 +741,11 @@ graph.createROIs = async function(rid, data) {
 
 	if (!rid.match(/^#/)) rid = '#' + rid
 
+	// we must gather all ROIs that has @rid or that are new ones
+	var rids = []
+
+
+
 	for(var roi of data.rois) {
 		// only image ROIs have coordinates
 		if (roi.coordinates) {
@@ -748,6 +754,8 @@ graph.createROIs = async function(rid, data) {
 		
 		// check if this is update by user
 		if(roi['@rid']) {
+			rids.push(roi['@rid'])
+			if(roi['locked']) continue // locked ROIs are not updated
 			const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
 			var response = await web.cypher(query)
 			if(response.result.length > 0) {
@@ -759,8 +767,16 @@ graph.createROIs = async function(rid, data) {
 			const query_c = `CREATE Vertex ROI CONTENT ${JSON.stringify(roi)}`
 			var response_c = await web.sql(query_c)
 			await this.connect(rid, 'HAS_ROI', response_c.result[0]['@rid'])
+			rids.push(response_c.result[0]['@rid'])
 		}
 	}
+
+
+	// now we must delete all ROIs that are not in the rids array
+	const query_delete = `DELETE FROM ROI WHERE @rid NOT IN [${rids.join(',')}] AND in().@rid = [${rid}]`
+	console.log(query_delete)
+	var response_delete = await web.sql(query_delete)
+
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
 	var response_count = await web.sql(query_count)
 	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count} )
