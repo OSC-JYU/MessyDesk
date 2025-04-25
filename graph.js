@@ -564,11 +564,9 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 		if(node_metadata.metadata) var metadata = node_metadata.metadata
 		if(metadata && metadata.width && metadata.height) {
 			var rois = await this.getROIs(node_rid)
-			var roi_message = structuredClone(message)
-			for(var roi of rois) {
-				media.ROIPercentagesToPixels(roi, roi_message)
-				console.log(roi_message)
-				messages.push(roi_message)
+			for(var roi_item of rois) {
+				var m = media.ROIPercentagesToPixels(roi_item, structuredClone(message))
+				messages.push(m)
 			}	
 		}
 	} else {
@@ -748,9 +746,9 @@ graph.createROIs = async function(rid, data) {
 
 	for(var roi of data.rois) {
 		// only image ROIs have coordinates
-		if (roi.coordinates) {
-			roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
-		}
+		// if (roi.coordinates) {
+		// 	roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
+		// }
 		
 		// check if this is update by user
 		if(roi['@rid']) {
@@ -780,6 +778,7 @@ graph.createROIs = async function(rid, data) {
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
 	var response_count = await web.sql(query_count)
 	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count} )
+	return response_count.result[0].count
 
 }
 

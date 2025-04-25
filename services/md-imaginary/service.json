@@ -36,7 +36,7 @@
             "filter": "ROI",
             "name": "Extract",
             "output": "image",
-            "description": "Extract images based on Regions of Interest (ROI).",
+            "description": "Create images based on Regions of Interest (ROI).",
             "info": "I extracted images based on your selections.",
             "roi_params": { 
                 "top": 0,

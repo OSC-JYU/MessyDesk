@@ -1,4 +1,3 @@
-
 const util			= require('util');
 const path 			= require('path');
 const stream 		= require('stream');
@@ -14,16 +13,28 @@ let media = {}
 
 
 media.ROIPercentagesToPixels = function(roi, message) {
+	// Ensure percentages are between 0 and 100
+	const top = Math.max(0, Math.min(100, roi.top));
+	const left = Math.max(0, Math.min(100, roi.left));
+	const width = Math.max(0, Math.min(100, roi.width));
+	const height = Math.max(0, Math.min(100, roi.height));
 
-	const areaWidth = Math.round(roi.width/100 * message.file.metadata.width)
-	const areaheight = Math.round(roi.height/100 * message.file.metadata.height)
-	const top = Math.round(roi.top/100 * message.file.metadata.height)
-	const left = Math.round(roi.left/100 * message.file.metadata.width)
+	// Calculate pixel values
+	const areaWidth = Math.round(width/100 * message.file.metadata.width);
+	const areaHeight = Math.round(height/100 * message.file.metadata.height);
+	const topPixels = Math.round(top/100 * message.file.metadata.height);
+	const leftPixels = Math.round(left/100 * message.file.metadata.width);
 
-	message.params.left = left 
-	message.params.top = top 
-	message.params.areawidth = areaWidth 
-	message.params.areaheight = areaheight 
+	// Ensure final coordinates don't exceed image boundaries
+	const finalWidth = Math.min(areaWidth, message.file.metadata.width - leftPixels);
+	const finalHeight = Math.min(areaHeight, message.file.metadata.height - topPixels);
+
+	message.params.left = leftPixels;
+	message.params.top = topPixels;
+	message.params.areawidth = finalWidth;
+	message.params.areaheight = finalHeight;
+	
+	return message;
 }
 
 media.zipFilesAndStream2 = async function(fileList, ctx) {

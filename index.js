@@ -698,14 +698,23 @@ router.post('/api/queue/:topic/files/:file_rid/:roi?', async function (ctx) {
 		var messages = await Graph.createQueueMessages(service, ctx.request.body, ctx.request.params.file_rid, ctx.request.headers.mail, ctx.request.params.roi)
 		const queue = Graph.getQueueName(service, ctx.request, topic)
 
-		for(var msg of messages) {	
-			// add Process node to UI
-			var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
+		// add Process node to UI
+		if(messages.length > 0) {
+			var msg = messages[0]
+			if(ctx.request.params.roi) {
+				var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process}
+			} else {
+				var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'}
+			}
 			// there is output Set node, then add it too to UI
 			if(msg.set_node) {
 				wsdata.set_node = msg.set_node
 			}
 			send2UI(ctx.request.headers.mail, wsdata)
+		}
+
+		for(var msg of messages) {	
+
 			// send message to queue
 			nats.publish(queue, JSON.stringify(msg))
 		}
@@ -1278,6 +1287,8 @@ router.delete('/api/graph/vertices/:rid', async function (ctx) {
 
 router.post('/api/graph/vertices/:rid/rois', async function (ctx) {
 	var n = await Graph.createROIs(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.body)
+	var wsdata = {command: 'update', type: 'image', target: '#'+ctx.request.params.rid, roi_count: n}
+	send2UI(ctx.request.headers.mail, wsdata)
 	ctx.body = n
 })
 
