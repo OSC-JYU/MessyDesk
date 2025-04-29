@@ -139,7 +139,7 @@ pickTasks = function(service, extensions, filter, user, prompts, node_type) {
 
 	// LLM services have tasks defined in prompts
 	if(service_object.external_tasks) {
-		service_object.tasks = promptsToTasks(prompts, node_type, extensions, service_object)
+		service_object.tasks = promptsToTasks(filter,prompts, node_type, extensions, service_object)
 		return service_object
 	}
 
@@ -196,9 +196,14 @@ filterTask = function(filter, task) {
 
 }
 
-promptsToTasks = function(prompts, type, extensions, service) {
+promptsToTasks = function(filter, prompts, type, extensions, service) {
 
 	var tasks = {}
+
+	// currently there are no filtered prompts
+	if(filter) {
+		return tasks
+	}
 
 	// if type is Set, we return all tasks that have supported formats
 	if(type == 'Set') {
@@ -233,7 +238,7 @@ checkService = function(array, service) {
 
 // note: consumer here means service adapter, not NATS consumers
 services.addConsumer = async function(service, id) {
-console.log(service, id)
+
 	if(this.service_list[service]) {
 		if(this.service_list[service].consumers.includes(id)) {
 			return {status: 'consumer already exists', name: service}

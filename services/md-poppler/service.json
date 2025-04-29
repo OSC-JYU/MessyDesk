@@ -49,7 +49,7 @@
             "output_set": "PDF as images",
             "always_batch": true,
             "name": "Render PDF as images",
-            "description": "Renders pages as image files in any resolution.",
+            "description": "Create screenshot images of pages in any resolution.",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",

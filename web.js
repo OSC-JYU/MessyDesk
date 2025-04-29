@@ -270,12 +270,12 @@ web.getError = async function(rid) {
 			
 	} catch(e) {
 		console.log(e.message)
-		throw({msg: 'error in query', query: data, error: e})
+		//throw({msg: 'error in query', query: data, error: e})
 	}
 }
 
 web.solr = async function(data, user_rid) {
-	console.log(user_rid)
+	//console.log(user_rid)
 	const query = data.query;
 
 	//const filters = []; 
@@ -310,13 +310,13 @@ web.solr = async function(data, user_rid) {
 	
 	try {
 		var response = await axios.get(finalUrl, params)
-		console.log(response.data)
+		//console.log(response.data)
 		return response.data
 		
 		
 	} catch(e) {
 		console.log(e.message)
-		throw({msg: 'error in query', query: data, error: e})
+		//throw({msg: 'error in query', query: data, error: e})
 	}
 }
 
@@ -328,7 +328,7 @@ web.solrDropUserData = async function(userRID) {
 		return response.data	
 	} catch(e) {
 		console.log(e.message)
-		throw({msg: 'error in query', query: data, error: e})
+		//throw({msg: 'error in query', query: data, error: e})
 	}
 }
 
@@ -341,7 +341,7 @@ web.indexDocuments = async function(data) {
 		return response.data
 	} catch(e) {
 		console.log(e.message)
-		throw({msg: 'error in query', query: data, error: e})
+		//throw({msg: 'error in query', query: data, error: e})
 	}
 
 }

@@ -538,10 +538,10 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
 
 	// do we need info about "parent" file?
-	if(service.tasks[data.task] && service.tasks[data.task].source) {
-		var source = await this.getFileSource(node_rid)
+	if(service.tasks[data.task]?.source == 'source_file') {
+		const source = await this.getFileSource(node_rid)
 		if(source) {
-			var source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
+			const source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
 			message.source = source_metadata
 		}
 	}
@@ -816,7 +816,8 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	let setquery = ''
 	if(message.set) setquery = 'set:"' + message.set + '",'
 	var type = 'Process'
-	if(message.source) type = 'SetProcess'
+	// TODO: check in what situation we need to use SetProcess
+	//if(message.source) type = 'SetProcess'
 	
 	const query = `MATCH (p:${type}) WHERE id(p) = "${process_rid}" 
 		CREATE (file:File 

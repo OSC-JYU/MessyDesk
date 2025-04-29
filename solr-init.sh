@@ -1,3 +1,4 @@
+curl -X POST "http://localhost:8983/solr/admin/cores?action=CREATE&name=messydesk&instanceDir=messydesk&config=solrconfig.xml&schema=schema.xml&dataDir=data"
 
 
 #First create new type
@@ -120,3 +121,4 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"description", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"label", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"fulltext", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
+

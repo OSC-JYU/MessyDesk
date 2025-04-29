@@ -736,7 +736,18 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 	try {
 		console.log('****************** set queue ******************')
 		const service = services.getServiceAdapterByName(topic)
-		var task_name = service.tasks[ctx.request.body.task].name
+		var msg = JSON.parse(JSON.stringify(ctx.request.body))
+		var task_name = ''
+		// LLM services have tasks defined in prompts
+		if(service.external_tasks) {
+			msg.external = 'yes'
+			msg.info = ctx.request.body.info
+			msg.params = ctx.request.body.system_params
+			task_name = ctx.request.body.name	
+		} else {
+			task_name = service.tasks[ctx.request.body.task].name
+		}
+
 		var set_metadata = await Graph.getUserFileMetadata(set_rid, ctx.request.headers.mail)
 		var nodes = await Graph.createSetProcessNode(task_name, service, ctx.request.body, set_metadata, ctx.request.headers.mail)
 		
@@ -753,9 +764,18 @@ router.post('/api/queue/:topic/sets/:set_rid', async function (ctx) {
 			var processNode = await Graph.createProcessNode(task_name, service, ctx.request.body, file_metadata, ctx.request.headers.mail, set_rid)
 			await media.createProcessDir(processNode.path)
 
+			// do we need info about "parent" file? (when processing osd.json for example)
+			if(service.tasks[ctx.request.body.task]?.source == 'source_file') {
+				const source = await Graph.getFileSource(file['@rid'])
+				console.log('source: ', source)
+				if(source) {
+					const source_metadata = await Graph.getUserFileMetadata(source['@rid'], ctx.request.headers.mail)
+					msg.source = source_metadata
+				}
+			}
+
 			await media.writeJSON(ctx.request.body, 'params.json', path.join(path.dirname(processNode.path)))
 
-			var msg = JSON.parse(JSON.stringify(ctx.request.body))
 			msg.process = processNode
 			msg.file = file_metadata
 			msg.target = file_metadata['@rid']
@@ -1170,17 +1190,38 @@ router.get('/api/sets/:rid/files', async function (ctx) {
 
 
 router.get('/api/sets/:rid/files/zip', async function (ctx) {
-	var n = await Graph.getSetFiles(Graph.sanitizeRID(ctx.request.params.rid), ctx.request.headers[AUTH_HEADER], ctx.request.query)
+    try {
+        // Get the set files with proper authentication
+		const set_rid = Graph.sanitizeRID(ctx.request.params.rid)
+        var n = await Graph.getSetFiles(set_rid, ctx.request.headers[AUTH_HEADER], ctx.request.query)
+        
+        if (!n || !n.files || n.files.length === 0) {
+            ctx.status = 404	
+            ctx.body = 'No files found in set'
+            return
+        }
 
-	var fileList = []
-	n.files.forEach(file => {
-		fileList.push(file.path)
-	})
-	//ctx.body = fileList
-	//media.zipFilesAndStream(fileList, ctx)
-	media.createZip(fileList, ctx)
-	
-	
+        var fileList = []
+        n.files.forEach(file => {
+            if (file.path) {
+                fileList.push(file.path)
+            }
+        })
+
+        if (fileList.length === 0) {
+            ctx.status = 404
+            ctx.body = 'No valid file paths found'
+            return
+        }
+
+        // Create and stream the zip file
+        await media.createZipAndStream(fileList, ctx, set_rid)
+        
+    } catch (err) {
+        console.error('Error creating zip:', err)
+        ctx.status = 500
+        ctx.body = 'Error creating zip file'
+    }
 })
 
 
