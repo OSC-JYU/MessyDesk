@@ -1,26 +1,26 @@
-const axios = require("axios")
-const path = require('path')
-const JSON5 = require('json5')
-const yaml = require('js-yaml')
-const fsPromises = require('fs/promises')
+import axios from "axios";
+import path from 'path';
+import JSON5 from 'json5';
+import yaml from 'js-yaml';
+import fsPromises from 'fs/promises';
 
-const schema = require("./schema.js")
-const web = require("./web.js")
-const media = require("./media.js")
 
-const timers = require('timers-promises')
+import web from "./web.mjs";
+import media from "./media.mjs";
 
-const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
-const DB = process.env.DB_NAME || 'messydesk'
-const PORT = process.env.DB_PORT || 2480
-const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
+import timers from 'timers-promises';
 
-const API_URL = process.env.API_URL || '/'
-const AUTH_HEADER = 'mail'
-const DEFAULT_USER = 'local.user@localhost'
+const MAX_STR_LENGTH = 2048;
+const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1';
+const DB = process.env.DB_NAME || 'messydesk';
+const PORT = process.env.DB_PORT || 2480;
+const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`;
 
-let graph = {}
+const API_URL = process.env.API_URL || '/';
+const AUTH_HEADER = 'mail';
+const DEFAULT_USER = 'local.user@localhost';
+
+const graph = {};
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
@@ -680,20 +680,22 @@ graph.createProcessSetNode = async function (process_rid, options) {
 
 }
 
-graph.createOriginalFileNode = async function (project_rid, ctx, file_type, set_rid, data_dir) {
+graph.createOriginalFileNode = async function (project_rid, file, file_type, set_rid, data_dir) {
 
-	if(!ctx.file.description) ctx.file.description = ''
-	if(!ctx.file.info) ctx.file.info = ''
-	var extension = path.extname(ctx.file.originalname).replace('.', '').toLowerCase()
+	var description = ''
+	var info = ''
+	if(file.hapi.description) description = file.hapi.description
+	if(file.hapi.info) info = file.hapi.info
+	var extension = path.extname(file.hapi.filename).replace('.', '').toLowerCase()
 	const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
 		CREATE (file:File 
 			{
 				type: "${file_type}",
 				extension: "${extension}",
-				label: "${ctx.file.originalname}",
-				original_filename: "${ctx.file.originalname}",
-				description: "${ctx.file.description}",
-				info: "${ctx.file.info}",
+				label: "${file.hapi.filename}",
+				original_filename: "${file.hapi.filename}",
+				description: "${description}",
+				info: "${info}",
 				_active: true
 			}
 		) <- [r:HAS_FILE] - (p) 
@@ -1573,4 +1575,4 @@ async function getSetFileTypes(set_rid) {
 
 
 
-module.exports = graph
+export default graph

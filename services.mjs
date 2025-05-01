@@ -1,10 +1,118 @@
-const fs 			= require('fs').promises;
-const path 			= require('path');
-const web 		= require('./web.js');
-const nomad 		= require('./nomad.js');
+import path from 'path';
+import fs from 'fs';
+
+import nomad from './nomad.mjs';
 //const queue = require('./queue.js');
 
-let services = {service_list: {}}
+const services = {service_list: {}}
+
+function pickTasks(service, extensions, filter, user, prompts, node_type) {
+	const service_object = JSON.parse(JSON.stringify(service))
+	service_object.tasks = {}
+
+	// if service has service groups, check if user has access to any of them
+	// if not, return empty object
+	if(service_object.service_groups) {
+		if(!service_object.service_groups.some(value => user.service_groups.includes(value))) {
+			return 
+		}
+	}
+
+	// LLM services have tasks defined in prompts
+	if(service_object.external_tasks) {
+		service_object.tasks = promptsToTasks(filter,prompts, node_type, extensions, service_object)
+		return service_object
+	}
+
+	for(var task in service.tasks) {
+
+		// task can be disabled/enabled by service_groups
+		if(service.tasks[task].service_groups) {
+			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+				continue
+			}
+		}
+		
+		// task can be disabled for Sets
+		if(node_type == 'Set') {
+			if(service.tasks[task].set_disabled) {
+				continue
+			}
+		}
+
+		// if task has its own supported formats then compare to file extension
+		if(service.tasks[task].supported_formats) {
+			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+			
+		// otherwise compare file extension to service's supported formats
+		} else {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+			
+		}
+		
+	}	
+	return service_object
+}
+
+function filterTask(filter, task) {
+	// When filter is provided, we return only tasks that has that filter that matches to query filter
+	if(filter) {
+		if(task.filter && task.filter == filter) {
+			return true
+		}
+		return false
+
+	// by default we filter out tasks with "filter" property
+	} else if(!task.filter) {
+		return true
+	}
+
+	return false
+}
+
+function promptsToTasks(filter, prompts, type, extensions, service) {
+	var tasks = {}
+
+	// currently there are no filtered prompts
+	if(filter) {
+		return tasks
+	}
+
+	// if type is Set, we return all tasks that have supported formats
+	if(type == 'Set') {
+		for(var prompt of prompts) {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(service.supported_types.includes(prompt.type)) {
+					tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+				}
+			}
+		}
+	} else {
+		for(var prompt of prompts) {
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(type == prompt.type) {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			}	
+		}
+	}
+
+	return tasks
+}
+
+function checkService(array, service) {
+	// check if service already exists
+	for (const obj of array) {
+		if (obj.id = service) {
+		  return true;
+		}
+	}
+}
 
 services.loadServiceAdapters = async function (service_path = 'services') {
 	const directoryPath = service_path
@@ -13,7 +121,7 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 		const servicesObject = {};
 
 		// Read the subdirectories in the specified directory
-		const subdirectories = await fs.readdir(directoryPath, { withFileTypes: true })
+		const subdirectories = await fs.promises.readdir(directoryPath, { withFileTypes: true })
 			.then(entries => entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
 
 		// Loop through each subdirectory
@@ -23,7 +131,7 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 
 			try {
 				// Read the content of the JSON file
-				const fileContent = await fs.readFile(path.join(filePath, 'service.json'), 'utf-8');
+				const fileContent = await fs.promises.readFile(path.join(filePath, 'service.json'), 'utf-8');
 
 				// Parse the JSON content
 				const jsonData = JSON.parse(fileContent);
@@ -32,7 +140,7 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 
 				// mark nomad services
 				try {
-					const nomadFile = await fs.readFile(path.join(filePath, 'nomad.hcl'), 'utf-8');
+					const nomadFile = await fs.promises.readFile(path.join(filePath, 'nomad.hcl'), 'utf-8');
 					if(nomadFile) {
 						jsonData['nomad'] = true
 						jsonData['nomad_hcl'] = nomadFile
@@ -123,119 +231,6 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 	return matches
 }
 
-
-pickTasks = function(service, extensions, filter, user, prompts, node_type) {
-
-	const service_object = JSON.parse(JSON.stringify(service))
-	service_object.tasks = {}
-
-	// if service has service groups, check if user has access to any of them
-	// if not, return empty object
-	if(service_object.service_groups) {
-		if(!service_object.service_groups.some(value => user.service_groups.includes(value))) {
-			return 
-		}
-	}
-
-	// LLM services have tasks defined in prompts
-	if(service_object.external_tasks) {
-		service_object.tasks = promptsToTasks(filter,prompts, node_type, extensions, service_object)
-		return service_object
-	}
-
-	for(var task in service.tasks) {
-
-		// task can be disabled/enabled by service_groups
-		if(service.tasks[task].service_groups) {
-			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
-				continue
-			}
-		}
-		
-		// task can be disabled for Sets
-		if(node_type == 'Set') {
-			if(service.tasks[task].set_disabled) {
-				continue
-			}
-		}
-
-		// if task has its own supported formats then compare to file extension
-		if(service.tasks[task].supported_formats) {
-			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
-			}
-			
-		// otherwise compare file extension to service's supported formats
-		} else {
-			if(service.supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
-			}
-			
-		}
-		
-	}	
-	return service_object
-}
-
-filterTask = function(filter, task) {
-	// When filter is provided, we return only tasks that has that filter that matches to query filter
-	if(filter) {
-		if(task.filter && task.filter == filter) {
-			return true
-		}
-		return false
-
-	// by default we filter out tasks with "filter" property
-	} else if(!task.filter) {
-		return true
-	}
-
-	return false
-
-}
-
-promptsToTasks = function(filter, prompts, type, extensions, service) {
-
-	var tasks = {}
-
-	// currently there are no filtered prompts
-	if(filter) {
-		return tasks
-	}
-
-	// if type is Set, we return all tasks that have supported formats
-	if(type == 'Set') {
-		for(var prompt of prompts) {
-			if(service.supported_formats.some(value => extensions.includes(value))) {
-				if(service.supported_types.includes(prompt.type)) {
-					tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-				}
-			}
-		}
-	} else {
-		for(var prompt of prompts) {
-			prompt.system_params = {prompts: {content: prompt.content}}
-			if(type == prompt.type) {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			}	
-		}
-	}
-
-	return tasks
-}
-
-checkService = function(array, service) {
-	// check if service already exists
-	for (const obj of array) {
-		if (obj.id = service) {
-		  return true;
-		}
-	}
-
-}
-
 // note: consumer here means service adapter, not NATS consumers
 services.addConsumer = async function(service, id) {
 
@@ -286,4 +281,4 @@ async function markRegisteredAdapter(services) {
 }
 
 
-module.exports = services
+export default services

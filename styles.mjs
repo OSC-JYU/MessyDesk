@@ -1,9 +1,9 @@
+import web from './web.js';
+
+const styles = {};
+
 const path = require('path')
 const fsPromises = require('fs/promises')
-const web = require("./web.js")
-
-
-let styles = {}
 
 
 // default style for every node and relationship
@@ -122,4 +122,4 @@ styles.getStyle = async function() {
 	return styles
 }
 
-module.exports = styles
+export default styles;

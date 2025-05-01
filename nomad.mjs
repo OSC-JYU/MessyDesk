@@ -1,7 +1,7 @@
-const fs 			= require('fs').promises;
-const path 			= require('path');
-const axios 		= require('axios');
-
+import axios from 'axios';
+import path from 'path';
+import fs from 'fs';
+import fse from 'fs-extra';
 
 const URL = process.env.NOMAD_URL || 'http://localhost:4646/v1'
 
@@ -89,6 +89,4 @@ nomad.getServiceURL = async function(service) {
 	return service_url
 }
 
-
-
-module.exports = nomad
+export default nomad

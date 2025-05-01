@@ -4,8 +4,8 @@ import path from 'path';
 import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
 
-import Graph from './graph.js';
-import nomad from './nomad.js';
+import Graph from './graph.mjs';
+import nomad from './nomad.mjs';
 
 import { connect, RetentionPolicy, AckPolicy } from "nats";
 

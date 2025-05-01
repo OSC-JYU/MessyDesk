@@ -1,6 +1,8 @@
-const axios = require("axios")
-const path 	= require("path")
-const fs 	= require("fs-extra")
+import axios from 'axios';
+import path from 'path';
+import fs from 'fs';
+import fse from 'fs-extra';
+import { pipeline } from 'stream';
 
 const username = process.env.DB_USER || 'root'
 const password = process.env.DB_PASSWORD
@@ -18,7 +20,7 @@ const INTERNAL_URL = process.env.INTERNAL_URL || 'http://localhost:8200'
 
 console.log(URL)
 
-let web = {}
+const web = {}
 
 web.initURL = function(url) {
 	console.log('intializing URL...')
@@ -462,4 +464,4 @@ async function convert2VueFlow(data, options) {
 }
 
 
-module.exports = web
+export default web

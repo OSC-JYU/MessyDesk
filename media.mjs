@@ -1,10 +1,13 @@
-const util			= require('util');
-const path 			= require('path');
-const stream 		= require('stream');
-const fs 			= require('fs-extra');
-const sizeOf		= require('image-size');
-const archiver 		= require('archiver');
-const os 			= require('os');
+import path from 'path';
+import fs from 'fs';
+import fse from 'fs-extra';
+
+
+import util from 'util';
+import stream from 'stream';
+import sizeOf from 'image-size';
+import archiver from 'archiver';
+import os from 'os';
 
 
 const TYPES = ['image', 'text'] 
@@ -43,14 +46,14 @@ media.ROIPercentagesToPixels = function(roi, message) {
 media.zipFilesAndStream2 = async function(fileList, ctx) {
     try {
         return await new Promise((resolve, reject) => {
-            // Create a new archive (zip) with no compression (store mode)
-            const archive = archiver('zip', {
-                zlib: { level: 0 } // 0 means no compression, just store
-            });
-
-            // Set the response headers for streaming the zip file
-            ctx.set('Content-Type', 'application/zip');
-            ctx.set('Content-Disposition', 'attachment; filename="files.zip"');
+	// Create a new archive (zip) with no compression (store mode)
+	const archive = archiver('zip', {
+	  zlib: { level: 0 } // 0 means no compression, just store
+	});
+  
+	// Set the response headers for streaming the zip file
+	ctx.set('Content-Type', 'application/zip');
+	ctx.set('Content-Disposition', 'attachment; filename="files.zip"');
 
             // Handle archive errors
             archive.on('error', (err) => {
@@ -69,31 +72,31 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
                 console.log('Archive finalized, response stream closed');
                 resolve();
             });
-
-            // Pipe the archive output to the response stream
-            archive.pipe(ctx.res);
-
-            // Add files to the archive
-            fileList.forEach(filePath => {
-                const fullPath = path.resolve(filePath);
-                if (fs.existsSync(fullPath)) {
-                    // Add each file to the zip as a file entry
-                    archive.file(fullPath, { name: path.basename(filePath) });
-                } else {
-                    console.error(`File not found: ${fullPath}`);
-                }
-            });
+  
+	// Pipe the archive output to the response stream
+	archive.pipe(ctx.res);
+  
+	// Add files to the archive
+	fileList.forEach(filePath => {
+	  const fullPath = path.resolve(filePath);
+	  if (fse.existsSync(fullPath)) {
+		// Add each file to the zip as a file entry
+		archive.file(fullPath, { name: path.basename(filePath) });
+	  } else {
+		console.error(`File not found: ${fullPath}`);
+	  }
+	});
 
             // Finalize the archive
-            archive.finalize();
+	archive.finalize();
         });
     } catch (err) {
         console.error('Error in zipFilesAndStream2:', err);
-        ctx.status = 500;
+		ctx.status = 500;
         ctx.body = 'Error creating zip file';
         throw err;
     }
-}
+  }
 
   media.createZip = function(files, ctx) {
 	const archive = archiver('zip', { zlib: { level: 9 } });
@@ -111,7 +114,7 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 	  const filePath = path.resolve(file);
 	  const fileName = path.basename(file);
   
-	  if (fs.existsSync(filePath)) {
+	  if (fse.existsSync(filePath)) {
 		archive.file(filePath, { name: fileName });
 	  } else {
 		console.error(`File not found: ${filePath}`);
@@ -126,7 +129,7 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 	try {
 		var p = path.dirname(dir)
 		if(p == 'data/projects' || p == 'data/projects/') throw('Protecting projects dir!')
-		await fs.remove(p)
+		await fse.remove(p)
 	} catch(e) {
 		console.log('error deleting node data directory. ' + e)
 		//throw('Could not delete directory!' + e.message)
@@ -136,10 +139,10 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 
 media.createDataDir = async function(data_dir) {
 	try {
-		//await fs.ensureDir(data_dir)
-		await fs.ensureDir(path.join(data_dir, 'projects'))
-		await fs.ensureDir(path.join(data_dir, 'uploads'))
-		await fs.ensureDir(path.join(data_dir, 'layouts'))
+		//await fse.ensureDir(data_dir)
+		await fse.ensureDir(path.join(data_dir, 'projects'))
+		await fse.ensureDir(path.join(data_dir, 'uploads'))
+		await fse.ensureDir(path.join(data_dir, 'layouts'))
 	} catch(e) {
 		throw('Could not create data directory!' + e.message)
 	}
@@ -148,7 +151,7 @@ media.createDataDir = async function(data_dir) {
 media.createProjectDir = async function(project, data_dir) {
 	const rid = this.rid2path(project['@rid'])
 	try {
-		await fs.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
+		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -156,7 +159,7 @@ media.createProjectDir = async function(project, data_dir) {
 
 media.createProcessDir = async function(process_path) {
 	try {
-		await fs.ensureDir(process_path)
+		await fse.ensureDir(process_path)
 	} catch(e) {
 		throw('Could not create process directory!' + e.message)
 	}
@@ -165,17 +168,18 @@ media.createProcessDir = async function(process_path) {
 media.uploadFile = async function(uploadpath, filegraph) {
 
 	console.log(filegraph)
+	console.log(uploadpath)
 	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
 	var filedata = null
 	try {
-		await fs.ensureDir(path.join(filepath, 'process'))
+		await fse.ensureDir(path.join(filepath, 'process'))
 	
 		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
-			await fs.rename(uploadpath, filegraph.path);
+			await fse.rename(uploadpath, filegraph.path);
 			filedata = await this.getImageSize(filegraph.path)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
@@ -189,7 +193,7 @@ media.uploadFile = async function(uploadpath, filegraph) {
 
 	} catch (e) {
 		console.log(e.message)
-		await fs.unlink(uploadpath)
+		await fse.unlink(uploadpath)
 		throw('file saving failed')
 	}
 }
@@ -227,18 +231,18 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	console.log(filename)
 	const filedata = {}
 	try {
-		await fs.ensureDir(path.join(basepath))
+		await fse.ensureDir(path.join(basepath))
 		const filepath = path.join(basepath, filename)
 		console.log(uploadpath)
 		console.log(filepath)
 
-		await fs.rename(uploadpath, filepath);
+		await fse.rename(uploadpath, filepath);
 		console.log('File moved successfully!')
 
 		return filedata
 
 	} catch (e) {
-		await fs.unlink(uploadpath)
+		await fse.unlink(uploadpath)
 		console.log(e.message)
 		throw('thumbnail saving failed')
 	}
@@ -247,7 +251,7 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 media.readJSON =  async function(fpath) {
 
 	try {
-		const jsonData = await fs.promises.readFile(fpath, 'utf8');
+		const jsonData = await fse.readFile(fpath, 'utf8');
 		return jsonData
 	  } catch (error) {
 		console.error('Error reading data from json:', error);
@@ -259,7 +263,7 @@ media.writeJSON =  async function(data, filename, fpath) {
 
 	try {
 		const jsonData = JSON.stringify(data, null, 2);
-		await fs.promises.writeFile(path.join(fpath, filename), jsonData);
+		await fse.writeFile(path.join(fpath, filename), jsonData);
 		console.log('Data successfully written to params.json!');
 	  } catch (error) {
 		console.error('Error writing data to params.json:', error);
@@ -267,17 +271,18 @@ media.writeJSON =  async function(data, filename, fpath) {
 
 }
 
-media.detectType = async function(ctx) {
+media.detectType = async function(file) {
+	const originalFilename = file.hapi.filename;
+	const mimeType = file.hapi.headers['content-type'];
+    var extension = path.extname(originalFilename)
 
-    var extension = path.extname(ctx.file.originalname)
-
-    var ftype = ctx.file.mimetype.split('/')[0]
+    var ftype = mimeType.split('/')[0]
     console.log(ftype)
     if(TYPES.includes(ftype)) {
         return ftype
-    } else if(ctx.file.mimetype == 'application/pdf') {
+    } else if(mimeType == 'application/pdf') {
         return 'pdf'
-    } else if(ctx.file.mimetype == 'application/octet-stream') {
+    } else if(mimeType == 'application/octet-stream') {
         if(extension == '.csv') {
             return 'data'
         }
@@ -504,7 +509,7 @@ Set ID: ${set_rid}`;
         console.error('Error in createZipAndStream:', err);
         ctx.status = 500;
         ctx.body = 'Error creating zip file';
-    }
+	}
 }
 
-module.exports = media
+export default media

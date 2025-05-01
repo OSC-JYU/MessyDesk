@@ -1,11 +1,10 @@
+import web from './web.js';
+
 const axios = require("axios")
 const path = require('path')
 const JSON5 = require('json5')
 const yaml = require('js-yaml')
 const fsPromises = require('fs/promises')
-
-const web = require("./web.js")
-
 
 let schema = {}
 
@@ -158,4 +157,4 @@ async function writeSchemaToDB(schema) {
 	}
 }
 
-module.exports = schema
+export default schema
