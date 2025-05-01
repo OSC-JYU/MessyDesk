@@ -222,7 +222,7 @@ graph.createUser = async function (data) {
 	var response = await web.cypher(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
-	data['service_groups'] = []
+	//data['service_groups'] = []
 	var user = await this.create('User', data, true)
 	await this.initUserData(user)
 
@@ -972,6 +972,7 @@ graph.create = async function (type, data, admin) {
 		if(!admin) throw ('You are not admin!')
 		if (!data['group']) data_str_arr.push(`group: "user"`) // default user group for all persons
 		if (!data['access']) data_str_arr.push(`access: "user"`) // default access for all persons
+		if (!data['service_groups']) data_str_arr.push(`service_groups: ["OSC"]`) // default service groups for all persons
 	}
 	// _active
 	if (!data['active']) data_str_arr.push(`active: true`)

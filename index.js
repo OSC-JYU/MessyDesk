@@ -987,6 +987,11 @@ router.post('/api/nomad/process/files', upload.fields([
 				// for text nodes we create a description from the content of the file
 				if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
 					info = await media.getTextDescription(contentFilepath, message.file.type)
+
+					// EXPERIMENTAL: auto-tagger
+					if(message.file.type == 'ner.json') {
+						//const auto_tagger_msg = await Graph.autoTagger(contentFilepath, message)
+					}
 				}
 
 				const process_rid = message.process['@rid']	
