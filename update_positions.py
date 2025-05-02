@@ -40,7 +40,7 @@ def update_positions(layouts_dir='data/layouts'):
                 
                 if x is not None and y is not None:
                     # Generate SQL statement
-                    sql = f"UPDATE Project SET x={x}, y={y} WHERE @rid = '{rid}'"
+                    sql = f"UPDATE Project SET position = {{x:{x}, y:{y}}} WHERE @rid = '{rid}'"
                     sql_statements.append(sql)
                     
         except json.JSONDecodeError as e:

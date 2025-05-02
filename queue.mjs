@@ -16,10 +16,10 @@ const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
 
 
-export let queue = {}
+const nats = {}
 
 
-queue.init = async function(services) {
+nats.init = async function(services) {
   console.log('NATS: connecting...', NATS_URL)
   this.nc = await connect({
     servers: [NATS_URL],
@@ -78,25 +78,25 @@ queue.init = async function(services) {
   }
 }
 
-queue.connect = async function() {
+nats.connect = async function() {
   this.nc = await connect({
     servers: [servers],
   });
   this.js = this.nc.jetstream();
 }
 
-queue.close = async function() {
+nats.close = async function() {
   await this.nc.close()
 }
 
-queue.checkService = async function(data) {
+nats.checkService = async function(data) {
   // get service url from nomad
   const service = await nomad.getServiceURL(data)
   return service
 }
 
 
-queue.publish = async function(topic, data) {
+nats.publish = async function(topic, data) {
   console.log(topic)
   //var service = await services.getServiceAdapterByName(topic)
   try {
@@ -114,7 +114,7 @@ queue.publish = async function(topic, data) {
 }
 
 
-queue.listConsumers = async function() {
+nats.listConsumers = async function() {
   var consumers = []
   var lister = await this.jsm.consumers.list("PROCESS")
   for await (const item of lister) {
@@ -124,7 +124,7 @@ queue.listConsumers = async function() {
 }
 
 
-queue.getFilesFromStore = async function(response, message, service) {
+nats.getFilesFromStore = async function(response, message, service) {
 
   if(response.uri) {
  
@@ -146,7 +146,7 @@ queue.getFilesFromStore = async function(response, message, service) {
 
 
 
-queue.downLoadFile = async function(message, uri, service) {
+nats.downLoadFile = async function(message, uri, service) {
   // get file type from extension
   var ext = path.extname(uri).replace('.', '')
   var filename = uri.split('/').pop()
@@ -204,7 +204,7 @@ queue.downLoadFile = async function(message, uri, service) {
   }
 }
 
-queue.getQueueStatus = async function(topic) {
+nats.getQueueStatus = async function(topic) {
   try {
     const url = NATS_URL_STATUS + '/jsz?consumers=true'
     const queues = {}
@@ -224,3 +224,6 @@ queue.getQueueStatus = async function(topic) {
     console.log('Queue status failed!')
   }
 }
+
+
+export default nats

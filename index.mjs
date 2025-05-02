@@ -10,6 +10,7 @@ import { pipeline } from 'stream';
 import Boom from '@hapi/boom';
 import Susie from 'susie';
 
+import nats from './queue.mjs';
 import Graph from './graph.mjs';
 import media from './media.mjs';
 import services from './services.mjs';
@@ -18,8 +19,7 @@ import nomad from './nomad.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let nats;
-let positions;
+
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
@@ -31,11 +31,6 @@ const sseClients = new Map();
 // Initialize the server
 const init = async () => {
 	console.log('initing...');
-	// migration to ES6 in progress...
-	const { queue } = await import('./queue.mjs');
-	const { layout } = await import('./layouts.mjs');
-	nats = queue;
-	positions = layout;
 	await media.createDataDir(DATA_DIR);
 	await nomad.getStatus();
 	await services.loadServiceAdapters();
@@ -421,10 +416,28 @@ const init = async () => {
 			}
 		},
 		{
+			method: 'GET',
+			path: '/api/documents/{rid}',
+			handler: async (request, h) => {
+				console.log(request.auth.credentials.user)
+				const clean_rid = Graph.sanitizeRID(request.params.rid);
+				const n = await Graph.getNodeAttributes(clean_rid);
+				const entities = await Graph.getLinkedEntities(clean_rid, request.auth.credentials.user.rid);
+				const rois = await Graph.getROIs(clean_rid);
+
+				if (n.result && n.result.length) {
+					n.result[0].rois = rois;
+					n.result[0].entities = entities;
+					return n.result[0];
+				} else {
+					return h.response({}).code(404);
+				}
+			}
+		},
+		{
 			method: 'GET', 
 			path: '/api/thumbnails/{param*}',
 			handler: async (request, h) => {
-				return 'test'
 				const src = await media.getThumbnail(request.params.param);
 				const response = h.response(src);
 				response.type('image/jpeg');
@@ -681,10 +694,10 @@ const init = async () => {
 					h.event({ id: 2, data: { a: 1 } }); // object datum
 				}, 500);
 		 
-				const interval = setInterval(() => {
-					const data = JSON.stringify({ time: new Date().toISOString() });
-					h.event({data: data});
-				  }, 2000);
+				// const interval = setInterval(() => {
+				// 	const data = JSON.stringify({ time: new Date().toISOString() });
+				// 	h.event({data: data});
+				//   }, 2000);
 
 				return respons;
 				

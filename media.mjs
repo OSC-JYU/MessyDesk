@@ -296,7 +296,7 @@ media.rid2path = function (rid) {
 
 media.getText = async function (filePath) {
 	try {
-		const data = await fs.promises.readFile(filePath, 'utf8');
+		const data = await fse.readFile(filePath, 'utf8');
 		return data
 	  } catch (error) {
 		console.error('Error reading file:', error);
@@ -307,7 +307,7 @@ media.getText = async function (filePath) {
 media.getTextDescription = async function (filePath, file_type) {
 	const maxCharacters = 150;
 	try {
-		const data = await fs.promises.readFile(filePath, 'utf8');
+		const data = await fse.readFile(filePath, 'utf8');
 		// get number of characters	
 		const linecount = data.split(/\n/).length
 
@@ -334,6 +334,7 @@ media.getTextDescription = async function (filePath, file_type) {
 
 
 media.getThumbnail = async function(filePath) {
+	console.log(filePath)
 	try {
 		var thumbfile = 'preview.jpg'
 		var base = path.dirname(filePath)
@@ -348,15 +349,16 @@ media.getThumbnail = async function(filePath) {
 		}
 
 		let fullPath = path.join(base.replace('/api/thumbnails/', './'), thumbfile)
+		console.log(fullPath)
 
         // Check if the file exists asynchronously
-        var fileExists = await fs.pathExists(fullPath)
+        var fileExists = await fse.pathExists(fullPath)
         if (!fileExists) {
 			// for pdf there are no smaller thumbnails currently
 			if(f == 'thumbnail.jpg') {
 				thumbfile = 'preview.jpg'
 				fullPath = path.join(base.replace('/api/thumbnails/', './'), 'preview.jpg')
-				var fileExists = await fs.pathExists(fullPath)
+				var fileExists = await fse.pathExists(fullPath)
 			}
 			if (!fileExists) {
 				fullPath = path.join('images/image_not_found.jpg')
@@ -420,7 +422,7 @@ function JSON2text(data) {
 async function checkFileExists(filePath) {
 	try {
 		console.log(filePath)
-	  	await fs.access(filePath);
+	  	await fse.access(filePath);
 	  	return true;
 	} catch (err) {
 		return false;
@@ -470,7 +472,7 @@ Set ID: ${set_rid}`;
         let filesAdded = false;
         for (const filePath of fileList) {
             const fullPath = path.resolve(filePath);
-            if (await fs.pathExists(fullPath)) {
+            if (await fse.pathExists(fullPath)) {
                 archive.file(fullPath, { name: path.basename(filePath) });
                 filesAdded = true;
             } else {
@@ -500,7 +502,7 @@ Set ID: ${set_rid}`;
         
         // Clean up the temporary file after sending
         ctx.res.on('finish', () => {
-            fs.unlink(tempZipPath, (err) => {
+            fse.unlink(tempZipPath, (err) => {
                 if (err) console.error('Error deleting temporary zip file:', err);
             });
         });
