@@ -179,7 +179,7 @@ media.uploadFile = async function(uploadpath, filegraph) {
 		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
-			await fse.rename(uploadpath, filegraph.path);
+			await fse.move(uploadpath, filegraph.path);
 			filedata = await this.getImageSize(filegraph.path)
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
@@ -236,7 +236,7 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 		console.log(uploadpath)
 		console.log(filepath)
 
-		await fse.rename(uploadpath, filepath);
+		await fse.move(uploadpath, filepath);
 		console.log('File moved successfully!')
 
 		return filedata

@@ -491,8 +491,7 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 
 // Some services have long processing time (especially PDF services), so we need to add those to batch queue
 // These services have 'batch' property in service.json
-graph.getQueueName = function(service, request, topic) {
-	var data = request.body
+graph.getQueueName = function(service, data, topic) {
 	if(service.tasks[data.task] && service.tasks[data.task].always_batch) {
 		return topic + '_batch'
 	}
