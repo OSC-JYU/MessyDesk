@@ -1,7 +1,6 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import nats from '../queue.mjs';
-import { send2UI } from '../index.mjs';
 
 export default [
     {

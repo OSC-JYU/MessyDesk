@@ -234,14 +234,4 @@ init().catch((err) => {
 	process.exit(1);
 });
 
-// Replace the send2UI function
-async function send2UI(userId, data) {
-	const client = sseClients.get(userId);
-	if (client) {
-		client.send(data);
-	} else {
-		console.log('SSE client not found!', userId);
-	}
-}
 
-export { send2UI };

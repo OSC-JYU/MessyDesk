@@ -5,7 +5,7 @@ import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import web from '../web.mjs';
 import nats from '../queue.mjs';
-import { send2UI } from '../index.mjs';
+import userManager from '../userManager.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
@@ -47,7 +47,7 @@ export async function processFilesHandler(request, h) {
                     };
                     // direct link to thumbnail
                     wsdata.image = API_URL + 'api/thumbnails/' + base_path;
-                    await send2UI(message.userId, wsdata);
+                    userManager.sendToUser(message.userId, wsdata);
                 }
             } catch (e) {
                 throw('Could not move file!' + e);
@@ -81,7 +81,7 @@ export async function processFilesHandler(request, h) {
                             count: info_json.count,
                             description: info_json.size + ' MB'
                         };
-                        send2UI(message.userId, wsdata);
+                        userManager.sendToUser(message.userId, wsdata);
                     }
                 } catch (e) {
                     console.log('file metadata failed!', e.message);
@@ -172,7 +172,7 @@ export async function processFilesHandler(request, h) {
                             node: fileNode
                         };
                     }
-                    send2UI(message.userId, wsdata);
+                    userManager.sendToUser(message.userId, wsdata);
                 }
 
                 // finally check if there is pipeline in message
@@ -199,7 +199,7 @@ export async function processFilesHandler(request, h) {
                                     node: msg.process,
                                     image: API_URL + 'icons/wait.gif'
                                 };
-                                send2UI(request.headers.mail, wsdata);
+                                userManager.sendToUser(request.headers.mail, wsdata);
                                 nats.publish(request.params.topic, JSON.stringify(msg));
                             }
                         }

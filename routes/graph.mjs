@@ -1,7 +1,6 @@
 import Graph from '../graph.mjs';
 import nats from '../queue.mjs';
-import { send2UI } from '../index.mjs';
-
+import userManager from '../userManager.mjs';
 export default [
     {
         method: 'GET',
@@ -51,6 +50,16 @@ export default [
     },
     {
         method: 'POST',
+        path: '/api/graph/vertices/{rid}/rois',
+        handler: async (request) => {
+            const n = await Graph.createROIs(Graph.sanitizeRID(request.params.rid), request.payload)
+            const wsdata = {command: 'update', type: 'image', target: '#'+request.params.rid, roi_count: n}
+            await userManager.sendToUser(request.auth.credentials.user.id, wsdata)
+            return n
+        }
+    },
+    {
+        method: 'POST',
         path: '/api/graph/vertices/{rid}',
         handler: async (request) => {
             const clean_rid = Graph.sanitizeRID(request.params.rid);
@@ -62,7 +71,7 @@ export default [
                     target: clean_rid,
                     description: request.payload.value
                 };
-                await send2UI(request.auth.credentials.user.id, wsdata);
+                await userManager.sendToUser(request.auth.credentials.user.id, wsdata);
             }
             
             return result;

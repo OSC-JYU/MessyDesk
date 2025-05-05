@@ -4,7 +4,7 @@ import fs from 'fs';
 import fse from 'fs-extra';
 import path from 'path';
 import nats from '../queue.mjs';
-import { send2UI } from '../index.mjs';
+import userManager from '../userManager.mjs';
 
 export default [
     {
@@ -152,7 +152,7 @@ export default [
                                 node: filegraph,
                                 set: request.params.set
                             };
-                            send2UI(request.auth.credentials.user.id, wsdata);
+                            userManager.sendToUser(request.auth.credentials.user.id, wsdata);
                         }
                         resolve(filegraph);
                     });

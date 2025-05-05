@@ -2,11 +2,7 @@
 import Graph from '../graph.mjs';
 import services from '../services.mjs';
 import nats from '../queue.mjs';
-import media from '../media.mjs';
-import { send2UI } from '../index.mjs';
-import path from 'path';
-
-
+import userManager from '../userManager.mjs';
 
 
 export default [
@@ -25,8 +21,12 @@ export default [
                 var service = services.getServiceAdapterByName(request.params.topic);
                 messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.headers.mail);
                 for(var msg of messages) {
-                    var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:process.env.API_URL + 'icons/wait.gif'};
-                    send2UI(request.headers.mail, wsdata);
+                    userManager.sendToUser(request.headers.mail, {
+                        command: 'add', 
+                        type: 'process', 
+                        target: msg.file['@rid'], 
+                        node:msg.process, 
+                        image:process.env.API_URL + 'icons/wait.gif'});
                     nats.publish(request.params.topic, JSON.stringify(msg));
                 }
             }
@@ -67,7 +67,7 @@ export default [
                     if(msg.set_node) {
                         wsdata.set_node = msg.set_node;
                     }
-                    send2UI(request.headers.mail, wsdata);
+                    userManager.sendToUser(request.headers.mail, wsdata);
                 }
 
                 for(var msg of messages) {    

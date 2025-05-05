@@ -7,7 +7,7 @@ import media from '../media.mjs';
 import web from '../web.mjs';
 import fse from 'fs-extra';
 import { processFilesHandler } from '../controllers/processFilesController.mjs';
-
+import userManager from '../userManager.mjs';
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
 
@@ -102,7 +102,7 @@ export default [
                         await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'});
                         console.log('ERROR');
                         console.log(message);
-                        await send2UI(message.userId, wsdata);
+                        await userManager.sendToUser(message.userId, wsdata);
 
                         const index_msg = [{
                             type: 'error',
