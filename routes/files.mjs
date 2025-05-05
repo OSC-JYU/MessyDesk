@@ -44,17 +44,16 @@ export default [
                 if (!file_type) {
                     throw Boom.badRequest('Could not determine file type');
                 }
-
                 // For text files, get additional info
-                if (file_type === 'text') {
-                    try {
-                        file.info = await media.getTextDescription(file.path);
-                    } catch (error) {
-                        console.log('Error getting text description:', error);
-                        // Continue without text description
-                        file.info = null;
-                    }
-                }
+                // if (file_type === 'text') {
+                //     try {
+                //         file.info = await media.getTextDescription(file.path);
+                //     } catch (error) {
+                //         console.log('Error getting text description:', error);
+                //         // Continue without text description
+                //         file.info = null;
+                //     }
+                // }
 
                 // Create file node in graph
                 const filegraph = await Graph.createOriginalFileNode(
@@ -72,70 +71,95 @@ export default [
 
                 const filesave = fs.createWriteStream(filegraph.path);
 
-                filesave.on('error', (err) => console.error(err));
+                // Create a promise to handle the file upload completion
+                const uploadPromise = new Promise((resolve, reject) => {
+                    // Set up error handler before piping
+                    filesave.on('error', (err) => {
+                        console.error('File write error:', err);
+                        reject(err);
+                    });
 
-                file.pipe(filesave);
+                    file.pipe(filesave);
+                    
+                    filesave.on('finish', async () => {
+                        console.log('file uploaded');
+                        
+                        // Process text file description if needed
+                        if (file_type === 'text') {
+                            try {
+                                const info = await media.getTextDescription(filegraph.path);
+                                await Graph.setNodeAttribute(filegraph['@rid'], {
+                                    key: 'info',
+                                    value: info
+                                });
+                            } catch (error) {
+                                console.log('Error getting text description:', error);
+                            }
+                        }
 
-                filesave.on('end', (err) => {
-                    // Update metadata if available
-                    if (file_info) {
-                        Graph.setNodeAttribute(filegraph['@rid'], {
-                            key: 'metadata',
-                            value: file_info
-                        });
-                    }
+                        // Update metadata if available
+                        if (file.info) {
+                            await Graph.setNodeAttribute(filegraph['@rid'], {
+                                key: 'metadata',
+                                value: file.info
+                            });
+                        }
 
-                    // Handle different file types
-                    if (file_type === 'text') {
-                        const index_msg = {
-                            id: 'solr',
-                            task: 'index',
-                            file: filegraph,
-                            userId: request.auth.credentials.user.id,
-                            target: filegraph['@rid']
-                        };
-                        nats.publish(index_msg.id, JSON.stringify(index_msg));
-                    } else if (file_type === 'image') {
-                        const data = {
-                            file: filegraph,
-                            userId: request.headers[AUTH_HEADER],
-                            target: filegraph['@rid'],
-                            task: 'thumbnail',
-                            params: { width: 800, type: 'jpeg' },
-                            id: 'md-thumbnailer'
-                        };
-                        nats.publish('md-thumbnailer', JSON.stringify(data));
-                    } else if (file_type === 'pdf') {
-                        const data = {
-                            file: filegraph,
-                            userId: request.headers[AUTH_HEADER],
-                            target: filegraph['@rid'],
-                            task: 'pdf2images',
-                            params: {
-                                firstPageToConvert: '1',
-                                lastPageToConvert: '1',
-                                resolutionXYAxis: '80',
-                                task: 'pdf2images'
-                            },
-                            role: 'thumbnail',
-                            id: 'md-poppler'
-                        };
-                        nats.publish('md-poppler', JSON.stringify(data));
-                    }
+                        // send message to thumbnailer or indexer depending on file type
+                        if (file_type === 'text') {
+                            const index_msg = {
+                                id: 'solr',
+                                task: 'index',
+                                file: filegraph,
+                                userId: request.auth.credentials.user.id,
+                                target: filegraph['@rid']
+                            };
+                            nats.publish(index_msg.id, JSON.stringify(index_msg));
+                        } else if (file_type === 'image') {
+                            const data = {
+                                file: filegraph,
+                                userId: request.auth.credentials.user.id,
+                                target: filegraph['@rid'],
+                                task: 'thumbnail',
+                                params: { width: 800, type: 'jpeg' },
+                                id: 'md-thumbnailer'
+                            };
+                            console.log(data)
+                            nats.publish(data.id, JSON.stringify(data));
+                        } else if (file_type === 'pdf') {
+                            const data = {
+                                file: filegraph,
+                                userId: request.auth.credentials.user.id,
+                                target: filegraph['@rid'],
+                                task: 'pdf2images',
+                                params: {
+                                    firstPageToConvert: '1',
+                                    lastPageToConvert: '1',
+                                    resolutionXYAxis: '80',
+                                    task: 'pdf2images'
+                                },
+                                role: 'thumbnail',
+                                id: 'md-poppler'
+                            };
+                            nats.publish(data.id, JSON.stringify(data));
+                        }
 
-                    // Notify UI if user is authenticated
-                    if (request.headers[AUTH_HEADER]) {
-                        const wsdata = {
-                            command: 'add',
-                            type: file_type,
-                            node: filegraph,
-                            set: request.params.set
-                        };
-                        send2UI(request.headers[AUTH_HEADER], wsdata);
-                    }
+                        // Notify UI if user is authenticated
+                        if (request.auth.credentials.user.id) {
+                            const wsdata = {
+                                command: 'add',
+                                type: file_type,
+                                node: filegraph,
+                                set: request.params.set
+                            };
+                            send2UI(request.auth.credentials.user.id, wsdata);
+                        }
+                        resolve(filegraph);
+                    });
                 });
 
-                return filegraph;
+                // Wait for the upload to complete before returning
+                return await uploadPromise;
 
             } catch (error) {
                 console.error('File upload error:', error);

@@ -8,11 +8,10 @@ export default [
         method: 'POST',
         path: '/api/projects',
         handler: async (request) => {
-            const me = await Graph.myId(request.headers.mail);
             if (!request.payload.label) {
                 throw new Error('label required');
             }
-            const project = await Graph.createProject(request.payload, me.rid);
+            const project = await Graph.createProject(request.payload, request.auth.credentials.user.rid);
             await media.createProjectDir(project, process.env.DATA_DIR || 'data');
             return project;
         }
@@ -21,7 +20,7 @@ export default [
         method: 'GET',
         path: '/api/projects',
         handler: async (request) => {
-            return await Graph.getProjects(request.headers.mail, process.env.DATA_DIR || 'data');
+            return await Graph.getProjects(request.auth.credentials.user.rid, process.env.DATA_DIR || 'data');
         }
     },
     {
@@ -30,7 +29,7 @@ export default [
         handler: async (request) => {
             return await Graph.getProject_backup(
                 Graph.sanitizeRID(request.params.rid),
-                request.headers.mail
+                request.auth.credentials.user.rid
             );
         }
     },
@@ -40,7 +39,7 @@ export default [
         handler: async (request) => {
             return await Graph.deleteProject(
                 Graph.sanitizeRID(request.params.rid),
-                request.headers.mail,
+                request.auth.credentials.user.rid,
                 nats
             );
         }
@@ -51,9 +50,22 @@ export default [
         handler: async (request) => {
             const result = await Graph.getProjectFiles(
                 Graph.sanitizeRID(request.params.rid),
-                request.headers.mail
+                request.auth.credentials.user.rid
             );
             return result.result;
         }
+    },
+    {
+        method: 'POST',
+        path: '/api/projects/{rid}/sets',
+        handler: async (request) => {
+            const result = await Graph.createSet(
+                Graph.sanitizeRID(request.params.rid),
+                request.payload,
+                request.auth.credentials.user.rid
+            );
+            return result;
+        }
     }
 ]; 
+

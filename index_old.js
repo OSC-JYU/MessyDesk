@@ -942,7 +942,7 @@ router.post('/api/nomad/process/files', upload.fields([
 					await send2UI(message.userId, wsdata)
 				}
 			} catch(e) {
-				throw('Could not move file!' + e.message)
+				throw('Could not move file!' + e)
 			}
 
 		} else if(infoFilepath && contentFilepath) {

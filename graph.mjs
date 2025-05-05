@@ -97,12 +97,13 @@ graph.createProject = async function (data, me_rid) {
 
 }
 
-graph.deleteProject = async function (project_rid, me_rid, nats) {
-	const query = `MATCH {type:User, as:user, where:(id = '${me_rid}')}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
+graph.deleteProject = async function (project_rid, user_rid, nats) {
+	const query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
 	var response = await web.sql(query)
 	if(response.result.length == 1) {
 		await this.deleteNode(response.result[0]['rid'], nats)
 	}
+	return response.result[0]['rid']
 }
 
 graph.createSet = async function (project_rid, data, me_rid) {
@@ -308,10 +309,10 @@ graph.getProject = async function (rid, me_email) {
 }
 
 
-graph.getProject_backup = async function (rid, me_email) {
+graph.getProject_backup = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `match {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->
+	const query = `match {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 10)} return node`
 
@@ -322,14 +323,14 @@ graph.getProject_backup = async function (rid, me_email) {
 	}
 	
 	var result = await web.sql2(query, options)
-	result = await getSetThumbnails(me_email, result, rid)
+	result = await getSetThumbnails(user_rid, result, rid)
 	return result
 }
 
 
 
-graph.getProjects = async function (me_email, data_dir) {
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE p.id = "${me_email}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
+graph.getProjects = async function (user_rid, data_dir) {
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await web.cypher(query)
 	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
@@ -353,14 +354,14 @@ graph.getProjects = async function (me_email, data_dir) {
 		return 0;
 	});
 
-	data = await getProjectThumbnails(me_email, data, data_dir)
+	data = await getProjectThumbnails(user_rid, data, data_dir)
 	return data
 }
 
 
-async function getProjectThumbnails(me_email, data, data_dir) {
+async function getProjectThumbnails(user_rid, data, data_dir) {
 
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE p.id = "${me_email}" 
+	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
 	var response = await web.cypher(query)
 
@@ -380,11 +381,11 @@ async function getProjectThumbnails(me_email, data, data_dir) {
 	return data
 }
 
-async function getSetThumbnails(me_email, data, project_rid, data_dir) {
+async function getSetThumbnails(user_rid, data, project_rid) {
 
 	// order image by file label so that result set would show same images as source set
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[*0..10]->(set:Set)-->(file:File) 
-		WHERE p.id = "${me_email}" AND id(pr) = "${project_rid}" AND file.type = "image"
+		WHERE id(p) = "${user_rid}" AND id(pr) = "${project_rid}" AND file.type = "image"
 		WITH file, set ORDER BY file.label
 	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
 	var response = await web.cypher(query)
@@ -964,10 +965,20 @@ graph.create = async function (type, data, admin) {
 				if (data[key] == '[TIMESTAMP]') data_str_arr.push(`${key}: date()`)
 				else data_str_arr.push(`${key}:"${data[key].replace(/"/g, '\\"')}"`)
 			} else {
-				data_str_arr.push(`${key}:${data[key]}`)
+				console.log(key, data[key])
+				// check that xy values are integers
+				if (key == 'position') {
+					if (typeof data[key].x == 'number' && typeof data[key].y == 'number') {
+						data_str_arr.push(`${key}: {x: ${data[key].x}, y: ${data[key].y}}`)
+					} else {
+						throw ('Position must be an object with x and y values!')
+					}
+				} else data_str_arr.push(`${key}:${data[key]}`)
 			}
 		}
 	}
+
+	
 	// set some system attributes to all Users
 	if (type === 'User') {
 		if(!admin) throw ('You are not admin!')
@@ -979,6 +990,7 @@ graph.create = async function (type, data, admin) {
 	if (!data['active']) data_str_arr.push(`active: true`)
 
 	var query = `CREATE (n:${type} {${data_str_arr.join(',')}}) return n`
+
 	
 	const response = await web.cypher(query)
 	return response.result[0]
