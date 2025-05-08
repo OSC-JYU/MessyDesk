@@ -336,6 +336,10 @@ media.getTextDescription = async function (filePath, file_type) {
 media.getThumbnail = async function(filePath) {
 	console.log(filePath)
 	try {
+		if(!filePath) {
+			return fs.createReadStream('images/image_not_found.jpg')
+		}
+		
 		var thumbfile = 'preview.jpg'
 		var base = path.dirname(filePath)
 		// get filename from path	

@@ -159,7 +159,9 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 		}
 
 		this.service_list = await markRegisteredAdapter(servicesObject)
+		// add some default consumers (not vis)
 		this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
+		this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
 		return this.service_list
 
 	} catch (error) {

@@ -84,6 +84,18 @@ export default [
                     filesave.on('finish', async () => {
                         console.log('file uploaded');
                         
+                        // Get file size and store it
+                        const stats = await fs.promises.stat(filegraph.path);
+                        filegraph.metadata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100    // rounded to MB with 2 decimal places
+                        try {
+                            await Graph.setNodeAttribute(filegraph['@rid'], {
+                                key: 'metadata.size',
+                                value: filegraph.metadata.size
+                            }, 'File');
+                        } catch (error) {
+                            console.log('Error setting node attribute:', error);
+                        }
+                        
                         // Process text file description if needed
                         if (file_type === 'text') {
                             try {
@@ -91,21 +103,22 @@ export default [
                                 await Graph.setNodeAttribute(filegraph['@rid'], {
                                     key: 'info',
                                     value: info
-                                });
+                                }, 'File');
                             } catch (error) {
                                 console.log('Error getting text description:', error);
                             }
                         }
 
                         // Update metadata if available
-                        if (file.info) {
-                            await Graph.setNodeAttribute(filegraph['@rid'], {
-                                key: 'metadata',
-                                value: file.info
-                            });
-                        }
+                        // if (file.info) {
+                        //     await Graph.setNodeAttribute(filegraph['@rid'], {
+                        //         key: 'info',
+                        //         value: file.info
+                        //     }, 'File');
+                        // }
 
                         // send message to thumbnailer or indexer depending on file type
+                        // TEXT
                         if (file_type === 'text') {
                             const index_msg = {
                                 id: 'solr',
@@ -115,6 +128,8 @@ export default [
                                 target: filegraph['@rid']
                             };
                             nats.publish(index_msg.id, JSON.stringify(index_msg));
+
+                        // IMAGE    
                         } else if (file_type === 'image') {
                             const data = {
                                 file: filegraph,
@@ -126,30 +141,28 @@ export default [
                             };
                             console.log(data)
                             nats.publish(data.id, JSON.stringify(data));
+
+                        // PDF
                         } else if (file_type === 'pdf') {
                             const data = {
                                 file: filegraph,
                                 userId: request.auth.credentials.user.id,
                                 target: filegraph['@rid'],
-                                task: 'pdf2images',
-                                params: {
-                                    firstPageToConvert: '1',
-                                    lastPageToConvert: '1',
-                                    resolutionXYAxis: '80',
-                                    task: 'pdf2images'
-                                },
-                                role: 'thumbnail',
-                                id: 'md-poppler'
+                                task: 'split',
+                                params: {},
+                                role: 'pdf-splitter',
+                                id: 'pdf-splitter'
                             };
                             nats.publish(data.id, JSON.stringify(data));
                         }
 
-                        // Notify UI if user is authenticated
+                        // Add file to UI
                         if (request.auth.credentials.user.id) {
                             const wsdata = {
                                 command: 'add',
                                 type: file_type,
                                 node: filegraph,
+                                image: 'api/thumbnails',
                                 set: request.params.set
                             };
                             userManager.sendToUser(request.auth.credentials.user.id, wsdata);
@@ -197,6 +210,53 @@ export default [
             const response = h.response(src);
             response.type('image/jpeg');
             return response;
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/files/{file_rid}/thumbnail',
+        handler: async (request, h) => {
+            try {
+                const file_rid = Graph.sanitizeRID(request.params.file_rid);
+                const file = await Graph.getUserFileMetadata(
+                    file_rid,
+                    request.auth.credentials.user.id
+                );
+
+                if (file.type === 'image') {
+                    const data = {
+                        file: file,
+                        userId: request.auth.credentials.user.id,
+                        target: file['@rid'],
+                        task: 'thumbnail',
+                        params: { width: 800, type: 'jpeg' },
+                        id: 'md-thumbnailer'
+                    };
+                    console.log(data)
+                    nats.publish(data.id, JSON.stringify(data));
+
+                // PDF thumbnail is made by poppler
+                } else if (file.type === 'pdf') {
+                    const data = {
+                        file: file,
+                        userId: request.auth.credentials.user.id,
+                        target: file['@rid'],
+                        task: 'pdf2images',
+                        params: {
+                            firstPageToConvert: '1',
+                            lastPageToConvert: '1',
+                            resolutionXYAxis: '80',
+                            task: 'pdf2images'
+                        },
+                        role: 'thumbnail',
+                        id: 'md-poppler'
+                    };
+                    nats.publish(data.id, JSON.stringify(data));
+                }
+                return file
+            } catch (e) {
+                return h.response().code(403);
+            }
         }
     },
     {

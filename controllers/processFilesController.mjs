@@ -36,10 +36,10 @@ export async function processFilesHandler(request, h) {
             const filename = message.thumb_name || 'preview.jpg';
 
             try {
-                console.log('saving thumbnail to', base_path, filename);
+                //console.log('saving thumbnail to', base_path, filename);
                 await media.saveThumbnail(contentFilepath, base_path, filename);
                 if (filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
-                    console.log('sending thumbnail WS', filename);
+                    //console.log('sending thumbnail WS', filename);
                     const wsdata = {
                         command: 'update',
                         type: 'image', 
@@ -64,13 +64,13 @@ export async function processFilesHandler(request, h) {
                         await Graph.setNodeAttribute(message.file['@rid'], {
                             key: 'metadata',
                             value: {width: info_json.width, height: info_json.height}
-                        });
+                        }, 'File');
                     } else {
                         // nextcloud directory info
                         await Graph.setNodeAttribute(message.file['@rid'], {
                             key: 'metadata',
                             value: info_json
-                        });
+                        }, 'File');
                         const filepath = message.file.path;
                         const base_path = path.dirname(filepath);
                         await media.uploadFile(contentFilepath, {path: message.file.path + '/source.json'});
@@ -91,7 +91,7 @@ export async function processFilesHandler(request, h) {
                 const process_rid = message.process['@rid'];
                 const process_dir = path.dirname(message.process.path);
                 await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'});
-                await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path});
+                await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, 'Process');
             // else save content to processFileNode
             } else {
                 let info = '';

@@ -49,32 +49,32 @@ export default [
             }
         }
     },
-    {
-        method: 'GET',
-        path: '/api/nomad/files/{file_rid}',
-        handler: async (request, h) => {
-            const clean_rid = Graph.sanitizeRID(request.params.file_rid);
-            const file_metadata = await Graph.getUserFileMetadata(clean_rid, request.headers.mail);
-            const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path));
+    // {
+    //     method: 'GET',
+    //     path: '/api/nomad/files/{file_rid}',
+    //     handler: async (request, h) => {
+    //         const clean_rid = Graph.sanitizeRID(request.params.file_rid);
+    //         const file_metadata = await Graph.getUserFileMetadata(clean_rid, request.headers.mail);
+    //         const src = fs.createReadStream(path.join(DATA_DIR, file_metadata.path));
 
-            const response = h.response(src);
+    //         const response = h.response(src);
 
-            if(file_metadata.type == 'pdf') {
-                response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
-                response.type('application/pdf');
-            } else if(file_metadata.type == 'image') {
-                response.type('image/png');
-            } else if(file_metadata.type == 'text') {
-                response.type('text/plain; charset=utf-8');
-            } else if(file_metadata.type == 'data') {
-                response.type('text/plain; charset=utf-8');
-            } else {
-                response.header('Content-Disposition', `attachment; filename=${file_metadata.label}`);
-            }
+    //         if(file_metadata.type == 'pdf') {
+    //             response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
+    //             response.type('application/pdf');
+    //         } else if(file_metadata.type == 'image') {
+    //             response.type('image/png');
+    //         } else if(file_metadata.type == 'text') {
+    //             response.type('text/plain; charset=utf-8');
+    //         } else if(file_metadata.type == 'data') {
+    //             response.type('text/plain; charset=utf-8');
+    //         } else {
+    //             response.header('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+    //         }
 
-            return response;
-        }
-    },
+    //         return response;
+    //     }
+    // },
     {
         method: 'POST',
         path: '/api/nomad/process/files/error',
@@ -99,7 +99,7 @@ export default [
 
                         // write error to node, send update to UI and index error
                         const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-                        await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'});
+                        await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'}, 'File');
                         console.log('ERROR');
                         console.log(message);
                         await userManager.sendToUser(message.userId, wsdata);
@@ -117,13 +117,50 @@ export default [
                 }
             }
 
-            if (error.status == 'created_duplicate_source') {
-                console.log('DUPLICATE');
-            }
+            // if (error.status == 'created_duplicate_source') {
+            //     console.log('DUPLICATE');
+            // }
 
             return [];
         }
     },
+
+    {
+        method: 'POST',
+        path: '/api/nomad/process/files/done',
+        handler: async (request, h) => {
+            if (request.payload ) {
+                console.log(request.payload)
+            
+                const message = request.payload
+                let target = message.target;
+
+                if (message.process && message.process['@rid']) {
+                    target = message.process['@rid'];
+                }
+
+                // write data to node
+                const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
+                // PDF page count
+                if(message?.file?.metadata?.page_count) {
+                    await Graph.setNodeAttribute(targetNode, {key: 'metadata.page_count', value: message.file.metadata.page_count}, 'File');
+                }
+            
+                // update UI if metadata is available
+                if(message?.file?.metadata) {
+                    const wsdata = {
+                        command: 'update',
+                        target: target,
+                        metadata: message.file.metadata
+                    };
+                    await userManager.sendToUser(message.userId, wsdata);
+                }
+                
+            }
+            return [];
+        }
+    },
+
     {
         method: 'POST',
         path: '/api/nomad/process/files',

@@ -696,6 +696,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 				original_filename: "${file.hapi.filename}",
 				description: "${description}",
 				info: "${info}",
+				metadata: {size: 0},
 				_active: true
 			}
 		) <- [r:HAS_FILE] - (p) 
@@ -711,7 +712,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	// link file to set
 	if(set_rid) {
 		await this.connect(set_rid, 'HAS_ITEM', file_rid)
-		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid} ) // this attribute is used in project query
+		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
 		await this.updateFileCount(set_rid)
 	}
 	
@@ -779,7 +780,7 @@ graph.createROIs = async function(rid, data) {
 
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
 	var response_count = await web.sql(query_count)
-	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count} )
+	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count}, 'File' )
 	return response_count.result[0].count
 
 }
@@ -849,7 +850,7 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
 		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
-		await this.setNodeAttribute(file_rid, {key:"set", value: message.output_set} ) // this attribute is used in project query
+		await this.setNodeAttribute(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
 		await this.connect(process_rid, 'PRODUCED', file_rid)
 	// otherwise connect file to process
 	} else {
@@ -1186,27 +1187,29 @@ graph.setEdgeAttribute = async function (rid, data) {
 }
 
 
-graph.setNodeAttribute = async function (rid, data) {
+graph.setNodeAttribute = async function (rid, data, type) {
+	if (!type) throw('Type is required')
 	console.log(rid, data)
 	if (!rid.match(/^#/)) rid = '#' + rid
-	let query = `MATCH (node) WHERE id(node) = '${rid}' `
-	console.log(query)
+	const where = ` WHERE @rid = ${rid} `
+	console.log(where)
+	let query = ''
 
 	if (Array.isArray(data.value) && data.value.length > 0) {
 		data.value = data.value.map(i => `'${i}'`).join(',')
-		query = `SET node.${data.key} = [${data.value}]`
-		return web.cypher(query)
+		query = `UPDATE ${type} SET ${data.key} = [${data.value}] ${where}`
 	} else if (typeof data.value == 'boolean' || typeof data.value == 'number') {
-		query = query + `SET node.${data.key} = ${data.value}`
-		return web.cypher(query)
+		query = `UPDATE ${type} SET ${data.key} = ${data.value} ${where}`
 	} else if (typeof data.value == 'string') {
-		query = query + `SET node.${data.key} = '${data.value.replace(/'/g, "\\'")}'`
-		return web.cypher(query)
+		query = `UPDATE ${type} SET ${data.key} = '${data.value.replace(/'/g, "\\'")}' ${where}`
 	} else if (typeof data.value == 'object') {
-		query = `UPDATE ${rid} SET ${data.key} = ${JSON.stringify(data.value)}`
-		return web.sql(query)
+		query = `UPDATE ${type} SET ${data.key} = ${JSON.stringify(data.value)} ${where}`
+	} else {
+		throw('Illegal data', data)
 	}
-	throw('Illegal data', data)
+	console.log(query)
+	return web.sql(query)
+
 }
 
 
