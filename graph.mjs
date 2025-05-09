@@ -498,17 +498,13 @@ graph.getQueueName = function(service, data, topic) {
 }
 
 // Creates process and output Set nodes and creates queue messages
-graph.createQueueMessages =  async function(service, body, node_rid, user_id, roi) {
+graph.createQueueMessages =  async function(service, body, node_rid, user_rid, roi) {
 
 	var data = body
 	console.log("****** CREATEQUEUE MESSAGE ******")
 	console.log(data)
 
 	console.log("****** END CREATEQUEUE MESSAGE ******")
-
-	if(!user_id) {
-		user_id = request.headers[AUTH_HEADER]
-	}
 
 	var messages = []
 	var message = structuredClone(data)
@@ -523,12 +519,12 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 		task_name = service.tasks[data.task].name
 	}
 
-	var node_metadata = await this.getUserFileMetadata(node_rid, user_id)
+	var node_metadata = await this.getUserFileMetadata(node_rid, user_rid)
 	if(!node_metadata) {
 		throw new Error('File not found: '+ node_rid )
 	}
 
-	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_id)
+	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_rid)
 	await media.createProcessDir(processNode.path)
 	if(service.tasks[data.task] && service.tasks[data.task].system_params)
 		message.params = service.tasks[data.task].system_params
@@ -539,7 +535,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 	if(service.tasks[data.task]?.source == 'source_file') {
 		const source = await this.getFileSource(node_rid)
 		if(source) {
-			const source_metadata = await this.getUserFileMetadata(source['@rid'], user_id)
+			const source_metadata = await this.getUserFileMetadata(source['@rid'], user_rid)
 			message.source = source_metadata
 		}
 	}
@@ -554,7 +550,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 	// default message
 	message.process = processNode
 	message.target = node_rid
-	message.userId = user_id
+	message.userId = user_rid
 	message.file = node_metadata
 
 	// pdfs are splitted so we give each page its own message

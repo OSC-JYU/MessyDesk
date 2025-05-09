@@ -52,7 +52,7 @@ export default [
             try {
                 const topic = request.params.topic;
                 const service = services.getServiceAdapterByName(topic);
-                var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.id, request.params.roi);
+                var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.rid, request.params.roi);
                 const queue = Graph.getQueueName(service, request.payload, topic);
 
 
