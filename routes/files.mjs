@@ -1,8 +1,9 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
-import fs from 'fs';
+//import fs from 'fs';
 import fse from 'fs-extra';
 import path from 'path';
+import Boom from '@hapi/boom';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 
@@ -22,7 +23,7 @@ export default [
         handler: async (request, h) => {
             try {
                 // Verify project exists and user has access
-                const response = await Graph.getProject_old(request.params.rid, request.headers.mail);
+                const response = await Graph.getProject_old(request.params.rid, request.auth.credentials.user.id);
                 if (response.result.length === 0) {
                     throw Boom.notFound('Project not found');
                 }
@@ -69,7 +70,7 @@ export default [
                 var filepath = filegraph.path.split('/').slice(0, -1).join('/');
                 await fse.ensureDir(path.join(filepath, 'process'));
 
-                const filesave = fs.createWriteStream(filegraph.path);
+                const filesave = fse.createWriteStream(filegraph.path);
 
                 // Create a promise to handle the file upload completion
                 const uploadPromise = new Promise((resolve, reject) => {
@@ -85,7 +86,7 @@ export default [
                         console.log('file uploaded');
                         
                         // Get file size and store it
-                        const stats = await fs.promises.stat(filegraph.path);
+                        const stats = await fse.stat(filegraph.path);
                         filegraph.metadata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100    // rounded to MB with 2 decimal places
                         try {
                             await Graph.setNodeAttribute(filegraph['@rid'], {
@@ -217,10 +218,10 @@ export default [
         path: '/api/files/{file_rid}/thumbnail',
         handler: async (request, h) => {
             try {
-                const file_rid = Graph.sanitizeRID(request.params.file_rid);
+                const file_rid = request.params.file_rid
                 const file = await Graph.getUserFileMetadata(
                     file_rid,
-                    request.auth.credentials.user.id
+                    request.auth.credentials.user.rid
                 );
 
                 if (file.type === 'image') {
@@ -265,11 +266,11 @@ export default [
         handler: async (request, h) => {
             try {
                 const file_metadata = await Graph.getUserFileMetadata(
-                    Graph.sanitizeRID(request.params.file_rid),
-                    request.headers.mail
+                    request.params.file_rid,
+                    request.auth.credentials.user.rid
                 );
 
-                const src = fs.createReadStream(file_metadata.path);
+                const src = fse.createReadStream(file_metadata.path);
                 const response = h.response(src);
 
                 if (file_metadata.type === 'pdf') {
@@ -286,6 +287,128 @@ export default [
                 return response;
             } catch (e) {
                 return h.response().code(403);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/files/{file_rid}/source',
+        handler: async (request, h) => {
+            try {
+                const source = await Graph.getFileSource(request.params.file_rid);
+                if (!source) {
+                    return h.response().code(404);
+                }
+
+                const file_metadata = await Graph.getUserFileMetadata(
+                    source['@rid'],
+                    request.auth.credentials.user.rid
+                );
+
+                const src = fse.createReadStream(path.join(DATA_DIR, file_metadata.path));
+                const response = h.response(src);
+
+                if (file_metadata.type === 'pdf') {
+                    response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
+                    response.type('application/pdf');
+                } else if (file_metadata.type === 'image') {
+                    response.type('image/png');
+                } else if (file_metadata.type === 'text') {
+                    response.type('text/plain; charset=utf-8');
+                } else if (file_metadata.type === 'data') {
+                    response.type('text/plain; charset=utf-8');
+                } else {
+                    response.header('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+                }
+
+                return response;
+            } catch (e) {
+                return h.response().code(403);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/files/{file_rid}/pages/{page_number}',
+        handler: async (request, h) => {
+            try {
+                const file_metadata = await Graph.getUserFileMetadata(
+                    request.params.file_rid,
+                    request.auth.credentials.user.rid
+                );
+
+                const pageFilename = path.join(
+                    path.dirname(file_metadata.path),
+                    'pages',
+                    `page_${request.params.page_number}.pdf`
+                );
+                console.log('pageFilename: ', pageFilename);
+                // Verify file exists before creating read stream
+                try {
+                    await fse.access(pageFilename);
+                } catch (err) {
+                    return h.response().code(404);
+                }
+
+                const src = fse.createReadStream(pageFilename);
+                const response = h.response(src);
+
+                // Only set PDF headers if original file was PDF
+                if (file_metadata.type === 'pdf') {
+                    const pageLabel = `page_${request.params.page_number}_${file_metadata.label}`;
+                    response.header('Content-Disposition', `inline; filename=${pageLabel}`);
+                    response.type('application/pdf');
+                }
+
+                return response;
+            } catch (e) {
+                console.error('Error accessing file:', e);
+                return h.response().code(403);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files',
+        handler: async (request, h) => {
+            const n = await Graph.getSetFiles(
+                Graph.sanitizeRID(request.params.rid), 
+                request.auth.credentials.user.rid, 
+                request.query
+            );
+            return h.response(n);
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files/zip',
+        handler: async (request, h) => {
+            try {
+                // Get the set files with proper authentication
+                const set_rid = Graph.sanitizeRID(request.params.rid);
+                const n = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, request.query);
+
+                if (!n || !n.files || n.files.length === 0) {
+                    return h.response('No files found in set').code(404);
+                }
+
+                const fileList = [];
+                n.files.forEach(file => {
+                    if (file.path) {
+                        fileList.push(file);
+                    }
+                });
+
+                if (fileList.length === 0) {
+                    return h.response('No valid file paths found').code(404);
+                }
+
+                // Create and stream the zip file
+                return await media.createZipAndStream(fileList, request, h, set_rid);
+
+            } catch (err) {
+                console.error('Error creating zip:', err);
+                return h.response('Error creating zip file').code(500);
             }
         }
     }

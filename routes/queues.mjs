@@ -19,9 +19,9 @@ export default [
             
             for(var request of requests) {
                 var service = services.getServiceAdapterByName(request.params.topic);
-                messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.headers.mail);
+                messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.id );
                 for(var msg of messages) {
-                    userManager.sendToUser(request.headers.mail, {
+                    userManager.sendToUser(request.auth.credentials.user.id, {
                         command: 'add', 
                         type: 'process', 
                         target: msg.file['@rid'], 
@@ -52,8 +52,9 @@ export default [
             try {
                 const topic = request.params.topic;
                 const service = services.getServiceAdapterByName(topic);
-                var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.headers.mail, request.params.roi);
+                var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.id, request.params.roi);
                 const queue = Graph.getQueueName(service, request.payload, topic);
+
 
                 // add Process node to UI
                 if(messages.length > 0) {
@@ -67,7 +68,7 @@ export default [
                     if(msg.set_node) {
                         wsdata.set_node = msg.set_node;
                     }
-                    userManager.sendToUser(request.headers.mail, wsdata);
+                    userManager.sendToUser(request.auth.credentials.user.id, wsdata);
                 }
 
                 for(var msg of messages) {    
@@ -102,8 +103,49 @@ export default [
                     msg.info = request.payload.info;
                     msg.params = request.payload.system_params;
                     task_name = request.payload.name;
+                } else {
+                    task_name = service.tasks[request.payload.task].name;
                 }
+
+                var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
+                console.log('set_metadata: ', set_metadata);
+                var nodes = await Graph.createSetProcessNode(task_name, service, request.payload, set_metadata, request.auth.credentials.user.rid);
+
+                // add node to UI
+                var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set, image:process.env.API_URL + 'icons/wait.gif'};
+                userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+
+                // next we create process nodes for each file in set and put them in queue
+                var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit:'500'});
+
+                for(var file of set_files.files) {
+                    var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+                    console.log(file_metadata);
+                    var processNode = await Graph.createProcessNode(task_name, service, request.payload, file_metadata, request.auth.credentials.user.rid, set_rid);
+                    await media.createProcessDir(processNode.path);
+
+                    // do we need info about "parent" file? (when processing osd.json for example)
+                    if(service.tasks[request.payload.task]?.source == 'source_file') {
+                        const source = await Graph.getFileSource(file['@rid']);
+                        console.log('source: ', source);
+                        if(source) {
+                            const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                            msg.source = source_metadata;
+                        }
+                    }
+
+                    await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
+
+                    msg.process = processNode;
+                    msg.file = file_metadata;
+                    msg.target = file_metadata['@rid'];
+                    msg.userId = request.auth.credentials.user.rid;
+                    msg.output_set = nodes.set['@rid'];  // link file to output Set
+                    nats.publish(topic + '_batch', JSON.stringify(msg));
+                }
+
                 return set_rid;
+
             } catch(e) {
                 console.log('Queue failed!', e);
                 throw e;

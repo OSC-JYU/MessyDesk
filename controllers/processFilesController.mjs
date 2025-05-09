@@ -199,7 +199,7 @@ export async function processFilesHandler(request, h) {
                                     node: msg.process,
                                     image: API_URL + 'icons/wait.gif'
                                 };
-                                userManager.sendToUser(request.headers.mail, wsdata);
+                                userManager.sendToUser(request.auth.credentials.user.id, wsdata);
                                 nats.publish(request.params.topic, JSON.stringify(msg));
                             }
                         }

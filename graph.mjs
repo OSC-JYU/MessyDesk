@@ -1,8 +1,6 @@
-import axios from "axios";
+
 import path from 'path';
-import JSON5 from 'json5';
-import yaml from 'js-yaml';
-import fsPromises from 'fs/promises';
+
 
 
 import web from "./web.mjs";
@@ -408,23 +406,23 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 }
 
 
-graph.getProjectFiles = async function (rid, me_email) {
+graph.getProjectFiles = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND p.id = "${me_email}" RETURN file`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
 	
 	var result = await web.cypher(query)
 	return result
 }
 
-graph.getSetFiles = async function (set_rid, me_email, params) {
+graph.getSetFiles = async function (set_rid, user_rid, params) {
 	if(!params || !isIntegerString(params.skip)) params.skip = 0
 	if(!params || !isIntegerString(params.limit)) params.limit = 10
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
+	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE id(p) = "${user_rid}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
 	var response_count = await web.cypher(count_query)
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File)  WHERE p.id = "${me_email}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File)  WHERE id(p) = "${user_rid}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
 	var response = await web.cypher(query)
 	
 	// thumbnails and entities
@@ -442,13 +440,13 @@ graph.getSetFiles = async function (set_rid, me_email, params) {
 		files: response.result } //response.result
 }
 
-graph.getSourceFiles = async function (source_rid, me_email, params) {
+graph.getSourceFiles = async function (source_rid, user_rid, params) {
 
 	try {
 		var files = []
 		if (!source_rid.match(/^#/)) source_rid = '#' + source_rid
 	
-		const query = `MATCH {type:User, as:user, where:(id = "${me_email}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
+		const query = `MATCH {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
 		var response = await web.sql(query)
 	
 		var source_file = await media.readJSON(path.join(response.result[0].path, 'source.json'))
@@ -553,13 +551,26 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 		message.set_node = setNode
 	}
 
+	// default message
 	message.process = processNode
-	message.file = node_metadata
 	message.target = node_rid
 	message.userId = user_id
+	message.file = node_metadata
 
-	// ROI request must be handled separately
-	if(roi) {
+	// pdfs are splitted so we give each page its own message
+	if(node_metadata.type == 'pdf') {
+		message.pdf = true
+		if(data.params.firstPageToConvert && data.params.lastPageToConvert) {
+			const first = parseInt(data.params.firstPageToConvert)
+			const last = parseInt(data.params.lastPageToConvert)
+			for(var i = first; i <= last; i++) {
+				var m = structuredClone(message)
+				m.params.page = i
+				messages.push(m)
+			}	
+		}
+	// ROIs also need one message per ROI
+	} else if (roi) {
 		// we can work with ROIs only if we have width and height of file
 		if(node_metadata.metadata) var metadata = node_metadata.metadata
 		if(metadata && metadata.width && metadata.height) {
@@ -569,6 +580,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_id, ro
 				messages.push(m)
 			}	
 		}
+		// otherwise create normal, single message
 	} else {
 		messages.push(message)
 	}
@@ -887,16 +899,18 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 // 	return update_response.result[0]
 // }
 
-graph.getUserFileMetadata = async function (file_rid, me_email) {
-	file_rid = file_rid.replace('#','')
+graph.getUserFileMetadata = async function (file_rid, user_rid) {
+
+	const clean_file_rid = this.sanitizeRID(file_rid)
 	// file must be somehow related to a project that is owned by user
 	var query = `MATCH {
 		type: User, 
 		as:p, 
-		where:(id = "${me_email}")}
+		where:(@rid = ${user_rid})}
 	-IS_OWNER->
 		{type:Project, as:project}--> 
-		{type:File, as:file, where:(@rid = "#${file_rid}"), while: ($depth < 20)} return file`
+		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
+		console.log(query)
 	var file_response = await web.sql(query)
 
 	if(file_response.result[0] && file_response.result[0].file)
@@ -907,10 +921,10 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 		var query_set = `MATCH {
 			type: User, 
 			as:p, 
-			where:(id = "${me_email}")}
+			where:(@rid = ${user_rid})}
 		-IS_OWNER->
 			{type:Project, as:project}--> 
-			{type:Set, as:file, where:(@rid = "#${file_rid}"), while: ($depth < 20)} return file`
+			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
 		var set_response = await web.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content
@@ -924,10 +938,10 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 			var query_source = `MATCH {
 				type: User, 
 				as:p, 
-				where:(id = "${me_email}")}
+				where:(@rid = ${user_rid})}
 			-IS_OWNER->
 				{type:Project, as:project}--> 
-				{type:Source, as:file, where:(@rid = "#${file_rid}")} return file`
+				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file`
 				
 			var source_response = await web.sql(query_source)
 			if(source_response.result[0] && source_response.result[0].file) {
@@ -939,8 +953,8 @@ graph.getUserFileMetadata = async function (file_rid, me_email) {
 }
 
 graph.getFileSource = async function (file_rid) {
-	file_rid = file_rid.replace('#','')
-	const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${file_rid} )} return source`
+	const clean_file_rid = this.sanitizeRID(file_rid)
+	const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
 	var response = await web.sql(sql)
 	if(response.result[0] && response.result[0].source) return response.result[0].source
 
@@ -1220,38 +1234,38 @@ graph.getNodeAttributes = async function (rid) {
 }
 
 
-graph.getGraph = async function (body, ctx) {
+// graph.getGraph = async function (body, ctx) {
 
-	var me = await this.myId(ctx.request.headers.mail)
-	// ME
-	if (body.query.includes('_ME_')) {
-		body.query = body.query.replace('_ME_', me.rid)
-	}
+// 	var me = await this.myId(ctx.request.headers.mail)
+// 	// ME
+// 	if (body.query.includes('_ME_')) {
+// 		body.query = body.query.replace('_ME_', me.rid)
+// 	}
 
-	var schema_relations = null
-	// get schemas first so that one can map relations to labels
-	if (!body.raw) {
-		schema_relations = await this.getSchemaRelations()
-	}
-	const options = {
-		serializer: 'graph',
-		format: 'cytoscape',
-		schemas: schema_relations,
-		current: body.current,
-		me: me
-	}
-	return web.cypher(body.query, options)
-}
+// 	var schema_relations = null
+// 	// get schemas first so that one can map relations to labels
+// 	if (!body.raw) {
+// 		schema_relations = await this.getSchemaRelations()
+// 	}
+// 	const options = {
+// 		serializer: 'graph',
+// 		format: 'cytoscape',
+// 		schemas: schema_relations,
+// 		current: body.current,
+// 		me: me
+// 	}
+// 	return web.cypher(body.query, options)
+// }
 
 
-graph.getSchemaRelations = async function () {
-	var schema_relations = {}
-	var schemas = await web.cypher('MATCH (s:Schema_)-[r]->(s2:Schema_) return type(r) as type, r.label as label, r.label_rev as label_rev, COALESCE(r.label_inactive, r.label) as label_inactive, s._type as from, s2._type as to, r.tags as tags, r.compound as compound')
-	schemas.result.forEach(x => {
-		schema_relations[x.type] = x
-	})
-	return schema_relations
-}
+// graph.getSchemaRelations = async function () {
+// 	var schema_relations = {}
+// 	var schemas = await web.cypher('MATCH (s:Schema_)-[r]->(s2:Schema_) return type(r) as type, r.label as label, r.label_rev as label_rev, COALESCE(r.label_inactive, r.label) as label_inactive, s._type as from, s2._type as to, r.tags as tags, r.compound as compound')
+// 	schemas.result.forEach(x => {
+// 		schema_relations[x.type] = x
+// 	})
+// 	return schema_relations
+// }
 
 
 graph.getSearchData = async function (search) {

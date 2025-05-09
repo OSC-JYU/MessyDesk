@@ -5,7 +5,7 @@ export default [
         method: 'GET',
         path: '/events',
         handler: (request, h) => {
-            const userId = request.headers.mail;
+            const userId = request.auth.credentials.user.id;
             if (!userId) {
                 return h.response({ error: 'User ID is required' }).code(400);
             }
@@ -36,7 +36,7 @@ export default [
         method: 'GET',
         path: '/events/test',
         handler: (request, h) => {
-            const userId = request.headers.mail;
+            const userId = request.auth.credentials.user.id;
             console.log(userId);
             if (!userId) {
                 return h.response({ error: 'User ID is required' }).code(400);

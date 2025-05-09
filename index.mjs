@@ -30,7 +30,6 @@ const __dirname = path.dirname(__filename);
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
 const AUTH_HEADER = 'mail';
-const AUTH_NAME = 'displayname';
 
 const sseClients = new Map();
 
@@ -179,27 +178,9 @@ const init = async () => {
 		{
 			method: 'GET',
 			path: '/api',
-			options: {
-				auth: process.env.MODE !== 'development' ? 'mail' : false
-			},
 			handler: () => 'MessyDesk API'
 		},
-		// Settings endpoint
-		{
-			method: 'GET',
-			path: '/api/settings',
-			options: {
-				auth: process.env.MODE !== 'development' ? 'mail' : false
-			},
-			handler: (request) => ({
-				info: 'MessyDesk API',
-				version: require('./package.json').version,
-				mode: process.env.MODE,
-				data_dir: DATA_DIR,
-				db: process.env.DB_NAME,
-				user: request.auth.credentials.user
-			})
-		},
+
 		// Import and register all route modules
 		...projectRoutes,
 		...serviceRoutes,

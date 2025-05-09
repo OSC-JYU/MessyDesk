@@ -21,13 +21,13 @@ export default [
             }
         }
     },
-    {
-        method: 'POST',
-        path: '/api/graph/query',
-        handler: async (request) => {
-            return await Graph.getGraph(request.payload, request);
-        }
-    },
+    // {
+    //     method: 'POST',
+    //     path: '/api/graph/query',
+    //     handler: async (request) => {
+    //         return await Graph.getGraph(request.payload, request);
+    //     }
+    // },
     {
         method: 'POST',
         path: '/api/graph/vertices',

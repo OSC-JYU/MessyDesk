@@ -197,7 +197,8 @@ web.sql2 = async function(query, options) {
 	};
 	const query_data = {
 		command:query,
-		language:'sql'
+		language:'sql',
+		params: options.params
 	}
 
 	if(options.serializer) query_data.serializer = options.serializer

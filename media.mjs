@@ -3,11 +3,10 @@ import fs from 'fs';
 import fse from 'fs-extra';
 
 
-import util from 'util';
-import stream from 'stream';
 import sizeOf from 'image-size';
 import archiver from 'archiver';
 import os from 'os';
+import logger from './logger.mjs';
 
 
 const TYPES = ['image', 'text'] 
@@ -433,16 +432,15 @@ async function checkFileExists(filePath) {
 	}
 }
 
-media.createZipAndStream = async function(fileList, ctx, set_rid) {
+
+media.createZipAndStream = async function(fileList, request, h, set_rid) {
     try {
         if (!fileList || fileList.length === 0) {
-            ctx.status = 404;
-            ctx.body = 'No files found to zip';
-            return;
+            logger.warn('No files provided for zip creation', { set_rid });
+            return h.response('No files found to zip').code(404);
         }
 
-        console.log(set_rid)
-        const filename = `files_${set_rid.replace('#', '')}.zip`
+        const filename = `files_${set_rid.replace('#', '')}.zip`;
         // Create a temporary file path for the zip
         const tempZipPath = path.join(os.tmpdir(), filename);
         
@@ -451,13 +449,34 @@ media.createZipAndStream = async function(fileList, ctx, set_rid) {
         
         // Create a new archive with compression
         const archive = archiver('zip', {
-            zlib: { level: 9 } // Maximum compression
+            zlib: { level: 0 } // do not compress
+        });
+        
+        logger.info('Creating zip archive', { 
+            set_rid, 
+            fileCount: fileList.length,
+            tempPath: tempZipPath 
         });
         
         // Set up event handlers for the archive
         archive.on('error', (err) => {
-            console.error('Archive error:', err);
+            logger.error('Archive creation error', { 
+                error: err.message,
+                set_rid,
+                tempPath: tempZipPath
+            });
             throw err;
+        });
+
+        archive.on('warning', (err) => {
+            if (err.code === 'ENOENT') {
+                logger.warn('Archive warning', { 
+                    warning: err.message,
+                    set_rid
+                });
+            } else {
+                throw err;
+            }
         });
         
         // Pipe the archive to the output file
@@ -465,57 +484,89 @@ media.createZipAndStream = async function(fileList, ctx, set_rid) {
         
         // Add README.txt with creation date
         const creationDate = new Date().toISOString();
-        const readmeContent = `Zip Archive Creation Details:
+        const readmeContent = `MessyDesk set output
+Zip Archive Creation Details:
 Created on: ${creationDate}
 Number of files: ${fileList.length}
-Set ID: ${set_rid}`;
+Set ID: ${set_rid}
+
+file list: 
+${fileList.map(file => file.original_filename || file.label || file.path).join('\n')}
+`;
         
         archive.append(readmeContent, { name: 'README.txt' });
         
         // Add files to the archive
         let filesAdded = false;
-        for (const filePath of fileList) {
-            const fullPath = path.resolve(filePath);
+        for (const file of fileList) {
+            const fullPath = path.resolve(file.path);
             if (await fse.pathExists(fullPath)) {
-                archive.file(fullPath, { name: path.basename(filePath) });
+                archive.file(fullPath, { name: file.original_filename || file.label || path.basename(file.path) });
                 filesAdded = true;
             } else {
-                console.error(`File not found: ${fullPath}`);
+                logger.warn('File not found for zip', { 
+                    filePath: fullPath,
+                    set_rid 
+                });
             }
         }
 
         if (!filesAdded) {
-            ctx.status = 404;
-            ctx.body = 'No valid files found to zip';
-            return;
+            logger.warn('No valid files found for zip', { set_rid });
+            return h.response('No valid files found to zip').code(404);
         }
 
         // Finalize the archive
         await new Promise((resolve, reject) => {
-            output.on('close', resolve);
-            output.on('error', reject);
+            output.on('close', () => {
+                logger.info('Archive finalized', { 
+                    set_rid,
+                    size: archive.pointer()
+                });
+                resolve();
+            });
+            output.on('error', (err) => {
+                logger.error('Output stream error', { 
+                    error: err.message,
+                    set_rid
+                });
+                reject(err);
+            });
             archive.finalize();
         });
 
-        // Set response headers
-        ctx.set('Content-Type', 'application/zip');
-        ctx.set('Content-Disposition', 'attachment; filename="' + filename + '"');
-        
-        // Send the file
-        ctx.body = fs.createReadStream(tempZipPath);
-        
-        // Clean up the temporary file after sending
-        ctx.res.on('finish', () => {
-            fse.unlink(tempZipPath, (err) => {
-                if (err) console.error('Error deleting temporary zip file:', err);
-            });
+        // Create response with file stream
+        const response = h.file(tempZipPath, {
+            filename: filename,
+            mode: 'attachment',
+            confine: false // Allow serving files outside of the server's root directory
         });
 
+        // Clean up the temporary file after sending
+        response.events.on('finish', async () => {
+            logger.info('Zip download completed', { set_rid });
+            try {
+                await fse.unlink(tempZipPath);
+                logger.info('Temporary zip file cleaned up', { set_rid });
+            } catch (err) {
+                logger.error('Error deleting temporary zip file', { 
+                    error: err.message,
+                    set_rid,
+                    tempPath: tempZipPath
+                });
+            }
+        });
+
+        return response;
+
     } catch (err) {
-        console.error('Error in createZipAndStream:', err);
-        ctx.status = 500;
-        ctx.body = 'Error creating zip file';
-	}
+        logger.error('Error in createZipAndStream', { 
+            error: err.message,
+            set_rid,
+            stack: err.stack
+        });
+        return h.response('Error creating zip file').code(500);
+    }
 }
 
 export default media

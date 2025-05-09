@@ -27,7 +27,6 @@ export default [
         method: 'POST',
         path: '/api/services/{service}/consumer/{id}',
         handler: async (request) => {
-            console.log(request.params.service, request.params.id);
             return await services.addConsumer(request.params.service, request.params.id);
         }
     },
@@ -35,7 +34,6 @@ export default [
         method: 'DELETE', 
         path: '/api/services/{service}/consumer/{id}',
         handler: async (request) => {
-            console.log(request.params.service, request.params.id);
             const adapter = await services.getServiceAdapterByName(request.params.service);
             const response = await services.removeConsumer(request.params.service, request.params.id);
             await nomad.stopService(adapter);
@@ -47,8 +45,8 @@ export default [
         path: '/api/services/files/{rid}',
         handler: async (request) => {
             const file = await Graph.getUserFileMetadata(
-                Graph.sanitizeRID(request.params.rid),
-                request.headers.mail
+                request.params.rid,
+                request.auth.credentials.user.rid
             );
             const prompts = await Graph.getPrompts(request.auth.credentials.user.id);
 
