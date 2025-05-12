@@ -196,10 +196,95 @@ media.uploadFile = async function(uploadpath, filegraph) {
 	}
 }
 
+media.rotateImage = async function(originalPath, rotatedPath, rotate) {
+	try {
+		const ext = path.extname(originalPath).toLowerCase();
+		
+		if (ext === '.jpg' || ext === '.jpeg') {
+			// Use jpegtran for lossless JPEG rotation
+			const jpegtran = require('jpegtran-bin');
+			const { execFile } = require('child_process');
+			
+			await new Promise((resolve, reject) => {
+				execFile(jpegtran, ['-rotate', rotate, '-outfile', rotatedPath, originalPath], (error) => {
+					if (error) reject(error);
+					resolve();
+				});
+			});
+			
+		} else if (ext === '.png') {
+			// Use pngjs for lossless PNG rotation
+			const PNG = require('pngjs').PNG;
+			const fs = require('fs');
+			
+			const png = await new Promise((resolve, reject) => {
+				fs.createReadStream(originalPath)
+					.pipe(new PNG())
+					.on('parsed', function() {
+						resolve(this);
+					})
+					.on('error', reject);
+			});
+			
+			// Create rotated buffer
+			const rotatedPng = new PNG({width: rotate % 180 === 0 ? png.width : png.height,
+									  height: rotate % 180 === 0 ? png.height : png.width});
+			
+			// Copy pixels with rotation
+			for (let y = 0; y < png.height; y++) {
+				for (let x = 0; x < png.width; x++) {
+					let newX, newY;
+					switch(rotate) {
+						case 90:
+							newX = png.height - 1 - y;
+							newY = x;
+							break;
+						case 180:
+							newX = png.width - 1 - x;
+							newY = png.height - 1 - y;
+							break;
+						case 270:
+							newX = y;
+							newY = png.width - 1 - x;
+							break;
+					}
+					
+					const oldIdx = (png.width * y + x) << 2;
+					const newIdx = (rotatedPng.width * newY + newX) << 2;
+					
+					rotatedPng.data[newIdx] = png.data[oldIdx];
+					rotatedPng.data[newIdx + 1] = png.data[oldIdx + 1];
+					rotatedPng.data[newIdx + 2] = png.data[oldIdx + 2];
+					rotatedPng.data[newIdx + 3] = png.data[oldIdx + 3];
+				}
+			}
+			
+			await new Promise((resolve, reject) => {
+				rotatedPng.pack().pipe(fs.createWriteStream(rotatedPath))
+					.on('finish', resolve)
+					.on('error', reject);
+			});
+			
+		} else {
+			// Fallback to Sharp for other formats
+			const image = await sharp(originalPath);
+			await image.rotate(rotate);
+			await image.toFile(rotatedPath);
+		}
+		
+	} catch (error) {
+		console.log('Error rotating image:', error);
+		throw error;
+	}
+}
+
+
 media.getImageSize = async function(filepath) {
 	var filedata = {}
 	try {
-		const dimensions = await sizeOf(filepath)
+		var stats = await fse.stat(filepath)
+		const dimensions = sizeOf(filepath)
+		filedata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100 
 		filedata.width = dimensions.width
 		filedata.height = dimensions.height
 		filedata.imgtype = dimensions.type

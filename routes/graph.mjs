@@ -54,7 +54,7 @@ export default [
         handler: async (request) => {
             const n = await Graph.createROIs(Graph.sanitizeRID(request.params.rid), request.payload)
             const wsdata = {command: 'update', type: 'image', target: '#'+request.params.rid, roi_count: n}
-            await userManager.sendToUser(request.auth.credentials.user.id, wsdata)
+            userManager.sendToUser(request.auth.credentials.user.rid, wsdata)
             return n
         }
     },
@@ -71,7 +71,7 @@ export default [
                     target: clean_rid,
                     description: request.payload.value
                 };
-                await userManager.sendToUser(request.auth.credentials.user.id, wsdata);
+                userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
             }
             
             return result;

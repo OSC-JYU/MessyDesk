@@ -30,8 +30,37 @@ export async function processFilesHandler(request, h) {
             contentFilepath = request.payload.content.path;
         }
 
-        // check if this is thumbnail ('role' is for PDF thumbnail via Poppler)
-        if (message.id === 'md-thumbnailer' || message.role === 'thumbnail') {
+        if(message?.role === 'exif_rotate') {
+            console.log('rotate message detected');
+            console.log(message);
+            // exif_rotate replaces the original file with the rotated file
+            const originalPath = path.join(path.dirname(message.file.path), 'original.' + message.file.extension);
+            await fse.rename(message.file.path, originalPath);
+            const metadata = await media.uploadFile(contentFilepath, message.file);
+            if(metadata) {
+                await Graph.setNodeAttribute_old(message.file['@rid'], {key: 'metadata', value: metadata}, 'File');
+            }
+            const data = {
+                file: message.file,
+                userId: message.userId,
+                target: message.file['@rid'],
+                task: 'thumbnail',
+                params: { width: 800, type: 'jpeg' },
+                id: 'md-thumbnailer'
+            };
+            
+            nats.publish(data.id, JSON.stringify(data));
+
+            var wsdata = {
+                command: 'update',
+                type: message.file.type,
+                target: message.file['@rid'],
+                metadata: metadata
+            };
+            userManager.sendToUser(message.userId, wsdata);
+
+            // check if this is thumbnail ('role' is for PDF thumbnail via Poppler)
+        } else if (message.id === 'md-thumbnailer' || message.role === 'thumbnail') {
             const filepath = message.file.path;
             const base_path = path.dirname(filepath);
             const filename = message.thumb_name || 'preview.jpg';
@@ -55,44 +84,12 @@ export async function processFilesHandler(request, h) {
             }
 
         } else if (infoFilepath && contentFilepath) {
-            // if this is "info" task then we save metadata to file node
-            if (message.task == 'info') {
-                try {
-                    const info = await fse.readFile(contentFilepath);
-                    const info_json = JSON.parse(info);
-                    if (message.file.type == 'image') {
-                        // image info
-                        await Graph.setNodeAttribute(message.file['@rid'], {
-                            key: 'metadata',
-                            value: {width: info_json.width, height: info_json.height}
-                        }, request.auth.credentials.user.rid);
-                    } else {
-                        // nextcloud directory info
-                        await Graph.setNodeAttribute(message.file['@rid'], {
-                            key: 'metadata',
-                            value: info_json
-                        }, request.auth.credentials.user.rid);
-                        const filepath = message.file.path;
-                        const base_path = path.dirname(filepath);
-                        await media.uploadFile(contentFilepath, {path: message.file.path + '/source.json'});
-                        const wsdata = {
-                            command: 'update',
-                            type: message.file.type,
-                            target: message.file['@rid'],
-                            count: info_json.count,
-                            description: info_json.size + ' MB'
-                        };
-                        userManager.sendToUser(message.userId, wsdata);
-                    }
-                } catch (e) {
-                    console.log('file metadata failed!', e.message);
-                }
-            // if this is response file then we save it to the process node directory and not in the graph
-            } else if (message.file.type == 'response') {
+            if (message.file.type == 'response') {
                 const process_rid = message.process['@rid'];
                 const process_dir = path.dirname(message.process.path);
                 await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'});
                 await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, request.auth.credentials.user.rid);
+
             // else save content to processFileNode
             } else {
                 let info = '';
@@ -104,10 +101,16 @@ export async function processFilesHandler(request, h) {
                 const process_rid = message.process['@rid'];
                 const fileNode = await Graph.createProcessFileNode(process_rid, message, '', info);
 
-                await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
+                fileNode.metadata = await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
+                console.log('METADATA: ', fileNode.metadata)
+               
+                if(fileNode.metadata) {
+                    await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
+                }
 
-                // for images and pdf files we create normal thumbnails
-                if (message.file.type == 'image' || message.file.type == 'pdf') {
+
+                // for images files we create normal thumbnails
+                if (message.file.type == 'image') {
                     const th = {
                         id: 'md-thumbnailer',
                         task: 'thumbnail',
@@ -117,20 +120,6 @@ export async function processFilesHandler(request, h) {
                         params: {width: 800, type: 'jpeg'}
                     };
                     nats.publish(th.id, JSON.stringify(th));
-
-                    // image resolution info
-                    if (message.file.type == 'image') {
-                        const info = {
-                            id: 'md-imaginary',
-                            task: 'info',
-                            file: fileNode,
-                            userId: message.userId,
-                            target: fileNode['@rid'],
-                            params: {task: 'info'}
-                        };
-                        nats.publish(info.id, JSON.stringify(info));
-                        console.log(`published info task\nservice: ${info.id}\ntarget: ${info.target}`);
-                    }
                 }
 
                 // send to indexer queue if text
@@ -151,8 +140,7 @@ export async function processFilesHandler(request, h) {
                     console.log('ner file detected');
                     await Graph.createROIsFromJSON(process_rid, message, fileNode);
                 }
-                console.log('SENDING MESSAGE')
-                console.log(message.userId)
+
                 // update set file count or add file to visual graph
                 if (message.userId) {
                     let wsdata;
@@ -181,15 +169,8 @@ export async function processFilesHandler(request, h) {
                 if (message.pipeline && message.pipeline.length > 0) {
                     // if file_count and file_total are integers and they are equal, then call pipeline
                     if (Number.isInteger(message.file_count) && Number.isInteger(message.file_total) && message.file_total == message.file_count) {
-                        console.log('\n\n\n\n--------------PIPELINE detected');
-                        console.log(message.file_total, message.file_count);
-                        console.log('pipeline target: ', fileNode['@rid']);
-                        console.log(message.pipeline);
-
                         let messages = [];
-
                         const pipelineLines = await Graph.createRequestsFromPipeline(message, fileNode['@rid'].replace('#', ''));
-                        
                         for (const line of pipelineLines) {
                             const service = services.getServiceAdapterByName(line.params.topic);
                             messages = await Graph.createQueueMessages(service, line.payload, fileNode['@rid'].replace('#', ''), request.auth.credentials.user.rid);

@@ -86,16 +86,40 @@ export default [
                         console.log('file uploaded');
                         
                         // Get file size and store it
-                        const stats = await fse.stat(filegraph.path);
-                        filegraph.metadata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100    // rounded to MB with 2 decimal places
-                        try {
-                            await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                key: 'metadata.size',
-                                value: filegraph.metadata.size
-                            }, 'File');
-                        } catch (error) {
-                            console.log('Error setting node attribute:', error);
+                        const metadata = await media.getImageSize(filegraph.path)
+                        // if we have exif rotation, we make image where rotation is applied
+                        if (file_type === 'image' && metadata.rotate) {
+
+
+	                        // ************** EXIF FIX **************
+	                        // if file has EXIF orientation, then we need to rotate it
+
+                            var rotatedata = {
+                                id:"md-imaginary",
+                                userId: request.auth.credentials.user.rid,
+                                task:"rotate",
+                                file: filegraph,
+                                target: filegraph['@rid'],
+                                params: {rotate:`${metadata.rotate}`, stripmeta:'true', task:"rotate"},
+                                role: 'exif_rotate',
+                                info:"I auto-rotated image based on EXIF orientation.",
+                            }
+                            nats.publish(rotatedata.id, JSON.stringify(rotatedata));
+                            // ************** EXIF FIX **************
+
+                         // we save metadata only if there is no rotation
+                        } else {
+                            filegraph.metadata = metadata
+                            try {
+                                await Graph.setNodeAttribute_old(filegraph['@rid'], {
+                                    key: 'metadata',
+                                    value: filegraph.metadata
+                                }, 'File');
+                            } catch (error) {
+                                console.log('Error setting node attribute:', error);
+                            }
                         }
+
                         
                         // Process text file description if needed
                         if (file_type === 'text') {
@@ -110,13 +134,7 @@ export default [
                             }
                         }
 
-                        // Update metadata if available
-                        // if (file.info) {
-                        //     await Graph.setNodeAttribute(filegraph['@rid'], {
-                        //         key: 'info',
-                        //         value: file.info
-                        //     }, 'File');
-                        // }
+
 
                         // send message to thumbnailer or indexer depending on file type
                         // TEXT
@@ -131,7 +149,7 @@ export default [
                             nats.publish(index_msg.id, JSON.stringify(index_msg));
 
                         // IMAGE    
-                        } else if (file_type === 'image') {
+                        } else if (file_type === 'image' && !metadata.rotate) {
                             const data = {
                                 file: filegraph,
                                 userId: request.auth.credentials.user.rid,

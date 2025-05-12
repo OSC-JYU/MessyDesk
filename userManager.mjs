@@ -21,6 +21,7 @@ export const userManager = {
 
     // Send message to a specific user
     sendToUser(userRID, message) {
+        console.log('SENDING TO USER: ', userRID)
         const connection = userConnections.get(userRID);
         
         if (connection) {

@@ -77,7 +77,7 @@ export default [
                         // write error to node, send update to UI and index error
                         const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
                         logger.error('Error processing files', { error: error, message: message });
-                        await Graph.setNodeError(targetNode, {key: 'node_error', value: 'error'}, request.auth.credentials.user.rid);
+                        await Graph.setNodeError(targetNode, 'error', request.auth.credentials.user.rid);
                         console.log('ERROR');
                         console.log(message);
                         await userManager.sendToUser(message.userId, wsdata);

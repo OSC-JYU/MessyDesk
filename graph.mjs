@@ -534,7 +534,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 	
 	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
 
-	// do we need info about "parent" file?
+	// do we need info about "parent" file? Like for image rotation based on OSD file
 	if(service.tasks[data.task]?.source == 'source_file') {
 		const source = await this.getFileSource(node_rid)
 		if(source) {
@@ -571,9 +571,12 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 	// ROIs also need one message per ROI
 	} else if (roi) {
 		// we can work with ROIs only if we have width and height of file
+		console.log('ROI: ', roi)
+		console.log('NODE METADATA: ', node_metadata)
 		if(node_metadata.metadata) var metadata = node_metadata.metadata
 		if(metadata && metadata.width && metadata.height) {
 			var rois = await this.getROIs(node_rid)
+			console.log('ROIS: ', rois)
 			for(var roi_item of rois) {
 				var m = media.ROIPercentagesToPixels(roi_item, structuredClone(message))
 				messages.push(m)
