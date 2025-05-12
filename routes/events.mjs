@@ -5,8 +5,8 @@ export default [
         method: 'GET',
         path: '/events',
         handler: (request, h) => {
-            const userId = request.auth.credentials.user.id;
-            if (!userId) {
+            const userRID = request.auth.credentials.user.rid;
+            if (!userRID) {
                 return h.response({ error: 'User ID is required' }).code(400);
             }
 
@@ -15,7 +15,7 @@ export default [
             console.log('Last event ID:', lastEventId);
 
             // Store the connection for this user
-            userManager.addConnection(userId, h);
+            userManager.addConnection(userRID, h);
 
             // Send initial event with a timestamp-based ID
             const initialId = Date.now().toString();
@@ -26,7 +26,7 @@ export default [
 
             // Clean up when the connection is closed
             request.raw.req.on('close', () => {
-                userManager.removeConnection(userId);
+                userManager.removeConnection(userRID);
             });
 
             return response;
@@ -36,9 +36,9 @@ export default [
         method: 'GET',
         path: '/events/test',
         handler: (request, h) => {
-            const userId = request.auth.credentials.user.id;
-            console.log(userId);
-            if (!userId) {
+            const userRID = request.auth.credentials.user.rid;
+            console.log(userRID);
+            if (!userRID) {
                 return h.response({ error: 'User ID is required' }).code(400);
             }
             var users = userManager.getConnectedUsers();
@@ -46,7 +46,7 @@ export default [
             
             // Send test message with a timestamp-based ID
             const messageId = Date.now().toString();
-            userManager.sendToUser(userId, { 
+            userManager.sendToUser(userRID, { 
                 id: messageId,
                 data: { message: 'This is a test message' } 
             });

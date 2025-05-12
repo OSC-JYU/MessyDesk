@@ -2,6 +2,8 @@ import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import nats from '../queue.mjs';
 
+import Boom from '@hapi/boom';
+
 export default [
     {
         method: 'POST',
@@ -30,6 +32,22 @@ export default [
                 Graph.sanitizeRID(request.params.rid),
                 request.auth.credentials.user.rid
             );
+        }
+    },
+    {
+        method: 'PUT',
+        path: '/api/projects/{rid}',
+        handler: async (request) => {
+            try {
+                return await Graph.setProjectAttribute(
+                    Graph.sanitizeRID(request.params.rid),
+                    request.payload,
+                    request.auth.credentials.user.rid
+                );
+            } catch (error) {
+                console.log(error)
+                throw Boom.badRequest(error.message);
+            }
         }
     },
     {

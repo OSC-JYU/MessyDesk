@@ -63,7 +63,7 @@ export default [
         path: '/api/graph/vertices/{rid}',
         handler: async (request) => {
             const clean_rid = Graph.sanitizeRID(request.params.rid);
-            const result = await Graph.setNodeAttribute(clean_rid, request.payload);
+            const result = await Graph.setNodeAttribute(clean_rid, request.payload, request.auth.credentials.user.rid);
             
             if (request.payload.key && request.payload.key === 'description') {
                 const wsdata = {

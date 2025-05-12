@@ -61,7 +61,7 @@ const init = async () => {
 	// Setup development mode authentication bypass
 	if (process.env.MODE === 'development') {
 		server.ext('onRequest', async (request, h) => {
-			console.log('development mode');
+			console.log('NOTE: DEVELOPMENT mode');
 			const defaultUser = process.env.DEV_USER || "local.user@localhost";
 			// Set the auth header for all requests in development mode
 			request.headers[AUTH_HEADER] = defaultUser;

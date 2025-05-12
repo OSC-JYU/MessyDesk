@@ -6,6 +6,7 @@ import media from '../media.mjs';
 import web from '../web.mjs';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
+import services from '../services.mjs';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
@@ -64,13 +65,13 @@ export async function processFilesHandler(request, h) {
                         await Graph.setNodeAttribute(message.file['@rid'], {
                             key: 'metadata',
                             value: {width: info_json.width, height: info_json.height}
-                        }, 'File');
+                        }, request.auth.credentials.user.rid);
                     } else {
                         // nextcloud directory info
                         await Graph.setNodeAttribute(message.file['@rid'], {
                             key: 'metadata',
                             value: info_json
-                        }, 'File');
+                        }, request.auth.credentials.user.rid);
                         const filepath = message.file.path;
                         const base_path = path.dirname(filepath);
                         await media.uploadFile(contentFilepath, {path: message.file.path + '/source.json'});
@@ -91,7 +92,7 @@ export async function processFilesHandler(request, h) {
                 const process_rid = message.process['@rid'];
                 const process_dir = path.dirname(message.process.path);
                 await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'});
-                await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, 'Process');
+                await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, request.auth.credentials.user.rid);
             // else save content to processFileNode
             } else {
                 let info = '';
@@ -150,7 +151,8 @@ export async function processFilesHandler(request, h) {
                     console.log('ner file detected');
                     await Graph.createROIsFromJSON(process_rid, message, fileNode);
                 }
-
+                console.log('SENDING MESSAGE')
+                console.log(message.userId)
                 // update set file count or add file to visual graph
                 if (message.userId) {
                     let wsdata;
@@ -186,11 +188,11 @@ export async function processFilesHandler(request, h) {
 
                         let messages = [];
 
-                        const requests = await Graph.createRequestsFromPipeline(message, fileNode['@rid'].replace('#', ''));
+                        const pipelineLines = await Graph.createRequestsFromPipeline(message, fileNode['@rid'].replace('#', ''));
                         
-                        for (const request of requests) {
-                            const service = services.getServiceAdapterByName(request.params.topic);
-                            messages = await Graph.createQueueMessages(service, request.body, fileNode['@rid'].replace('#', ''), request.headers[AUTH_HEADER]);
+                        for (const line of pipelineLines) {
+                            const service = services.getServiceAdapterByName(line.params.topic);
+                            messages = await Graph.createQueueMessages(service, line.payload, fileNode['@rid'].replace('#', ''), request.auth.credentials.user.rid);
                             for (const msg of messages) {
                                 const wsdata = {
                                     command: 'add',
@@ -199,8 +201,8 @@ export async function processFilesHandler(request, h) {
                                     node: msg.process,
                                     image: API_URL + 'icons/wait.gif'
                                 };
-                                userManager.sendToUser(request.auth.credentials.user.id, wsdata);
-                                nats.publish(request.params.topic, JSON.stringify(msg));
+                                userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+                                nats.publish(line.params.topic, JSON.stringify(msg));
                             }
                         }
                     }

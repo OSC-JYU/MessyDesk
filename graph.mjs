@@ -18,7 +18,10 @@ const API_URL = process.env.API_URL || '/';
 const AUTH_HEADER = 'mail';
 const DEFAULT_USER = 'local.user@localhost';
 
+const MAX_POSITION = 10000; // max x and y for project nodes
 const graph = {};
+
+const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error']
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
@@ -472,7 +475,7 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 				file_rid: file_rid,
 				topic: pipeline.id
 			},
-			body: {
+			payload: {
 				task: pipeline.task,
 				params: pipeline.params,
 				info: pipeline.info,
@@ -481,7 +484,8 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 		}
 		// if we there is next pipeline, add it
 		if (pipeline.pipeline) {
-			request.body.pipeline = pipeline.pipeline		
+			console.log('ADDING pipeline detected')
+			request.payload.pipeline = pipeline.pipeline		
 		}
 		requests.push(request)
 	}
@@ -502,8 +506,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 
 	var data = body
 	console.log("****** CREATEQUEUE MESSAGE ******")
-	console.log(data)
-
+	console.log(data.task)
 	console.log("****** END CREATEQUEUE MESSAGE ******")
 
 	var messages = []
@@ -710,7 +713,6 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 		) <- [r:HAS_FILE] - (p) 
 		RETURN file`
 	var response = await web.cypher(query)
-	console.log(response)
 
 	var file_rid = response.result[0]['@rid']
 	var file_path = path.join(data_dir, 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
@@ -720,7 +722,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	// link file to set
 	if(set_rid) {
 		await this.connect(set_rid, 'HAS_ITEM', file_rid)
-		await this.setNodeAttribute(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
+		await this.setNodeAttribute_old(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
 		await this.updateFileCount(set_rid)
 	}
 	
@@ -788,7 +790,7 @@ graph.createROIs = async function(rid, data) {
 
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
 	var response_count = await web.sql(query_count)
-	await this.setNodeAttribute(rid, {key:"roi_count", value: response_count.result[0].count}, 'File' )
+	await this.setNodeAttribute_old(rid, {key:"roi_count", value: response_count.result[0].count}, 'File' )
 	return response_count.result[0].count
 
 }
@@ -848,7 +850,6 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 		console.log(query)
 		
 	var response = await web.cypher(query)
-	console.log(response)
 
 	var file_rid = response.result[0].file['@rid']
 	var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
@@ -858,7 +859,7 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
 		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
-		await this.setNodeAttribute(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
+		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
 		await this.connect(process_rid, 'PRODUCED', file_rid)
 	// otherwise connect file to process
 	} else {
@@ -906,7 +907,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 	-IS_OWNER->
 		{type:Project, as:project}--> 
 		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
-		console.log(query)
+
 	var file_response = await web.sql(query)
 
 	if(file_response.result[0] && file_response.result[0].file)
@@ -1144,7 +1145,7 @@ graph.connect = async function (from, relation, to) {
 
 	// check for existing link
 	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" RETURN r`
-	console.log(query)
+
 	var response = await web.cypher(query)
 	if (response.result.length > 0) {
 		throw ('Link already exists!')
@@ -1196,13 +1197,105 @@ graph.setEdgeAttribute = async function (rid, data) {
 	return web.cypher(query)
 }
 
+graph.isProjectOwner = async function (rid, userRID) {
+	var query = `MATCH {
+		type: User, 
+		as:p, 
+		where:(@rid = :userRID)}
+	-IS_OWNER->
+		{type:Project, as:project,  where:(@rid = :rid)} return project`
 
-graph.setNodeAttribute = async function (rid, data, type) {
+	var response = await web.sql_params(query, {rid: rid, userRID: userRID}, true)
+	return response.result.length > 0
+}
+
+graph.isNodeOwner = async function (rid, userRID) {
+
+	// node must be somehow related to a project that is owned by user
+	var query = `MATCH {
+		type: User, 
+		as:p, 
+		where:(@rid = ${userRID})}
+	-IS_OWNER->
+		{type:Project, as:project}--> 
+		{as:node, where:(@rid = ${rid}), while: ($depth < 20)} return node`
+
+	var file_response = await web.sql(query)
+	if(file_response.result.length > 0) return file_response.result[0]
+	return null
+}
+
+graph.validateNodeAttribute = async function (data) {
+	if (Array.isArray(data.value) && data.value.length > 0) {
+		data.value = data.value.map(i => `'${i}'`).join(',')
+		return true
+	}
+	return false
+}
+
+graph.setNodeError = async function (rid, error, userRID) {
+	if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
+	let query = `UPDATE :rid SET node_error = :error`
+	let params = {rid: rid, error: error}
+	return web.sql_params(query, params)
+}
+
+graph.setNodePosition = async function (rid, position) {
+
+	// check that position is an object with x and y properties
+	if(typeof position != 'object' || !position.x || !position.y) throw({'message': 'Invalid position'})
+	// check that x and y are integers between -2000 and 2000, or zero
+	if(!Number.isInteger(position.x) || position.x > MAX_POSITION || position.x < -MAX_POSITION) throw({'message': `Position x must be an integer between -${MAX_POSITION} and ${MAX_POSITION}`})
+	if(!Number.isInteger(position.y) || position.y > MAX_POSITION || position.y < -MAX_POSITION) throw({'message': `Position y must be an integer between -${MAX_POSITION} and ${MAX_POSITION}`})
+
+	let query = `UPDATE ${rid} SET position = {x: ${position.x}, y: ${position.y}}`
+	return web.sql(query)
+}
+
+graph.setProjectAttribute = async function (rid, data, userRID) {
+	if(!await this.isProjectOwner(rid, userRID)) throw({'message': 'You are not the owner of this project'})
+
+	const where = ` WHERE @rid = :rid`
+	let query = ''
+	let params = {rid: rid}
+
+	if (data.key == 'position') {
+		return this.setNodePosition(rid, data.value)
+	}
+
+	if(['description', 'label'].includes(data.key)) {
+		query = `UPDATE Project SET ${data.key} = :${data.key} ${where}`
+		params[data.key] = data.value
+	} else {
+		throw({'message': 'Invalid data'})
+	}
+
+	return web.sql_params(query, params)
+}	
+
+
+graph.setNodeAttribute = async function (rid, data, userRID) {
+
+	if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
+
+	let query = ''
+	let params = {rid: rid}
+	if(NODE_ATTRIBUTES.includes(data.key)) {
+		query = `UPDATE :rid SET ${data.key} = :${data.key}`
+		params[data.key] = data.value
+	} else {
+		throw({'message': 'Invalid data'})
+	}
+
+	return web.sql_params(query, params)
+}
+
+
+graph.setNodeAttribute_old = async function (rid, data, type) {
+	const clean_file_rid = this.sanitizeRID(rid)
 	if (!type) throw('Type is required')
-	console.log(rid, data)
-	if (!rid.match(/^#/)) rid = '#' + rid
-	const where = ` WHERE @rid = ${rid} `
-	console.log(where)
+
+	const where = ` WHERE @rid = ${clean_file_rid} `
 	let query = ''
 
 	if (Array.isArray(data.value) && data.value.length > 0) {
@@ -1437,10 +1530,10 @@ graph.linkEntity = async function (rid, vid, userRID) {
 	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
 	var response = await web.sql(query)
 	var entity = response.result[0]
-	console.log(entity)
+	
 	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
 	response = await web.sql(query)
-	console.log(response.result)
+
 	var target = response.result[0]
 	if(!entity || !target) return	
 	var linked = await this.connect(vid, 'HAS_ENTITY',rid)

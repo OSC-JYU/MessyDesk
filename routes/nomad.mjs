@@ -76,7 +76,8 @@ export default [
 
                         // write error to node, send update to UI and index error
                         const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-                        await Graph.setNodeAttribute(targetNode, {key: 'node_error', value: 'error'}, 'File');
+                        logger.error('Error processing files', { error: error, message: message });
+                        await Graph.setNodeError(targetNode, {key: 'node_error', value: 'error'}, request.auth.credentials.user.rid);
                         console.log('ERROR');
                         console.log(message);
                         await userManager.sendToUser(message.userId, wsdata);
@@ -143,7 +144,7 @@ export default [
                     const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
 
                     if(message?.file?.metadata?.page_count) {
-                        await Graph.setNodeAttribute(targetNode, {key: 'metadata.page_count', value: message.file.metadata.page_count}, 'File');
+                        await Graph.setNodeAttribute_old(targetNode, {key: 'metadata.page_count', value: message.file.metadata.page_count}, 'File');
                     }
 
                     message.task = 'pdf2images';

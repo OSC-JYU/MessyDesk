@@ -166,8 +166,7 @@ media.createProcessDir = async function(process_path) {
 
 media.uploadFile = async function(uploadpath, filegraph) {
 
-	console.log(filegraph)
-	console.log(uploadpath)
+
 	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
@@ -227,16 +226,13 @@ media.getImageSize = async function(filepath) {
 }
 
 media.saveThumbnail = async function(uploadpath, basepath, filename) {
-	console.log(filename)
+
 	const filedata = {}
 	try {
 		await fse.ensureDir(path.join(basepath))
 		const filepath = path.join(basepath, filename)
-		console.log(uploadpath)
-		console.log(filepath)
 
 		await fse.move(uploadpath, filepath);
-		console.log('File moved successfully!')
 
 		return filedata
 
@@ -276,7 +272,7 @@ media.detectType = async function(file) {
     var extension = path.extname(originalFilename)
 
     var ftype = mimeType.split('/')[0]
-    console.log(ftype)
+
     if(TYPES.includes(ftype)) {
         return ftype
     } else if(mimeType == 'application/pdf') {
@@ -333,7 +329,7 @@ media.getTextDescription = async function (filePath, file_type) {
 
 
 media.getThumbnail = async function(filePath) {
-	console.log(filePath)
+
 	try {
 		if(!filePath) {
 			return fs.createReadStream('images/image_not_found.jpg')
@@ -352,7 +348,7 @@ media.getThumbnail = async function(filePath) {
 		}
 
 		let fullPath = path.join(base.replace('/api/thumbnails/', './'), thumbfile)
-		console.log(fullPath)
+	
 
         // Check if the file exists asynchronously
         var fileExists = await fse.pathExists(fullPath)
@@ -395,7 +391,7 @@ function NERsummary(data) {
 		for (const [group, count] of Object.entries(entityCounts)) {
 			summary += `- ${group}: ${count}\n`;
 		}
-console.log(summary)
+
 		return summary;
 
 
@@ -424,7 +420,6 @@ function JSON2text(data) {
 
 async function checkFileExists(filePath) {
 	try {
-		console.log(filePath)
 	  	await fse.access(filePath);
 	  	return true;
 	} catch (err) {

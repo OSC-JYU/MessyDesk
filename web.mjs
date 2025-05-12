@@ -222,6 +222,33 @@ web.sql2 = async function(query, options) {
 	//return response.data
 }
 
+web.sql_params = async function(query, params, raw) {
+	
+	var config = {
+		auth: {
+			username: username,
+			password: password
+		}
+	};
+	const query_data = {
+		command:query,
+		language:'sql',
+		params: params
+	}
+
+	try {
+		var response = await axios.post(URL, query_data, config)
+		if(raw) return response.data
+		return convert2VueFlow(response.data)
+
+	} catch(e) {
+		console.log(e.message)
+		throw({msg: 'error in query', query: query, error: e})
+	}
+	//var response = await axios.post(URL, query_data, config)
+
+}
+
 web.cypher = async function(query, options) {
 
 	if(!options) var options = {}

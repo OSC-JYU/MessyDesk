@@ -4,6 +4,8 @@ import services from '../services.mjs';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 
+const API_URL = process.env.API_URL || '/';
+
 
 export default [
     {
@@ -15,25 +17,19 @@ export default [
             if(request.params.roi) clean_roi = Graph.sanitizeRID(request.params.roi);
             let messages = [];
             
-            var requests = await Graph.createRequestsFromPipeline(request.payload, clean_rid, clean_roi);
+            var pipelineLines = await Graph.createRequestsFromPipeline(request.payload, clean_rid, clean_roi);
             
-            for(var request of requests) {
-                var service = services.getServiceAdapterByName(request.params.topic);
-                messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.id );
+            for(var line of pipelineLines) {
+                var service = services.getServiceAdapterByName(line.params.topic);
+                messages = await Graph.createQueueMessages(service, line.payload, request.params.file_rid, request.auth.credentials.user.rid );
                 for(var msg of messages) {
-                    userManager.sendToUser(request.auth.credentials.user.id, {
-                        command: 'add', 
-                        type: 'process', 
-                        target: msg.file['@rid'], 
-                        node:msg.process, 
-                        image:process.env.API_URL + 'icons/wait.gif'});
-                    nats.publish(request.params.topic, JSON.stringify(msg));
+                    nats.publish(line.params.topic, JSON.stringify(msg));
                 }
             }
-
             return messages;
         }
     },
+
     {
         method: 'GET', 
         path: '/api/queue/{topic}/status',
@@ -62,13 +58,13 @@ export default [
                     if(request.params.roi) {
                         var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process};
                     } else {
-                        var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:process.env.API_URL + 'icons/wait.gif'};
+                        var wsdata = {command: 'add', type: 'process', target: msg.file['@rid'], node:msg.process, image:API_URL + 'icons/wait.gif'};
                     }
                     // there is output Set node, then add it too to UI
                     if(msg.set_node) {
                         wsdata.set_node = msg.set_node;
                     }
-                    userManager.sendToUser(request.auth.credentials.user.id, wsdata);
+                    userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                 }
 
                 for(var msg of messages) {    
@@ -112,7 +108,7 @@ export default [
                 var nodes = await Graph.createSetProcessNode(task_name, service, request.payload, set_metadata, request.auth.credentials.user.rid);
 
                 // add node to UI
-                var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set, image:process.env.API_URL + 'icons/wait.gif'};
+                var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set, image:API_URL + 'icons/wait.gif'};
                 userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
                 // next we create process nodes for each file in set and put them in queue

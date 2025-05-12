@@ -3,25 +3,25 @@ const userConnections = new Map();
 
 export const userManager = {
     // Add a new user connection
-    addConnection(userId, connection) {
-        if (!userId) {
+    addConnection(userRID, connection) {
+        if (!userRID) {
             throw new Error('User ID is required');
         }
-        userConnections.set(userId, connection);
-        console.log(`User ${userId} connected`);
+        userConnections.set(userRID, connection);
+        console.log(`User ${userRID} connected`);
     },
 
     // Remove a user connection
-    removeConnection(userId) {
-        if (userConnections.has(userId)) {
-            userConnections.delete(userId);
-            console.log(`User ${userId} disconnected`);
+    removeConnection(userRID) {
+        if (userConnections.has(userRID)) {
+            userConnections.delete(userRID);
+            console.log(`User ${userRID} disconnected`);
         }
     },
 
     // Send message to a specific user
-    sendToUser(userId, message) {
-        const connection = userConnections.get(userId);
+    sendToUser(userRID, message) {
+        const connection = userConnections.get(userRID);
         
         if (connection) {
             const initialId = Date.now().toString();
@@ -35,8 +35,8 @@ export const userManager = {
     },
 
     // Check if a user is connected
-    isUserConnected(userId) {
-        return userConnections.has(userId);
+    isUserConnected(userRID) {
+        return userConnections.has(userRID);
     },
 
     // Get all connected users

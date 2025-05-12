@@ -89,7 +89,7 @@ export default [
                         const stats = await fse.stat(filegraph.path);
                         filegraph.metadata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100    // rounded to MB with 2 decimal places
                         try {
-                            await Graph.setNodeAttribute(filegraph['@rid'], {
+                            await Graph.setNodeAttribute_old(filegraph['@rid'], {
                                 key: 'metadata.size',
                                 value: filegraph.metadata.size
                             }, 'File');
@@ -104,7 +104,7 @@ export default [
                                 await Graph.setNodeAttribute(filegraph['@rid'], {
                                     key: 'info',
                                     value: info
-                                }, 'File');
+                                }, request.auth.credentials.user.rid);
                             } catch (error) {
                                 console.log('Error getting text description:', error);
                             }
@@ -125,7 +125,7 @@ export default [
                                 id: 'solr',
                                 task: 'index',
                                 file: filegraph,
-                                userId: request.auth.credentials.user.id,
+                                userId: request.auth.credentials.user.rid,
                                 target: filegraph['@rid']
                             };
                             nats.publish(index_msg.id, JSON.stringify(index_msg));
@@ -134,20 +134,20 @@ export default [
                         } else if (file_type === 'image') {
                             const data = {
                                 file: filegraph,
-                                userId: request.auth.credentials.user.id,
+                                userId: request.auth.credentials.user.rid,
                                 target: filegraph['@rid'],
                                 task: 'thumbnail',
                                 params: { width: 800, type: 'jpeg' },
                                 id: 'md-thumbnailer'
                             };
-                            console.log(data)
+                            
                             nats.publish(data.id, JSON.stringify(data));
 
                         // PDF
                         } else if (file_type === 'pdf') {
                             const data = {
                                 file: filegraph,
-                                userId: request.auth.credentials.user.id,
+                                userId: request.auth.credentials.user.rid,
                                 target: filegraph['@rid'],
                                 task: 'split',
                                 params: {},
@@ -166,7 +166,7 @@ export default [
                                 image: 'api/thumbnails',
                                 set: request.params.set
                             };
-                            userManager.sendToUser(request.auth.credentials.user.id, wsdata);
+                            userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                         }
                         resolve(filegraph);
                     });
@@ -188,7 +188,6 @@ export default [
         method: 'GET',
         path: '/api/documents/{rid}',
         handler: async (request, h) => {
-            console.log(request.auth.credentials.user);
             const clean_rid = Graph.sanitizeRID(request.params.rid);
             const n = await Graph.getNodeAttributes(clean_rid);
             const entities = await Graph.getLinkedEntities(clean_rid, request.auth.credentials.user.rid);
@@ -233,7 +232,6 @@ export default [
                         params: { width: 800, type: 'jpeg' },
                         id: 'md-thumbnailer'
                     };
-                    console.log(data)
                     nats.publish(data.id, JSON.stringify(data));
 
                 // PDF thumbnail is made by poppler
@@ -258,6 +256,19 @@ export default [
             } catch (e) {
                 return h.response().code(403);
             }
+        }
+    },
+    {
+        method: 'PUT',
+        path: '/api/files/{file_rid}',
+        handler: async (request, h) => {
+            const file_rid = request.params.file_rid;
+            const metadata = request.payload;
+            const file = await Graph.getUserFileMetadata(file_rid, request.auth.credentials.user.rid);
+            if (!file) {
+                return h.response().code(404);
+            }
+            return file;
         }
     },
     {
@@ -342,7 +353,6 @@ export default [
                     'pages',
                     `page_${request.params.page_number}.pdf`
                 );
-                console.log('pageFilename: ', pageFilename);
                 // Verify file exists before creating read stream
                 try {
                     await fse.access(pageFilename);
