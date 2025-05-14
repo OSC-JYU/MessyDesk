@@ -3,6 +3,8 @@ import Graph from '../graph.mjs';
 import services from '../services.mjs';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
+import media from '../media.mjs';
+import path from 'path';
 
 const API_URL = process.env.API_URL || '/';
 
@@ -114,6 +116,7 @@ export default [
                 // next we create process nodes for each file in set and put them in queue
                 var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit:'500'});
 
+                var file_count = 1;
                 for(var file of set_files.files) {
                     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
                     console.log(file_metadata);
@@ -135,9 +138,13 @@ export default [
                     msg.process = processNode;
                     msg.file = file_metadata;
                     msg.target = file_metadata['@rid'];
+                    msg.total_files = set_files.files.length;
+                    msg.current_file = file_count;
                     msg.userId = request.auth.credentials.user.rid;
                     msg.output_set = nodes.set['@rid'];  // link file to output Set
                     nats.publish(topic + '_batch', JSON.stringify(msg));
+                    
+                    file_count += 1;
                 }
 
                 return set_rid;

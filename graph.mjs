@@ -527,11 +527,11 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 		throw new Error('File not found: '+ node_rid )
 	}
 
-	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_rid)
-	await media.createProcessDir(processNode.path)
 	if(service.tasks[data.task] && service.tasks[data.task].system_params)
 		message.params = service.tasks[data.task].system_params
-	
+
+	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_rid)
+	await media.createProcessDir(processNode.path)
 	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
 
 	// do we need info about "parent" file? Like for image rotation based on OSD file
@@ -559,14 +559,21 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 	// pdfs are splitted so we give each page its own message
 	if(node_metadata.type == 'pdf') {
 		message.pdf = true
-		if(data.params.firstPageToConvert && data.params.lastPageToConvert) {
+		if(node_metadata?.metadata?.page_count && data.params.firstPageToConvert && data.params.lastPageToConvert) {
 			const first = parseInt(data.params.firstPageToConvert)
-			const last = parseInt(data.params.lastPageToConvert)
-			for(var i = first; i <= last; i++) {
-				var m = structuredClone(message)
-				m.params.page = i
-				messages.push(m)
-			}	
+			var last = parseInt(data.params.lastPageToConvert)
+			if(last > node_metadata?.metadata?.page_count) last = node_metadata?.metadata?.page_count
+			if(first < last) {
+				var c = 1
+				for(var i = first; i <= last; i++) {
+					var m = structuredClone(message)
+					m.params.page = i
+					m.total_files = last - first + 1
+					m.current_file = c
+					c += 1
+					messages.push(m)
+				}	
+			}
 		}
 	// ROIs also need one message per ROI
 	} else if (roi) {
@@ -1238,9 +1245,13 @@ graph.validateNodeAttribute = async function (data) {
 
 graph.setNodeError = async function (rid, error, userRID) {
 	if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
-	let query = `UPDATE :rid SET node_error = :error`
-	let params = {rid: rid, error: error}
-	return web.sql_params(query, params)
+	let query = `UPDATE ${rid} SET node_error = 'error'`
+	let params = {error: error}
+	try {
+		return web.sql(query)
+	} catch (e) {
+		throw({'message': 'Error setting node error'})
+	}
 }
 
 graph.setNodePosition = async function (rid, position) {
@@ -1520,17 +1531,49 @@ graph.createEntity = async function (data, userRID) {
 	if(!data.label || data.label == 'undefined') return
 	var schema = `SELECT color, icon FROM EntityType WHERE type = "${data.type}"`
 	var response = await web.sql(schema)
-	if(!response.result.length) return
-	if(!data.icon) data.icon = response.result[0].icon
-	if(!data.color) data.color = response.result[0].color
+	if(response.result.length) {
+		if(!data.icon) data.icon = response.result[0].icon || 'mdi-tag'
+		if(!data.color) data.color = response.result[0].color || '#ff8844'
+	} else {
+		data.icon = 'mdi-tag'
+		data.color = '#ff8844'
+	}
 	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
+	console.log(query)
 	return await web.sql(query)
+}
+
+graph.checkEntity = async function (data, node_rid, userRID) {
+	var query = `MATCH {type: Entity, as: entity, where: (type = "${data.type}" AND label = "${data.label}" AND owner = "${userRID}")}--{as: node, where: (@rid = ${node_rid}), optional: true} RETURN entity, node`
+	return await web.sql(query)
+}
+
+// data should be array of entities
+graph.createEntityAndLink = async function (data, rid, userRID) {
+	if(!rid.match(/^#/)) rid = '#' + rid
+	var entities = []
+	for(var entity of data) {
+		var response = await this.checkEntity(entity, rid, userRID)
+		if(response.result.length) {
+			if(!response.result[0].node) {
+				await this.linkEntity(rid, response.result[0].entity['@rid'], userRID)
+			}
+		} else {
+			var new_entity = await this.createEntity(entity, userRID)
+			if(new_entity.result.length) {
+				await this.linkEntity(new_entity.result[0]['@rid'], rid, userRID)
+			}
+			entities.push(new_entity)
+		}
+	}
+	return entities
 }
 
 graph.linkEntity = async function (rid, vid, userRID) {	
 	if(!rid.match(/^#/)) rid = '#' + rid
 	if(!vid.match(/^#/)) vid = '#' + vid
-	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
+	var query = `MATCH {type: Entity, as: entity, where: (@rid = ${rid} AND owner = "${userRID}")} RETURN entity`
+	console.log(query)
 	var response = await web.sql(query)
 	var entity = response.result[0]
 	
@@ -1538,6 +1581,7 @@ graph.linkEntity = async function (rid, vid, userRID) {
 	response = await web.sql(query)
 
 	var target = response.result[0]
+	console.log(entity, target)
 	if(!entity || !target) return	
 	var linked = await this.connect(vid, 'HAS_ENTITY',rid)
 	return linked

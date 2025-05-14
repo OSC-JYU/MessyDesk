@@ -77,7 +77,10 @@ export async function processFilesHandler(request, h) {
                     };
                     // direct link to thumbnail
                     wsdata.image = API_URL + 'api/thumbnails/' + base_path;
-                    userManager.sendToUser(message.userId, wsdata);
+                    // if we batch processing, don't send WS to user since this would create lot of traffic
+                    if(!message.output_set) {
+                        userManager.sendToUser(message.userId, wsdata);
+                    }
                 }
             } catch (e) {
                 throw('Could not move file!' + e);
@@ -117,6 +120,7 @@ export async function processFilesHandler(request, h) {
                         file: fileNode,
                         userId: message.userId,
                         target: fileNode['@rid'],
+                        output_set: message.output_set,
                         params: {width: 800, type: 'jpeg'}
                     };
                     nats.publish(th.id, JSON.stringify(th));
@@ -136,10 +140,10 @@ export async function processFilesHandler(request, h) {
                 }
 
                 // create ROIs for ner.json and human.json
-                if (message.file.type == 'ner.json' || message.file.type == 'human.json') {
-                    console.log('ner file detected');
-                    await Graph.createROIsFromJSON(process_rid, message, fileNode);
-                }
+                // if (message.file.type == 'ner.json' || message.file.type == 'human.json') {
+                //     console.log('ner file detected');
+                //     await Graph.createROIsFromJSON(process_rid, message, fileNode);
+                // }
 
                 // update set file count or add file to visual graph
                 if (message.userId) {
@@ -147,13 +151,25 @@ export async function processFilesHandler(request, h) {
                     // update set's file count if file is part of set
                     if (message.output_set) {
                         const count = await Graph.updateFileCount(message.output_set);
-                        wsdata = {
-                            command: 'update',
-                            type: 'set',
-                            target: message.output_set,
-                            count: count
-                        };
-                    // otherwise add node to visual graph
+                        if(message.current_file == message.total_files) {
+                            wsdata = {
+                                command: 'process_finished',
+                                type: 'set',
+                                target: message.output_set,
+                                process: process_rid,
+                                current_file: message.current_file,
+                                total_files: message.total_files
+                            };
+                        } else {
+                            wsdata = {
+                                command: 'process_update',
+                                type: 'set',
+                                target: message.output_set,
+                                process: process_rid,
+                                current_file: message.current_file,
+                                total_files: message.total_files
+                            };
+                        }
                     } else {
                         wsdata = {
                             command: 'add',

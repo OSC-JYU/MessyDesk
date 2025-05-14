@@ -1,4 +1,5 @@
 import Graph from '../graph.mjs';
+import Boom from '@hapi/boom';
 
 export default [
     {
@@ -22,6 +23,15 @@ export default [
         path: '/api/entities',
         handler: async (request) => {
             const result = await Graph.createEntity(request.payload, request.auth.credentials.user.rid);
+            return result;
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/entities/link/{rid}',
+        handler: async (request) => {
+            if(!Array.isArray(request.payload)) throw Boom.badRequest('Payload must be an array');
+            const result = await Graph.createEntityAndLink(request.payload, request.params.rid, request.auth.credentials.user.rid);
             return result;
         }
     },
