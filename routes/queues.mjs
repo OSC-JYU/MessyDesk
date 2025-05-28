@@ -10,6 +10,7 @@ const API_URL = process.env.API_URL || '/';
 
 
 export default [
+    // pipeline
     {
         method: 'POST',
         path: '/api/pipeline/files/{file_rid}/{roi?}',
@@ -107,15 +108,27 @@ export default [
 
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
                 console.log('set_metadata: ', set_metadata);
+
+                var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit:'500'});
                 var nodes = await Graph.createSetProcessNode(task_name, service, request.payload, set_metadata, request.auth.credentials.user.rid);
+
 
                 // add node to UI
                 var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set, image:API_URL + 'icons/wait.gif'};
                 userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
-                // next we create process nodes for each file in set and put them in queue
-                var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit:'500'});
+                if(service.output == 'always file') {
+                    msg.process = processNode;
+                    msg.file = file_metadata;
+                    msg.total_files = set_files.files.length;
+                    msg.current_file = file_count;
+                    msg.userId = request.auth.credentials.user.rid;
+                    console.log(msg)
+                    nats.publish(topic + '_batch', JSON.stringify(msg));
+                    return service
+                }
 
+                // next we create process nodes for each file in set and put them in queue
                 var file_count = 1;
                 for(var file of set_files.files) {
                     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
@@ -143,7 +156,7 @@ export default [
                     msg.userId = request.auth.credentials.user.rid;
                     msg.output_set = nodes.set['@rid'];  // link file to output Set
                     nats.publish(topic + '_batch', JSON.stringify(msg));
-                    
+
                     file_count += 1;
                 }
 

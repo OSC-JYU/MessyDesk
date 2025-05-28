@@ -55,6 +55,7 @@ export default [
         method: 'POST',
         path: '/api/nomad/process/files/error',
         handler: async (request, h) => {
+
             if (request.payload && request.payload.error) {
                 const error = request.payload.error;
                 if (request.payload.message) {
@@ -76,10 +77,7 @@ export default [
 
                         // write error to node, send update to UI and index error
                         const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-                        logger.error('Error processing files', { error: error, message: message });
                         await Graph.setNodeError(targetNode, 'error', message.userId);
-                        console.log('ERROR');
-                        console.log(message);
                         await userManager.sendToUser(message.userId, wsdata);
 
                         const index_msg = [{
@@ -136,7 +134,7 @@ export default [
                     await userManager.sendToUser(message.userId, wsdata);
                 }
 
-                // If target is a pdf, send thumbnail message to md-poppler
+                // If target is a pdf, send cover page thumbnail message to md-poppler
                 if(message?.file?.type == 'pdf') {
                     // PDF page count
 

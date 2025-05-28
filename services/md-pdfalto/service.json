@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:8500",
+    "local_url": "http://localhost:8500",
     "id": "md-pdfalto",
     "type": "pdf",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"PDFAlto",
     

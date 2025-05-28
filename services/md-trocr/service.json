@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:9100",
+    "local_url": "http://localhost:9100",
     "id": "md-trocr",
     "type": "pdf",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"TROCR",
     

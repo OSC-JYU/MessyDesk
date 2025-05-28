@@ -1,9 +1,10 @@
 {
 
-    "url": "http://localhost:8301",
+    "local_url": "http://localhost:8301",
     "id": "md-cld",
     "type": "text",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"Compact Language Detector (CLD2)",
 

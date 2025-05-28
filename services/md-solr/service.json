@@ -1,0 +1,27 @@
+{
+    "url": "http://localhost:9003",
+    "id": "md-solr",
+    "type": "solr",
+    "api_type": "elg",
+    "api": "/process",
+    "name" :"Solr",
+    
+    "supported_types": ["txt"],
+    "supported_formats": ["txt"],
+
+    "description": "Solr",
+
+
+
+    "tasks": {
+        "solr": {
+            "source":"source_file",
+            "params": {
+                "task": "solr"
+            },
+            "output": "index",
+            "name": "Solr",
+            "description": "Solr"
+        }
+    }
+}

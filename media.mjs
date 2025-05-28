@@ -7,6 +7,7 @@ import sizeOf from 'image-size';
 import archiver from 'archiver';
 import os from 'os';
 import logger from './logger.mjs';
+import unzipper from 'unzipper';
 
 
 const TYPES = ['image', 'text'] 
@@ -136,6 +137,9 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 }
 
 
+
+
+
 media.createDataDir = async function(data_dir) {
 	try {
 		//await fse.ensureDir(data_dir)
@@ -143,7 +147,7 @@ media.createDataDir = async function(data_dir) {
 		await fse.ensureDir(path.join(data_dir, 'uploads'))
 		await fse.ensureDir(path.join(data_dir, 'layouts'))
 	} catch(e) {
-		throw('Could not create data directory!' + e.message)
+		throw('Could not create data directory!  [' + data_dir + '] ' + e.message)
 	}
 }
 
@@ -196,85 +200,11 @@ media.uploadFile = async function(uploadpath, filegraph) {
 	}
 }
 
-media.rotateImage = async function(originalPath, rotatedPath, rotate) {
+media.replaceFile = async function(originalPath, filegraph) {
 	try {
-		const ext = path.extname(originalPath).toLowerCase();
-		
-		if (ext === '.jpg' || ext === '.jpeg') {
-			// Use jpegtran for lossless JPEG rotation
-			const jpegtran = require('jpegtran-bin');
-			const { execFile } = require('child_process');
-			
-			await new Promise((resolve, reject) => {
-				execFile(jpegtran, ['-rotate', rotate, '-outfile', rotatedPath, originalPath], (error) => {
-					if (error) reject(error);
-					resolve();
-				});
-			});
-			
-		} else if (ext === '.png') {
-			// Use pngjs for lossless PNG rotation
-			const PNG = require('pngjs').PNG;
-			const fs = require('fs');
-			
-			const png = await new Promise((resolve, reject) => {
-				fs.createReadStream(originalPath)
-					.pipe(new PNG())
-					.on('parsed', function() {
-						resolve(this);
-					})
-					.on('error', reject);
-			});
-			
-			// Create rotated buffer
-			const rotatedPng = new PNG({width: rotate % 180 === 0 ? png.width : png.height,
-									  height: rotate % 180 === 0 ? png.height : png.width});
-			
-			// Copy pixels with rotation
-			for (let y = 0; y < png.height; y++) {
-				for (let x = 0; x < png.width; x++) {
-					let newX, newY;
-					switch(rotate) {
-						case 90:
-							newX = png.height - 1 - y;
-							newY = x;
-							break;
-						case 180:
-							newX = png.width - 1 - x;
-							newY = png.height - 1 - y;
-							break;
-						case 270:
-							newX = y;
-							newY = png.width - 1 - x;
-							break;
-					}
-					
-					const oldIdx = (png.width * y + x) << 2;
-					const newIdx = (rotatedPng.width * newY + newX) << 2;
-					
-					rotatedPng.data[newIdx] = png.data[oldIdx];
-					rotatedPng.data[newIdx + 1] = png.data[oldIdx + 1];
-					rotatedPng.data[newIdx + 2] = png.data[oldIdx + 2];
-					rotatedPng.data[newIdx + 3] = png.data[oldIdx + 3];
-				}
-			}
-			
-			await new Promise((resolve, reject) => {
-				rotatedPng.pack().pipe(fs.createWriteStream(rotatedPath))
-					.on('finish', resolve)
-					.on('error', reject);
-			});
-			
-		} else {
-			// Fallback to Sharp for other formats
-			const image = await sharp(originalPath);
-			await image.rotate(rotate);
-			await image.toFile(rotatedPath);
-		}
-		
+		await fse.rename(originalPath, filegraph.path);
 	} catch (error) {
-		console.log('Error rotating image:', error);
-		throw error;
+		console.log('Error replacing file:', error);
 	}
 }
 
@@ -357,6 +287,9 @@ media.detectType = async function(file) {
     var extension = path.extname(originalFilename)
 
     var ftype = mimeType.split('/')[0]
+    if(mimeType == 'application/zip' || extension == '.zip') {
+        return 'zip'
+    }
 
     if(TYPES.includes(ftype)) {
         return ftype
@@ -399,6 +332,17 @@ media.getTextDescription = async function (filePath, file_type) {
 			if(json_str) {
 				return json_str.substring(0, maxCharacters);
 			}	
+		} else if(file_type == 'ocr.json') {
+			// let's assume the json looks like this:
+			// [{"coordinates":[{"x":0.05599300087489064,"y":0.164519906323185},{"x":0.5433070866141733,"y":0.15515222482435598},{"x":0.5441819772528433,"y":0.1797423887587822},{"x":0.0568678915135608,"y":0.18969555035128804}],"text":"kapäiväinen lentoyhteys Uumajaan.","confidence":0.9961017370223999}]
+			// we want to return the few lines of text 
+			var text = ''
+			var json = JSON.parse(data)
+			for(var i = 0; i < json.length; i++) {
+				text += json[i].text + ' '
+			}
+			return text.substring(0, maxCharacters)
+
 		} else {
 			var first = data.substring(0, maxCharacters);
 			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
@@ -646,6 +590,52 @@ ${fileList.map(file => file.original_filename || file.label || file.path).join('
             stack: err.stack
         });
         return h.response('Error creating zip file').code(500);
+    }
+}
+
+media.extractZip = async function(zipPath, destinationPath) {
+    try {
+        // Ensure the destination directory exists
+        await fse.ensureDir(destinationPath);
+
+        logger.info('Starting zip extraction', { 
+            zipPath,
+            destinationPath
+        });
+
+        // Create a read stream for the zip file
+        const zipStream = fs.createReadStream(zipPath);
+        
+        // Use unzipper for extraction
+        await new Promise((resolve, reject) => {
+            zipStream
+                .pipe(unzipper.Extract({ path: destinationPath }))
+                .on('close', () => {
+                    logger.info('Zip extraction completed', { 
+                        zipPath,
+                        destinationPath
+                    });
+                    resolve();
+                })
+                .on('error', (err) => {
+                    logger.error('Extraction error', { 
+                        error: err.message,
+                        zipPath,
+                        destinationPath
+                    });
+                    reject(err);
+                });
+        });
+
+        return true;
+    } catch (err) {
+        logger.error('Error in extractZip', { 
+            error: err.message,
+            zipPath,
+            destinationPath,
+            stack: err.stack
+        });
+        throw err;
     }
 }
 

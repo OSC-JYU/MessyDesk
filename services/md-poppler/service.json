@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:8300",
+    "local_url": "http://localhost:8300",
     "id": "md-poppler",
     "type": "pdf",
     "api_type": "elg",
+    "adapter": "poppler",
     "api": "/process",
     "name" :"Poppler",
     

@@ -1,7 +1,7 @@
 IMAGES := $(shell docker images -f "dangling=true" -q)
 CONTAINERS := $(shell docker ps -a -q -f status=exited)
 VOLUME := md-main
-VERSION := 25.04.29
+VERSION := 25.05.21
 REPOSITORY := osc.repo.kopla.jyu.fi
 IMAGE := messydesk
 
@@ -16,7 +16,15 @@ build:
 start:
 	docker run -d --name $(IMAGE) \
 		-p 8200:8200 \
-		--restart unless-stopped \
+		-e DATA_DIR=/data \
+		--net=host \
+		-e DB_NAME=messydesk \
+		-e DB_PORT=2480 \
+		-e DB_USER=root \
+		-e DB_PASSWORD=node_master \
+		-e MODE=development \
+		-e PODMAN=true \
+		-v $(VOLUME):/data:Z \
 		$(REPOSITORY)/messydesk/$(IMAGE):$(VERSION)
 
 restart:

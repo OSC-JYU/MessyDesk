@@ -1,9 +1,10 @@
 {
 
-    "url": "",
+    "local_url": "",
     "id": "md-gemini",
     "type": "text",
     "api_type": "elg",
+    "adapter": "gemini-ai",
     "api": "/process",
     "location": "external",
     "access": "commercial",

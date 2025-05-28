@@ -23,6 +23,7 @@ import authRoutes from './routes/auth.mjs';
 import eventRoutes from './routes/events.mjs';
 import nomadRoutes from './routes/nomad.mjs';
 import queueRoutes from './routes/queues.mjs';
+import promptRoutes from './routes/prompts.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,7 +62,6 @@ const init = async () => {
 	// Setup development mode authentication bypass
 	if (process.env.MODE === 'development') {
 		server.ext('onRequest', async (request, h) => {
-			console.log('NOTE: DEVELOPMENT mode');
 			const defaultUser = process.env.DEV_USER || "local.user@localhost";
 			// Set the auth header for all requests in development mode
 			request.headers[AUTH_HEADER] = defaultUser;
@@ -79,8 +79,6 @@ const init = async () => {
 		const scheme = (server, options) => {
 			return {
 				authenticate: async (request, h) => {
-					console.log('authenticate');
-					console.log(request.headers[AUTH_HEADER]);
 					const mail = request.headers[AUTH_HEADER];
 					
 					if (!mail) {
@@ -89,8 +87,6 @@ const init = async () => {
 
 					try {
 						const user = await Graph.myId(mail);
-						console.log('user');
-						console.log(user);
 						if (!user) {
 							throw Boom.unauthorized('User not found');
 						}
@@ -190,7 +186,8 @@ const init = async () => {
 		...authRoutes,
 		...eventRoutes,
 		...nomadRoutes,
-		...queueRoutes
+		...queueRoutes,
+		...promptRoutes
 	]);
 
 	// Start the server

@@ -48,7 +48,7 @@ export default [
                 request.params.rid,
                 request.auth.credentials.user.rid
             );
-            const prompts = await Graph.getPrompts(request.auth.credentials.user.id);
+            const prompts = await Graph.getPrompts(request.auth.credentials.user.rid);
 
             if (file) {
                 return await services.getServicesForNode(

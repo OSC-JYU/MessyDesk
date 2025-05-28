@@ -105,14 +105,14 @@ upload_response = requests.post(url, json={"key": "description", "value": "Kissa
 
 # 3. Run pipeline for image
 
-with open('test/pipeline/demo1_ocr_fin.json', 'r') as file:
-    pipeline_json = json.load(file)
+# with open('test/pipeline/demo1_ocr_fin.json', 'r') as file:
+#     pipeline_json = json.load(file)
 
-url = f"http://localhost:8200/api/pipeline/files/{image2}"
+# url = f"http://localhost:8200/api/pipeline/files/{image2}"
 
-pipeline_response = requests.post(url, json=pipeline_json, headers=headers)
+# pipeline_response = requests.post(url, json=pipeline_json, headers=headers)
 
-print(pipeline_response.text)
+# print(pipeline_response.text)
 
 
 

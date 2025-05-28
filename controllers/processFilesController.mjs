@@ -29,7 +29,8 @@ export async function processFilesHandler(request, h) {
         if (request.payload.content) {
             contentFilepath = request.payload.content.path;
         }
-
+        
+        // EXIF-ROTATE
         if(message?.role === 'exif_rotate') {
             console.log('rotate message detected');
             console.log(message);
@@ -39,6 +40,7 @@ export async function processFilesHandler(request, h) {
             const metadata = await media.uploadFile(contentFilepath, message.file);
             if(metadata) {
                 await Graph.setNodeAttribute_old(message.file['@rid'], {key: 'metadata', value: metadata}, 'File');
+                //await Graph.setNodeAttribute_old(message.file['@rid'], {key: 'description', value: 'EXIF rotation applied'}, 'File');
             }
             const data = {
                 file: message.file,
@@ -59,26 +61,38 @@ export async function processFilesHandler(request, h) {
             };
             userManager.sendToUser(message.userId, wsdata);
 
-            // check if this is thumbnail ('role' is for PDF thumbnail via Poppler)
-        } else if (message.id === 'md-thumbnailer' || message.role === 'thumbnail') {
+        // THUMBNAIL
+        // role' is for PDF thumbnail via Poppler)
+        } else if (message?.id === 'md-thumbnailer' || message?.role === 'thumbnail') {
             const filepath = message.file.path;
             const base_path = path.dirname(filepath);
             const filename = message.thumb_name || 'preview.jpg';
 
             try {
                 //console.log('saving thumbnail to', base_path, filename);
+                let wsdata = {};
                 await media.saveThumbnail(contentFilepath, base_path, filename);
                 if (filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
                     //console.log('sending thumbnail WS', filename);
-                    const wsdata = {
+                    wsdata = {
                         command: 'update',
                         type: 'image', 
                         target: message.file['@rid']
                     };
                     // direct link to thumbnail
                     wsdata.image = API_URL + 'api/thumbnails/' + base_path;
+                    // if we are batch processing and this is the last file, send the updated Set thumbnails to the user
+                    if(message.output_set && message.current_file == message.total_files) {
+                        const set_thumbnails = await Graph.getSetThumbnailsForNode(message.output_set);
+                        wsdata = {
+                            command: 'process_finished',
+                            type: 'set',
+                            target: message.output_set,
+                            paths: set_thumbnails,
+                            current_file: message.current_file}
+                        userManager.sendToUser(message.userId, wsdata);
                     // if we batch processing, don't send WS to user since this would create lot of traffic
-                    if(!message.output_set) {
+                    }else if(!message.output_set) {
                         userManager.sendToUser(message.userId, wsdata);
                     }
                 }
@@ -86,18 +100,23 @@ export async function processFilesHandler(request, h) {
                 throw('Could not move file!' + e);
             }
 
+ 
         } else if (infoFilepath && contentFilepath) {
+            // RESPONSE
+            // response files are saved but not visible in the graph (azure-ai, gemini, etc.)
             if (message.file.type == 'response') {
                 const process_rid = message.process['@rid'];
                 const process_dir = path.dirname(message.process.path);
                 await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'});
                 await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, request.auth.credentials.user.rid);
 
+            // REGULAR FILE
             // else save content to processFileNode
             } else {
+                console.log('creating file node', message.file.type)
                 let info = '';
                 // for text nodes we create a description from the content of the file
-                if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json') {
+                if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json' || message.file.type == 'ocr.json') {
                     info = await media.getTextDescription(contentFilepath, message.file.type);
                 }
 
@@ -112,7 +131,7 @@ export async function processFilesHandler(request, h) {
                 }
 
 
-                // for images files we create normal thumbnails
+                // for image files we create normal thumbnails
                 if (message.file.type == 'image') {
                     const th = {
                         id: 'md-thumbnailer',
@@ -120,6 +139,8 @@ export async function processFilesHandler(request, h) {
                         file: fileNode,
                         userId: message.userId,
                         target: fileNode['@rid'],
+                        total_files: message.total_files,
+                        current_file: message.current_file,
                         output_set: message.output_set,
                         params: {width: 800, type: 'jpeg'}
                     };
@@ -150,16 +171,17 @@ export async function processFilesHandler(request, h) {
                     let wsdata;
                     // update set's file count if file is part of set
                     if (message.output_set) {
+                        console.log('updating set file count', message.output_set)
                         const count = await Graph.updateFileCount(message.output_set);
                         if(message.current_file == message.total_files) {
+                           
                             wsdata = {
                                 command: 'process_finished',
                                 type: 'set',
                                 target: message.output_set,
                                 process: process_rid,
-                                current_file: message.current_file,
-                                total_files: message.total_files
-                            };
+                                //paths: set_thumbnails,
+                                current_file: message.current_file}
                         } else {
                             wsdata = {
                                 command: 'process_update',
@@ -215,5 +237,8 @@ export async function processFilesHandler(request, h) {
         console.log(e);
     }
 
-    return 's';
+    return {
+        success: true,
+        message: 'Files processed successfully'
+    };
 } 

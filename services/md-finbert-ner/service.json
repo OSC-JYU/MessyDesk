@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:8600",
+    "local_url": "http://localhost:8600",
     "id": "md-finbert-ner",
     "type": "text",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"finbert-ner",
     "source_url": "https://huggingface.co/Kansallisarkisto/finbert-ner",

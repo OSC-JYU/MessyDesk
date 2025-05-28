@@ -250,14 +250,14 @@ graph.initUserData = async function (user) {
 }
 
 
-graph.getPrompts = async function (userID) {
+graph.getPrompts = async function (userRID) {
 
-	const query = `SELECT FROM Prompt WHERE owner = "public" OR owner = "${userID}" ORDER BY label`
+	const query = `SELECT FROM Prompt WHERE owner = "public" OR owner = "${userRID}" ORDER BY label`
 	var response = await web.sql(query)
 	return response.result
 }
 
-graph.savePrompt = async function (prompt, userID) {
+graph.savePrompt = async function (prompt, userRID) {
 	
 	prompt.content = prompt.content.replace(/\n/g, '\\n')
 	prompt.description = prompt.description.replace(/\n/g, '\\n')
@@ -269,7 +269,7 @@ graph.savePrompt = async function (prompt, userID) {
 		return response.result
 
 	} else {
-		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", type = "${prompt.type}", owner = "${userID}"`
+		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", type = "${prompt.type}", owner = "${userRID}"`
 		
 		var response = await web.sql(query)
 		return response.result
@@ -313,9 +313,9 @@ graph.getProject = async function (rid, me_email) {
 graph.getProject_backup = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `match {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
-		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 10)} return node`
+		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
 
 
 	const options = {
@@ -360,6 +360,17 @@ graph.getProjects = async function (user_rid, data_dir) {
 }
 
 
+graph.getSetThumbnailsForNode = async function(set_rid) {
+	if(!set_rid.match(/^#/)) set_rid = '#' + set_rid
+	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 2`
+	var response = await web.sql(query)
+	return response.result.map(item => {
+		const dirPath = item.path.split('/').slice(0, -1).join('/')
+		return dirPath.replace('data/', 'api/thumbnails/data/')
+	})
+
+}
+
 async function getProjectThumbnails(user_rid, data, data_dir) {
 
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
@@ -381,6 +392,7 @@ async function getProjectThumbnails(user_rid, data, data_dir) {
 	}
 	return data
 }
+
 
 async function getSetThumbnails(user_rid, data, project_rid) {
 
@@ -422,14 +434,23 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	if(!params || !isIntegerString(params.limit)) params.limit = 10
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	const count_query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child:Set)-[r:HAS_ITEM]->(file:File) WHERE id(p) = "${user_rid}" AND id(child) = "${set_rid}" RETURN count(file) AS file_count`
-	var response_count = await web.cypher(count_query)
+	// TODO: it would be more efficient if project_rid was used in the query
+	const count_query = `select count() AS file_count from File where set=${set_rid}`
+	var response_count = await web.sql(count_query)
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[r2*]->(child)-[r:HAS_ITEM]->(file:File)  WHERE id(p) = "${user_rid}" AND id(child) = "${set_rid}" RETURN file ORDER BY file.label SKIP ${params.skip} LIMIT ${params.limit}`
-	var response = await web.cypher(query)
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
+		{type:Project, as:project}.out() 
+		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND @type = 'File'),  while:($depth < 30)}
+                 return  DISTINCT node ORDER by label SKIP ${params.skip} LIMIT ${params.limit}`
+	var response = await web.sql(query)
+	console.log(query)
+
+	var files = response.result.map(obj => obj.node);
+	console.log(files)
+	
 	
 	// thumbnails and entities
-	for (var file of response.result) {
+	for (var file of files) {
 		file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 		// TODO: do this in one query!
 		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
@@ -440,7 +461,7 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 		file_count: response_count.result[0].file_count, 
 		limit: params.limit,
 		skip: params.skip,
-		files: response.result } //response.result
+		files: files } //response.result
 }
 
 graph.getSourceFiles = async function (source_rid, user_rid, params) {
@@ -559,10 +580,13 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 	// pdfs are splitted so we give each page its own message
 	if(node_metadata.type == 'pdf') {
 		message.pdf = true
-		if(node_metadata?.metadata?.page_count && data.params.firstPageToConvert && data.params.lastPageToConvert) {
-			const first = parseInt(data.params.firstPageToConvert)
-			var last = parseInt(data.params.lastPageToConvert)
-			if(last > node_metadata?.metadata?.page_count) last = node_metadata?.metadata?.page_count
+		const first = parseInt(data.params.firstPageToConvert)
+		var last = parseInt(data.params.lastPageToConvert)
+		if(isNaN(first)) first = 0
+		
+		if(node_metadata?.metadata?.page_count) {
+			if(isNaN(last)) last = node_metadata.metadata.page_count
+			if(last > node_metadata.metadata.page_count) last = node_metadata.metadata.page_count
 			if(first < last) {
 				var c = 1
 				for(var i = first; i <= last; i++) {
@@ -646,6 +670,7 @@ graph.createSetProcessNode = async function (topic, service, data, filegraph ) {
 	// create process node
 	var processNode = {}
 	var process_rid = null
+	var setNode = null
 	const process_attrs = { label: topic, path:'' }
 	process_attrs.service = service.name
 	if(data.info) {
@@ -657,10 +682,13 @@ graph.createSetProcessNode = async function (topic, service, data, filegraph ) {
 
 	// finally, connect SetProcess node to source Set node
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+	
 	// create process output Set
-	var setNode = await this.create('Set', {path: processNode.path})
-	// and link it to SetProcess
-	await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+	if(service.output != 'always file') {
+		setNode = await this.create('Set', {path: processNode.path})
+		// and link it to SetProcess
+		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+	}
 
 	return {process: processNode, set: setNode} //processNode
 
@@ -857,8 +885,9 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 			}
 		) 
 		RETURN file, p.path as process_path`
-		console.log(query)
 		
+
+		console.log(query)
 	var response = await web.cypher(query)
 
 	var file_rid = response.result[0].file['@rid']
@@ -879,32 +908,6 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	return update_response.result[0]
 }
 
-// graph.createSetFileNode = async function (set_rid, file_type, extension, label, description, process_path) {
-
-// 	if(!description) description = label
-	
-// 	const query = `MATCH (p:Set) WHERE id(p) = "${set_rid}" 
-// 		CREATE (file:File 
-// 			{
-// 				type: "${file_type}",
-// 				extension: "${extension}",
-// 				label: "${label}",
-// 				description: "${description}",
-// 				_active: true
-// 			}
-// 		) <- [r:PRODUCED] - (p) 
-// 		RETURN file`
-// 		console.log(query)
-// 	var response = await web.cypher(query)
-// 	console.log(response)
-
-// 	var file_rid = response.result[0].file['@rid']
-// 	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
-// 	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
-// 	var update_response = await web.cypher(update)
-
-// 	return update_response.result[0]
-// }
 
 graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
@@ -1432,9 +1435,15 @@ graph.createAttributeCypher = async function (attributes) {
 
 graph.myId = async function (user) {
 	if (!user) return null
-	var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE id = "${user}"`
-	var response = await web.sql(query)
-	return response.result[0]
+	if(user.startsWith('#')) {
+		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE @rid = ${user}`
+		var response = await web.sql(query)
+		return response.result[0]
+	} else {
+		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE id = "${user}"`
+		var response = await web.sql(query)
+		return response.result[0]
+	}
 }
 
 graph.getStats = async function () {

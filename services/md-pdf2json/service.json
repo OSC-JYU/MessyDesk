@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:9000",
+    "local_url": "http://localhost:9000",
     "id": "md-pdf2json",
     "type": "pdf",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"PDF to JSON",
     

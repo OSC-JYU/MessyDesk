@@ -87,12 +87,25 @@ function promptsToTasks(filter, prompts, type, extensions, service) {
 	// if type is Set, we return all tasks that have supported formats
 	if(type == 'Set') {
 		for(var prompt of prompts) {
-			if(service.supported_formats.some(value => extensions.includes(value))) {
-				if(service.supported_types.includes(prompt.type)) {
-					tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-				}
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(extensions.includes('txt') && prompt.type == 'text') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('pdf') && prompt.type == 'pdf') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('jpg') && prompt.type == 'image') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('png') && prompt.type == 'image') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
 			}
 		}
+		// for(var prompt of prompts) {
+		// 	prompt.system_params = {prompts: {content: prompt.content}}
+		// 	if(service.supported_formats.some(value => extensions.includes(value))) {
+		// 		if(service.supported_types.includes(prompt.type)) {
+		// 			tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+		// 		}
+		// 	}
+		// }
 	} else {
 		for(var prompt of prompts) {
 			prompt.system_params = {prompts: {content: prompt.content}}
@@ -160,8 +173,8 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 
 		this.service_list = await markRegisteredAdapter(servicesObject)
 		// add some default consumers (not vis)
-		this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
-		this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
+		//this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
+		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
 		return this.service_list
 
 	} catch (error) {
