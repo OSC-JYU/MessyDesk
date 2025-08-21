@@ -142,14 +142,14 @@ export default [
                                 console.log('Error getting text description:', error);
                             }
 
-                            const index_msg = {
-                                id: 'solr',
-                                task: 'index',
-                                file: filegraph,
-                                userId: request.auth.credentials.user.rid,
-                                target: filegraph['@rid']
-                            };
-                            nats.publish(index_msg.id, JSON.stringify(index_msg));
+                            // const index_msg = {
+                            //     id: 'solr',
+                            //     task: 'index',
+                            //     file: filegraph,
+                            //     userId: request.auth.credentials.user.rid,
+                            //     target: filegraph['@rid']
+                            // };
+                            // nats.publish(index_msg.id, JSON.stringify(index_msg));
                         }
 
 
@@ -314,6 +314,8 @@ export default [
                     response.type('image/png');
                 } else if (file_metadata.type === 'text' || file_metadata.type === 'data') {
                     response.type('text/plain; charset=utf-8');
+                } else if (file_metadata.type === 'error.json') {
+                    response.type('application/json');
                 } else {
                     response.header('Content-Disposition', `attachment; filename=${file_metadata.label}`);
                 }

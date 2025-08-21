@@ -5,6 +5,9 @@ import services from '../services.mjs';
 import web from '../web.mjs';
 import nats from '../queue.mjs';
 import logger from '../logger.mjs';
+import media from '../media.mjs';
+
+import path from 'path';
 
 import { processFilesHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
@@ -69,35 +72,38 @@ export default [
                         if (message.process && message.process['@rid']) {
                             target = message.process['@rid'];
                         }
+                 
                         const wsdata = {
-                            command: 'update',
-                            target: target,
-                            error: 'error'
+                            command: 'add',
+                            target: message.process['@rid'],
+                            type: 'error.json'
                         };
+                        
 
                         // write error to node, send update to UI and index error
-                        const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-                        await Graph.setNodeError(targetNode, 'error', message.userId);
+                        //const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
+                       // await Graph.setNodeError(targetNode, error, message.userId);
+                        
+                        const errornode = await Graph.createErrorNode(error, message, process.env.DATA_DIR || 'data');
+                        wsdata.node = errornode;
                         await userManager.sendToUser(message.userId, wsdata);
 
-                        const index_msg = [{
-                            type: 'error',
-                            id: target + '_error',
-                            error_node: target,
-                            error: JSON.stringify(error),
-                            message: JSON.stringify(message),
-                            owner: message.userId
-                        }];
-                        await web.indexDocuments(index_msg);
+                        // write error to error node file
+                        const log = {info: 'Something went wrong with the file processing.', 
+                            timestamp: new Date().toISOString(), 
+                            file: message.file,
+                            task: message.task,
+                            message: message,
+                            error: error
+                        };  
+                        await media.createProcessDir(path.dirname(errornode.path))
+                        const errornode_file = await media.writeJSON(log, path.basename(errornode.path), path.dirname(errornode.path));
+                        console.log(errornode_file)
                     }
                 }
             } else {
                 logger.error('Error processing files', { error: request.payload });
             }
-
-            // if (error.status == 'created_duplicate_source') {
-            //     console.log('DUPLICATE');
-            // }
 
             return [];
         }
@@ -134,6 +140,14 @@ export default [
                     await userManager.sendToUser(message.userId, wsdata);
                 }
 
+                if(message?.output_set) {
+                    const wsdata = {
+                        command: 'update',
+                        target: target,
+                        metadata: message.file.metadata
+                    };
+                    await userManager.sendToUser(message.userId, wsdata);
+                }
                 // If target is a pdf, send cover page thumbnail message to md-poppler
                 if(message?.file?.type == 'pdf') {
                     // PDF page count

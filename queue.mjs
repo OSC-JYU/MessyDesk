@@ -33,20 +33,6 @@ nats.init = async function(services) {
   });
   console.log("NATS: created the 'PROCESS' stream");
 
-  // try {  // SOLR has its own consumer
-  //   await this.jsm.consumers.add("PROCESS", {
-  //     durable_name: 'solr',
-  //     ack_policy: AckPolicy.Explicit,
-  //     filter_subject: `process.solr`,  
-  //   })
-  //   console.log('NATS: created default consumer solr')
-  // } catch(e) {
-  //   console.log(e)
-  //   console.log('NATS ERROR: could not create SOLR consumer! exiting...')
-  //   //process.exit(1)
-  // }
-
-
 
 
   // create consumers for all services
@@ -56,6 +42,10 @@ nats.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
+        redeliver_policy: {
+          max_deliveries: 3,
+          interval: 1000,
+        },
         filter_subject: `process.${key}`,
     
       });
@@ -65,6 +55,10 @@ nats.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: batch,
         ack_policy: AckPolicy.Explicit,
+        redeliver_policy: {
+          max_deliveries: 2,
+          interval: 1000,
+        },
         filter_subject: `process.${batch}`,
     
       });

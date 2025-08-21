@@ -43,6 +43,18 @@ export default [
         }
     },
 
+
+    {
+        method: 'GET', 
+        path: '/api/queue/{topic}/flush',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const status = await nats.flushQueue(topic);
+            return status;
+        }
+    },
+
+
     // single queue
     {
         method: 'POST',

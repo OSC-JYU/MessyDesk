@@ -1,0 +1,32 @@
+{
+    "local_url": "http://localhost:9007",
+    "id": "md-syntok",
+    "type": "text",
+    "api_type": "elg",
+    "adapter": "elg",
+    "api": "/process",
+    "name" :"Syntok",
+    "status": "experimental",
+    
+    "supported_types": ["text"],
+    "supported_formats": ["txt"],
+
+    "description": "Syntok is a Python library for text segmentation.",
+
+
+
+    "tasks": {
+        "text2sentences": {
+            "params": {
+                "task": "text2sentences"
+            },
+            "output": "store",
+            "name": "Text to sentences",
+            "description": "This will extract sentences from text and output flowing text. ",
+            "params_help": {
+            },
+            "info": "Text to sentences"
+        }
+
+    }
+}

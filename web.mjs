@@ -90,6 +90,7 @@ web.createDB = async function() {
 		await this.createVertexType('EntityType')
 		await this.createVertexType('Request')
 		await this.createVertexType('Prompt')
+		await this.createVertexType('ErrorNode')
 		
 		//await this.createVertexType('Person')
 		// development/default user
@@ -288,15 +289,14 @@ web.cypher = async function(query, options) {
 
 // get node error
 web.getError = async function(rid) {
-	rid = rid.replace('#', '')
-	rid = rid.replace(':', '%3A')	
-	rid = '%23' + rid
-
-	var url = `${SOLR_URL}/${SOLR_CORE}/select?indent=true&q=*:*&fq={!term f=type}error&fq={!term f=error_node}${rid}&wt=json` 
-	console.log(url)
+	var query = `SELECT FROM ${rid}`
 	try {
-		var response = await axios.get(url)
-		return response.data
+		var response = await this.sql(query)
+		if(response.result.length > 0) {
+			return response.result[0]
+		} else {
+			return null
+		}
 			
 	} catch(e) {
 		console.log(e.message)

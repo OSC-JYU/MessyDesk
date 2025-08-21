@@ -9,6 +9,7 @@
     "source_url": "https://huggingface.co/Kansallisarkisto/finbert-ner",
     "auto-tagger": true,
     "auto-tagger-label": "finbert",
+    "status": "experimental",
     
     "supported_types": ["text"],
     "supported_formats": ["txt"],

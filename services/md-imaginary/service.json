@@ -1,10 +1,9 @@
 {
     "local_url": "http://localhost:9000",
     "id": "md-imaginary",
-    "api_type": "imaginary",
     "adapter": "imaginary",
-    "api": "/",
     "name" :"Imaginary",
+    "location": "on-premise",
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
     "source_url": "https://github.com/h2non/node-imaginary",
     

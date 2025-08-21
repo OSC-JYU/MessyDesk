@@ -1,0 +1,37 @@
+
+terminal 1:
+podman-compose up
+
+terminal 2:
+MODE=development DB_PASSWORD=node_master nodemon index.js
+
+terminal 3:
+cd MessyDesk-UI
+npm run dev
+
+Aim your browser to http://localhost:3000
+
+You should have an user interface but you can't do much. You can upload files but you don't get even thumbnails for images or PDFs.
+
+Let's start some basic tools.
+
+Image thumbnailer:
+
+Open yet another terminal and start imaginary container
+
+	docker run -d --name md-thumbnailer -p 9000:9000 nextcloud/aio-imaginary
+
+Now we should have imaginary (that is used for image thumbnails) running in port 9000.
+Now we must start adapter, that connects service to MessyDesk.
+
+	cd MD-consumers
+
+	TOPIC=md-thumbnailer DEV_URL=http://localhost:9000 node src/index.mjs 
+
+
+Now, when you upload an image to MessyDesk, you should have thumbnail.
+
+
+
+Imaginary (rotate, flip, resize, blur):
+

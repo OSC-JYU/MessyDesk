@@ -18,7 +18,7 @@ job "md-poppler" {
     task "md-poppler" {
       driver = "docker"
       config {
-          image = "osc.repo.kopla.jyu.fi/messydesk/md-poppler:25.04.29"
+          image = "osc.repo.kopla.jyu.fi/messydesk/md-poppler:0.1"
           ports = ["node"]
           auth {
             username = ""

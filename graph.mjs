@@ -767,6 +767,55 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	return update_response.result[0]
 }
 
+
+
+graph.createErrorNode = async function (error, message, data_dir) {
+
+	const file_type = message.file.type
+	const extension = message.file.extension
+	const label = message.file.label
+	const description = error.code || 'unknown'
+	const info = error.message || 'There was an error processing your file.'
+
+	let setquery = ''
+	if(message.set) setquery = 'set:"' + message.set + '",'
+	const process_rid = message.process['@rid']
+	const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
+		CREATE (file:File 
+			{
+				type: "error.json",
+				extension: "json",
+				label: "${label}.error.json",
+				description: "${description}",
+				info: "${info}",
+				set: null,
+				${setquery}
+				_active: true
+			}
+		) <- [r:HAS_FILE] - (p) 
+		RETURN file, p.path as process_path`
+
+	var response = await web.cypher(query)
+
+	var file_rid = response.result[0].file['@rid']
+	var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.json')
+	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
+	var update_response = await web.cypher(update)
+
+	// if output of process is a set, then connect file to set ALSO and add attribute "set"
+	if(message.output_set) {
+		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
+		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
+		await this.connect(process_rid, 'PRODUCED', file_rid)
+	// otherwise connect file to process
+	} else {
+		await this.connect(process_rid, 'PRODUCED', file_rid)
+	}
+
+	return update_response.result[0]
+}
+
+
 graph.createROIsFromJSON =  async function(process_rid, message, fileNode) {
 	console.log(fileNode)
 	// read file from fileNode.path
@@ -853,6 +902,8 @@ graph.updateFileCount = async function (set_rid) {
 	var response = await web.sql(query)
 	return count
 }
+
+
 
 graph.createProcessFileNode = async function (process_rid, message, description, info) {
 
@@ -1248,10 +1299,20 @@ graph.validateNodeAttribute = async function (data) {
 
 graph.setNodeError = async function (rid, error, userRID) {
 	if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
-	let query = `UPDATE ${rid} SET node_error = 'error'`
-	let params = {error: error}
+	let query = `UPDATE ${rid} SET node_error = 'error', timestamp = :timestamp, code = :code, message = :message, stack = :stack, trace = :trace`
+	let params = {timestamp: new Date().toISOString()}
+	if(error.code) params.code = error.code
+	else params.code = 'unknown'
+	if(error.message) params.message = error.message
+	if(error.stack) params.stack = error.stack
+	else params.stack = 'unknown'
+	if(error.trace) params.trace = error.trace
+	else params.trace = 'unknown'
+	if(error.message) params.message = error.message
+	console.log(query)
+	console.log(error)
 	try {
-		return web.sql(query)
+		return web.sql_params(query, params)
 	} catch (e) {
 		throw({'message': 'Error setting node error'})
 	}

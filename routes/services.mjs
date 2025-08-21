@@ -11,6 +11,13 @@ export default [
         }
     },
     {
+        method: 'GET',
+        path: '/api/services/{service}',
+        handler: async (request) => {
+            return services.getService(request.params.service);
+        }
+    },
+    {
         method: 'POST',
         path: '/api/services/reload',
         handler: async (request, h) => {
