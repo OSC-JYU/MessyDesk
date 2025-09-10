@@ -1,5 +1,5 @@
 
-What happens when user clicks "Crunch"
+## What happens when user clicks "Crunch"
 
 1. Request is made to queue endpoint
 
@@ -38,7 +38,7 @@ ELSE
 4.4 send file to thumbnailer queue
 
 
-Image upload:
+## Image upload:
 
 1. File node is created
 2. File node directory is created
@@ -57,7 +57,7 @@ PATHS:
 	setProcess noden pitää luoda path: /data/projects/PROJEKTI/files/SOURCE/process/SETPROCESS/files
 
 
-What happens when user click "Crunc" on Set (batch processing)?
+## What happens when user click "Crunch" on Set (batch processing)?
 
 
 1. Request is made to queue endpoint
@@ -67,4 +67,14 @@ post('/api/queue/:topic/files/:file_rid'
 1.1. Endpoint creates a Process node to database.
 
 
+## What happens when source node is created
+
+1. Source node is create in graph
+    - path is created: /projects/PROJECT_RID/sources/SOURCE_RID
+2. "init" task is send to queue
+    - init task can be fetch of collections (DSpace) or list of files (Nextcloud). "Init" task is implemented in service adapter
+    - result is saved as "init.json" to source node's path
+
+### What happens when process node is added to source node?
+1. Process and Set nodes are created (we are importing files and files are saved to Set)
 

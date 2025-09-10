@@ -46,10 +46,15 @@ function pickTasks(service, extensions, filter, user, prompts, node_type) {
 				if(filterTask(filter, service.tasks[task]))
 					service_object.tasks[task] = service.tasks[task]
 			}
-			
+		// if task has its own supported types then compare to node type
+		} else if(service.tasks[task].supported_types) {
+			if(service.tasks[task].supported_types.includes(node_type)) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
 		// otherwise compare file extension to service's supported formats
 		} else {
-			if(service.supported_formats.some(value => extensions.includes(value))) {
+			if(service.supported_formats && service.supported_formats.some(value => extensions.includes(value))) {
 				if(filterTask(filter, service.tasks[task]))
 					service_object.tasks[task] = service.tasks[task]
 			}
@@ -196,11 +201,14 @@ services.getServices = function () {
 }
 
 
+services.getService = function (service) {
+	return this.service_list[service]
+}
+
 services.getServicesForNode = async function(node, filter, user, prompts) {
 
 	const matches = {for_type: [], for_format: []}
 	if(!node) return matches
-	console.log('here', node['@type'])
 
 	for(var service in this.service_list) {
 
@@ -212,7 +220,6 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 				continue
 			}
 			if(this.service_list[service].consumers.length > 0) {
-				
 				var service_with_tasks = pickTasks(this.service_list[service], node.extensions, filter, user, prompts, node['@type'])
 				if(service_with_tasks) {
 					matches.for_format.push(service_with_tasks)
@@ -228,9 +235,9 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 			}			
 				
 		// for Files we compare first type and then extension
-		} else {
+		} else if (node['@type'] == 'File') {
 			// check service for supported types
-			if(this.service_list[service].supported_types.includes(node.type)) {
+			if(this.service_list[service]?.supported_types?.includes(node.type)) {
 				// we take only services that has consumer app listening (i.e are active services)
 				if(this.service_list[service].consumers.length > 0) {
 					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], filter, user, prompts, node.type)

@@ -258,6 +258,10 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 	}
 }
 
+media.ifExists = async function(fpath) {
+	return await fse.pathExists(fpath)
+}
+
 media.readJSON =  async function(fpath) {
 
 	try {

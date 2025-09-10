@@ -20,7 +20,7 @@
             "output": "set",
             "output_set": "Files from zip",
             "name": "Unzip",
-            "description": "Unzip a zip file and sort to sets based on file extension"
+            "description": "Unzip a zip file."
         }
     }
 }

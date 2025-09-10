@@ -64,42 +64,55 @@ export default [
                 if (request.payload.message) {
                     const message = request.payload.message;
                     let target = message.target;
+                    //logger.error('Error processing files', { error: error, message: message });
                     logger.error('Error processing files', { error: error, message: message });
+                    console.log(message)
 
-                    if (message.task == 'index') {
-                        return [];
-                    } else {
-                        if (message.process && message.process['@rid']) {
-                            target = message.process['@rid'];
+
+                    if (message.process && message.process['@rid']) {
+                        target = message.process['@rid'];
+                    }                  
+
+                    // write error to node, send update to UI and create error node
+                    // if processed file is part of set, then we need to update the setProcess node
+                    var targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
+                    if(message.output_set) {
+                        const setProcessNode = await Graph.getSetProcessNode(message.output_set, message.userId);
+                        if(setProcessNode) {
+                            console.log('setProcessNode', setProcessNode)
+                            targetNode = setProcessNode['setprocess']['@rid'];
                         }
-                 
-                        const wsdata = {
+                    }
+                    var error_count = await Graph.setNodeError(targetNode, error, message.userId);
+                    await userManager.sendToUser(message.userId, {
+                        command: 'update',
+                        target: targetNode,
+                        error: 'errors: ' + error_count
+                    });
+                    
+                    // create error node and update UI
+                    const errornode = await Graph.createErrorNode(error, message, process.env.DATA_DIR || 'data');
+        
+                    // write error to error node file
+                    const log = {info: 'Something went wrong with the file processing.', 
+                        timestamp: new Date().toISOString(), 
+                        file: message.file,
+                        task: message.task,
+                        message: message,
+                        error: error
+                    };  
+                    await media.createProcessDir(path.dirname(errornode.path))
+                    await media.writeJSON(log, 'error.json', path.dirname(errornode.path));
+                    if(!message.output_set) {
+                        await userManager.sendToUser(message.userId, {
                             command: 'add',
                             target: message.process['@rid'],
-                            type: 'error.json'
-                        };
-                        
-
-                        // write error to node, send update to UI and index error
-                        //const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-                       // await Graph.setNodeError(targetNode, error, message.userId);
-                        
-                        const errornode = await Graph.createErrorNode(error, message, process.env.DATA_DIR || 'data');
-                        wsdata.node = errornode;
-                        await userManager.sendToUser(message.userId, wsdata);
-
-                        // write error to error node file
-                        const log = {info: 'Something went wrong with the file processing.', 
-                            timestamp: new Date().toISOString(), 
-                            file: message.file,
-                            task: message.task,
-                            message: message,
-                            error: error
-                        };  
-                        await media.createProcessDir(path.dirname(errornode.path))
-                        const errornode_file = await media.writeJSON(log, path.basename(errornode.path), path.dirname(errornode.path));
-                        console.log(errornode_file)
+                            type: 'error.json',
+                            node: errornode
+                        })
                     }
+
+                    
                 }
             } else {
                 logger.error('Error processing files', { error: request.payload });
@@ -121,6 +134,7 @@ export default [
         path: '/api/nomad/process/files/done',
         handler: async (request, h) => {
             if (request.payload ) {
+                console.log('POST /api/nomad/process/files/done')
                 console.log(request.payload)
             
                 const message = request.payload
@@ -142,9 +156,10 @@ export default [
 
                 if(message?.output_set) {
                     const wsdata = {
-                        command: 'update',
+                        command: 'process_finished',
                         target: target,
-                        metadata: message.file.metadata
+                        metadata: message.file.metadata,
+                        paths: message.paths
                     };
                     await userManager.sendToUser(message.userId, wsdata);
                 }

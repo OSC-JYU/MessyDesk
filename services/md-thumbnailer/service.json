@@ -1,5 +1,5 @@
 {
-    "url": "http://localhost:9000",
+    "local_url": "http://localhost:9000",
     "id": "md-thumbnailer",
     "api_type": "thumbnail",
     "adapter": "imaginary",

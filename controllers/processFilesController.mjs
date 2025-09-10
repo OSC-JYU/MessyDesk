@@ -76,17 +76,14 @@ export async function processFilesHandler(request, h) {
                     //console.log('sending thumbnail WS', filename);
                     wsdata = {
                         command: 'update',
-                        type: 'image', 
-                        target: message.file['@rid']
+                        target: message.file['@rid'],
+                        node: {image: API_URL + 'api/thumbnails/' + base_path}
                     };
-                    // direct link to thumbnail
-                    wsdata.image = API_URL + 'api/thumbnails/' + base_path;
                     // if we are batch processing and this is the last file, send the updated Set thumbnails to the user
                     if(message.output_set && message.current_file == message.total_files) {
                         const set_thumbnails = await Graph.getSetThumbnailsForNode(message.output_set);
                         wsdata = {
                             command: 'process_finished',
-                            type: 'set',
                             target: message.output_set,
                             paths: set_thumbnails,
                             current_file: message.current_file}
@@ -103,12 +100,13 @@ export async function processFilesHandler(request, h) {
  
         } else if (infoFilepath && contentFilepath) {
             // RESPONSE
-            // response files are saved but not visible in the graph (azure-ai, gemini, etc.)
+            // response files are saved but not visible in the graph (azure-ai, gemini, init tasks, etc.)
             if (message.file.type == 'response') {
                 const process_rid = message.process['@rid'];
-                const process_dir = path.dirname(message.process.path);
-                await media.uploadFile(contentFilepath, {path: process_dir + '/response.json'});
-                await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, request.auth.credentials.user.rid);
+                //const process_dir = path.dirname(message.process.path);
+                console.log('saving response file to', path.join(message.process.path, message.file.label))
+                await media.uploadFile(contentFilepath, {path: path.join(message.process.path, message.file.label)});
+                //await Graph.setNodeAttribute(process_rid, {key: 'response', value: message.file.path}, request.auth.credentials.user.rid);
 
             // REGULAR FILE
             // else save content to processFileNode
@@ -148,17 +146,17 @@ export async function processFilesHandler(request, h) {
                 }
 
                 // send to indexer queue if text
-                if (message.file.type == 'text') {
-                    const index_msg = {
-                        id: 'solr',
-                        task: 'index',
-                        file: fileNode,
-                        userId: message.userId,
-                        target: fileNode['@rid']
-                    };
-                    console.log(`published info task\nservice: ${info.id}\ntarget: ${info.target}`);
-                    nats.publish(index_msg.id, JSON.stringify(index_msg));
-                }
+                // if (message.file.type == 'text') {
+                //     const index_msg = {
+                //         id: 'solr',
+                //         task: 'index',
+                //         file: fileNode,
+                //         userId: message.userId,
+                //         target: fileNode['@rid']
+                //     };
+                //     console.log(`published info task\nservice: ${info.id}\ntarget: ${info.target}`);
+                //     nats.publish(index_msg.id, JSON.stringify(index_msg));
+                // }
 
                 // create ROIs for ner.json and human.json
                 // if (message.file.type == 'ner.json' || message.file.type == 'human.json') {
@@ -195,8 +193,8 @@ export async function processFilesHandler(request, h) {
                     } else {
                         wsdata = {
                             command: 'add',
-                            type: message.file.type,
-                            target: process_rid,
+                            type: message.file.type,  // node type
+                            input: process_rid,
                             node: fileNode
                         };
                     }

@@ -1,6 +1,7 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import nats from '../queue.mjs';
+import path from 'path';
 
 import Boom from '@hapi/boom';
 
@@ -80,6 +81,19 @@ export default [
                 Graph.sanitizeRID(request.params.rid),
                 request.payload,
                 request.auth.credentials.user.rid
+            );
+            return result;
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/projects/{rid}/sources',
+        handler: async (request) => {
+            const result = await Graph.createSource(
+                Graph.sanitizeRID(request.params.rid),
+                request.payload,
+                request.auth.credentials.user.rid,
+                nats
             );
             return result;
         }

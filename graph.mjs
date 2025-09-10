@@ -21,7 +21,8 @@ const DEFAULT_USER = 'local.user@localhost';
 const MAX_POSITION = 10000; // max x and y for project nodes
 const graph = {};
 
-const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error']
+// allowed attributes that setNodeAttribute can set
+const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path']
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
@@ -125,16 +126,37 @@ graph.createSet = async function (project_rid, data, me_rid) {
 	}
 }
 
-graph.createSource = async function (project_rid, data, me_rid) {
+graph.createSource = async function (project_rid, data, me_rid, nats) {
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "#${project_rid}" RETURN pr`
+	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
+	console.log(query)
 	var response = await web.cypher(query)
 	console.log(response)
 	console.log(response.result[0])
 	if (response.result.length == 1) {
+		data.status = 'initing...'
 		var source = await this.create('Source', data)
 		var source_rid = source['@rid']
+		// DATA_DIR + '/projects/' + project_rid + '/sources/' + source_rid
+		const source_path = path.join(process.env.DATA_DIR || 'data', 'projects', media.rid2path(project_rid), 'sources', media.rid2path(source_rid))
+		source.path = source_path
 		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
+		await media.createProcessDir(source.path)
+		await this.setNodeAttribute(source_rid, {key: 'path', value: source.path}, me_rid)
+
+		// send init request to service 
+		var init_task = {
+			id:"md-" + data.type.toLowerCase(),
+			task:"init",
+			file:source,
+			process:source,
+			params: {url:`${source.url}`, task:"init"},
+			info:"Fetching collection hierarchy...",
+			userId: me_rid
+		}
+		nats.publish(init_task.id, JSON.stringify(init_task))
+
+
 		return source
 	} else {
 		console.log('Project not found')
@@ -464,6 +486,7 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 		files: files } //response.result
 }
 
+// this reads list of files from Nextcloud source
 graph.getSourceFiles = async function (source_rid, user_rid, params) {
 
 	try {
@@ -624,7 +647,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, service, data, filegraph, me_email, set_rid) {
+graph.createProcessNode = async function (topic, service, data, filegraph, me_email, set_rid, set_process_rid) {
 
 	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
 	//params.topic = topic
@@ -646,7 +669,9 @@ graph.createProcessNode = async function (topic, service, data, filegraph, me_em
 	if(set_rid) {
 		process_attrs.set = set_rid
 	}
-
+	if(set_process_rid) {
+		process_attrs.set_process = set_process_rid
+	}
 	processNode = await this.create('Process', process_attrs)
 	process_rid = processNode['@rid']
 	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
@@ -663,7 +688,7 @@ graph.createProcessNode = async function (topic, service, data, filegraph, me_em
 }
 
 // Create SetProcess and output Set 
-graph.createSetProcessNode = async function (topic, service, data, filegraph ) {
+graph.createSetAndProcessNodes = async function (topic, service, data, filegraph ) {
 
 	var file_rid = filegraph['@rid']
 	
@@ -759,6 +784,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	
 	// link file to set
 	if(set_rid) {
+		if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 		await this.connect(set_rid, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
 		await this.updateFileCount(set_rid)
@@ -792,7 +818,7 @@ graph.createErrorNode = async function (error, message, data_dir) {
 				${setquery}
 				_active: true
 			}
-		) <- [r:HAS_FILE] - (p) 
+		)
 		RETURN file, p.path as process_path`
 
 	var response = await web.cypher(query)
@@ -918,8 +944,6 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	let setquery = ''
 	if(message.set) setquery = 'set:"' + message.set + '",'
 	var type = 'Process'
-	// TODO: check in what situation we need to use SetProcess
-	//if(message.source) type = 'SetProcess'
 	
 	const query = `MATCH (p:${type}) WHERE id(p) = "${process_rid}" 
 		CREATE (file:File 
@@ -1132,6 +1156,11 @@ graph.deleteNode = async function (rid, nats) {
 		nats.publish(index_msg.id, JSON.stringify(index_msg))
 	}
 
+	// if this is setProcess, then delete all Process nodes that has property set_process = rid
+	if(parent.result[0]['@type'] == 'SetProcess') {
+		const query_delete_process = `DELETE FROM Process WHERE set_process = "${rid}"`
+		await web.sql(query_delete_process)
+	}
 
 	// get path for directory deletion
 	const query_path = `SELECT path FROM ${rid}`
@@ -1159,43 +1188,6 @@ graph.deleteNode = async function (rid, nats) {
 		return {path: null}
 	}
 
-}
-
-
-graph.merge = async function (type, node) {
-	var attributes = []
-	for (var key of Object.keys(node[type])) {
-		attributes.push(`s.${key} = "${node[type][key]}"`)
-	}
-	// set some system attributes to all Users
-	if (type === 'User') {
-		if (!node['_group']) attributes.push(`s._group = "user"`) // default user group for all persons
-		if (!node['_access']) attributes.push(`s._access = "user"`) // default access for all persons
-	}
-	// _active
-	attributes.push(`s._active = true`)
-	// merge only if there is ID for node
-	if ('id' in node[type]) {
-		var insert = `MERGE (s:${type} {id:"${node[type].id}"}) SET ${attributes.join(',')} RETURN s`
-		try {
-			var response = await web.cypher(insert)
-			console.log(response)
-			return response.data
-
-		} catch (e) {
-			try {
-				await web.createVertexType(type)
-				var response = await web.cypher(insert)
-				console.log(response)
-				return response.data
-			} catch (e) {
-				console.log(e)
-				throw ('Merge failed!')
-			}
-		}
-	} else {
-
-	}
 }
 
 
@@ -1282,7 +1274,7 @@ graph.isNodeOwner = async function (rid, userRID) {
 		where:(@rid = ${userRID})}
 	-IS_OWNER->
 		{type:Project, as:project}--> 
-		{as:node, where:(@rid = ${rid}), while: ($depth < 20)} return node`
+		{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
 
 	var file_response = await web.sql(query)
 	if(file_response.result.length > 0) return file_response.result[0]
@@ -1297,25 +1289,41 @@ graph.validateNodeAttribute = async function (data) {
 	return false
 }
 
+// write error count to a processing node, so that can be re-run later
 graph.setNodeError = async function (rid, error, userRID) {
-	if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
-	let query = `UPDATE ${rid} SET node_error = 'error', timestamp = :timestamp, code = :code, message = :message, stack = :stack, trace = :trace`
-	let params = {timestamp: new Date().toISOString()}
+	//if(!await this.isNodeOwner(rid, userRID)) throw({'message': 'You are not the owner of this file'})
+
+	// get error count from node
+	let count_query = `SELECT error_count FROM ${rid}`
+	let count_response = await web.sql(count_query)
+	
+	let error_count = count_response.result[0].error_count
+	if(!error_count) error_count = 1
+	else error_count++
+
+	let query = `UPDATE ${rid} SET node_error = 'error', timestamp = :timestamp, error_count = :error_count`
+	let params = {
+		timestamp: new Date().toISOString(),
+		code: 'unknown',
+		error_count: error_count
+	}
 	if(error.code) params.code = error.code
-	else params.code = 'unknown'
-	if(error.message) params.message = error.message
-	if(error.stack) params.stack = error.stack
-	else params.stack = 'unknown'
-	if(error.trace) params.trace = error.trace
-	else params.trace = 'unknown'
-	if(error.message) params.message = error.message
-	console.log(query)
-	console.log(error)
+	
 	try {
-		return web.sql_params(query, params)
+		await web.sql_params(query, params)
+		return error_count
 	} catch (e) {
 		throw({'message': 'Error setting node error'})
 	}
+}
+
+
+graph.getSetProcessNode = async function (set, userRID) {
+	if(!await this.isNodeOwner(set, userRID)) throw({'message': 'You are not the owner of this set'})
+	let query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	console.log(query)
+	let response = await web.sql(query)
+	return response.result[0]
 }
 
 graph.setNodePosition = async function (rid, position) {
@@ -1399,40 +1407,6 @@ graph.getNodeAttributes = async function (rid) {
 	var query = `MATCH (node) WHERE id(node) = '${rid}' RETURN node`
 	return web.cypher(query)
 }
-
-
-// graph.getGraph = async function (body, ctx) {
-
-// 	var me = await this.myId(ctx.request.headers.mail)
-// 	// ME
-// 	if (body.query.includes('_ME_')) {
-// 		body.query = body.query.replace('_ME_', me.rid)
-// 	}
-
-// 	var schema_relations = null
-// 	// get schemas first so that one can map relations to labels
-// 	if (!body.raw) {
-// 		schema_relations = await this.getSchemaRelations()
-// 	}
-// 	const options = {
-// 		serializer: 'graph',
-// 		format: 'cytoscape',
-// 		schemas: schema_relations,
-// 		current: body.current,
-// 		me: me
-// 	}
-// 	return web.cypher(body.query, options)
-// }
-
-
-// graph.getSchemaRelations = async function () {
-// 	var schema_relations = {}
-// 	var schemas = await web.cypher('MATCH (s:Schema_)-[r]->(s2:Schema_) return type(r) as type, r.label as label, r.label_rev as label_rev, COALESCE(r.label_inactive, r.label) as label_inactive, s._type as from, s2._type as to, r.tags as tags, r.compound as compound')
-// 	schemas.result.forEach(x => {
-// 		schema_relations[x.type] = x
-// 	})
-// 	return schema_relations
-// }
 
 
 graph.getSearchData = async function (search) {
@@ -1682,11 +1656,25 @@ graph.createTag = async function (label, userRID) {
 	return await web.sql(query)
 }
 
-graph.getNode = async function (userRID) {
-	var query = `MATCH {type:User, as:user, where: (id = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file`
+graph.getNode = async function (rid, userRID) {
+	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
+	console.log(query)
+	
 	var response = await web.sql(query)
 	if(response.result.length == 0) return []
 	return response.result[0]
+}
+
+graph.getSourceInit = async function (rid, userRID) {
+	var node = await this.getNode(rid, userRID)
+	// read init.json from node.path
+	var init_path = node.file.path + '/init.json'
+	if(await media.ifExists(init_path)) {
+		var init_data = await media.readJSON(init_path)
+		return init_data
+	} else {
+		return {}
+	}
 }
 
 graph.getDataWithSchema = async function (rid, by_groups) {
@@ -1797,6 +1785,7 @@ function isIntegerString(value) {
     return typeof value === "string" && /^-?\d+$/.test(value);
 }
 
+// TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
 	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group`
 	var response = await web.sql(query)	

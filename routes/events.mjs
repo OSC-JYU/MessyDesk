@@ -53,5 +53,27 @@ export default [
 
             return h.response({ message: 'Message sent' });
         }
+    },
+    {
+        method: 'POST',
+        path: '/events/test/message',
+        handler: (request, h) => {
+            console.log('Add node request received');
+            const userRID = request.auth.credentials.user.rid;
+            const payload = JSON.parse(request.payload);
+            console.log(payload);
+
+            if (!userRID) {
+                return h.response({ error: 'User ID is required' }).code(400);
+            }
+            var users = userManager.getConnectedUsers();
+            console.log(users);
+            
+            // Send test message with a timestamp-based ID
+            //const messageId = Date.now().toString();
+            userManager.sendToUser(userRID, payload);
+
+            return h.response({ message: 'Message sent' });
+        }
     }
 ]; 

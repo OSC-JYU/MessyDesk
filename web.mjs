@@ -435,6 +435,7 @@ async function convert2VueFlow(data, options) {
 
 				if(v.p.type) node.data._type = v.p.type
 				if(v.p.node_error) node.data.error = v.p.node_error
+				if(v.p.error_count) node.data.error_count = v.p.error_count
 				if(v.p.metadata) node.data.metadata = v.p.metadata
 				if(v.p.service) node.data.service = v.p.service
 				

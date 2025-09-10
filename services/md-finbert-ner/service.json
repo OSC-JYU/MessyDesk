@@ -11,7 +11,6 @@
     "auto-tagger-label": "finbert",
     "status": "experimental",
     
-    "supported_types": ["text"],
     "supported_formats": ["txt"],
 
     "description": "The model performs named entity recognition from text input in Finnish. ",

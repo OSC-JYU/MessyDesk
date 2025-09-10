@@ -28,16 +28,16 @@ export default [
     //         return await Graph.getGraph(request.payload, request);
     //     }
     // },
-    {
-        method: 'POST',
-        path: '/api/graph/vertices',
-        handler: async (request) => {
-            const type = request.payload.type;
-            const result = await Graph.create(type, request.payload);
-            console.log(result);
-            return result;
-        }
-    },
+    // {
+    //     method: 'POST',
+    //     path: '/api/graph/vertices',
+    //     handler: async (request) => {
+    //         const type = request.payload.type;
+    //         const result = await Graph.create(type, request.payload);
+    //         console.log(result);
+    //         return result;
+    //     }
+    // },
     {
         method: 'GET',
         path: '/api/graph/vertices/{rid}',
@@ -46,6 +46,13 @@ export default [
                 Graph.sanitizeRID(request.params.rid),
                 request.auth.credentials.user.rid
             );
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/graph/vertices/{rid}/init',
+        handler: async (request) => {
+            return await Graph.getSourceInit(Graph.sanitizeRID(request.params.rid), request.auth.credentials.user.rid);
         }
     },
     {
@@ -93,17 +100,7 @@ export default [
             return result;
         }
     },
-    {
-        method: 'POST',
-        path: '/api/graph/edges',
-        handler: async (request) => {
-            return await Graph.connect(
-                request.payload.from,
-                request.payload.relation,
-                request.payload.to
-            );
-        }
-    },
+
     {
         method: 'DELETE',
         path: '/api/graph/edges/{rid}',

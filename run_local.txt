@@ -13,3 +13,9 @@ MODE=development DB_PASSWORD=node_master PODMAN=true nodemon index.js
 terminal 4:
 cd MessyDesk-UI
 npm run dev
+
+You should have an user interface but no crunchers. You can upload files but you don't get even thumbnails for images or PDFs.
+
+Let's start some basic tools.
+
+Image thumbnailer:

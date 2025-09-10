@@ -304,6 +304,23 @@ export default [
                     request.auth.credentials.user.rid
                 );
 
+                // we first check if file exist
+                // if not, then we search for error.json
+                // if error.json exists, then we return it
+                // if not, then we return 404
+                if (!fse.existsSync(file_metadata.path)) {
+                    const error_json_path = path.join(path.dirname(file_metadata.path), 'error.json')
+                    if (fse.existsSync(error_json_path)) {
+                        const src = fse.createReadStream(error_json_path);
+                        const response = h.response(src);
+                        response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
+                        response.type('application/json');
+                        return response;
+                    } else {
+                        return h.response().code(404);
+                    }
+                }
+
                 const src = fse.createReadStream(file_metadata.path);
                 const response = h.response(src);
 
