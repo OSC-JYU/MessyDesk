@@ -126,12 +126,15 @@ export default [
 
 
                 // add node to UI
-                var wsdata = {command: 'add', type: 'process', target: set_rid, node:nodes.process, set_node:nodes.set, image:API_URL + 'icons/wait.gif'};
+                var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
                 userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
+                var file_count = 1;
+                // TODO: think this again. Should this just send files with "merge" flag but messages would be created normally
+                // Actually, we need this for "report" type of services. For "combining texts" we need to merge files.
                 if(service.output == 'always file') {
-                    msg.process = processNode;
-                    msg.file = file_metadata;
+                    msg.process = nodes.process;
+                    msg.file = set_metadata;
                     msg.total_files = set_files.files.length;
                     msg.current_file = file_count;
                     msg.userId = request.auth.credentials.user.rid;

@@ -384,7 +384,7 @@ graph.getProjects = async function (user_rid, data_dir) {
 
 graph.getSetThumbnailsForNode = async function(set_rid) {
 	if(!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 2`
+	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 4`
 	var response = await web.sql(query)
 	return response.result.map(item => {
 		const dirPath = item.path.split('/').slice(0, -1).join('/')
@@ -431,7 +431,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 			
 				set.data.paths = []
 				thumbs.paths.forEach(function (part, index) {
-					if (index < 2) {
+					if (index < 4) {
 						const filename = path.basename(part)
 						set.data.paths.push(API_URL + 'api/thumbnails/' + part.replace(filename, '') + 'thumbnail.jpg')
 					}

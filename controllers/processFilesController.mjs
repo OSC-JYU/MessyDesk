@@ -55,9 +55,8 @@ export async function processFilesHandler(request, h) {
 
             var wsdata = {
                 command: 'update',
-                type: message.file.type,
                 target: message.file['@rid'],
-                metadata: metadata
+                node: { metadata: metadata }
             };
             userManager.sendToUser(message.userId, wsdata);
 
@@ -83,10 +82,10 @@ export async function processFilesHandler(request, h) {
                     if(message.output_set && message.current_file == message.total_files) {
                         const set_thumbnails = await Graph.getSetThumbnailsForNode(message.output_set);
                         wsdata = {
-                            command: 'process_finished',
+                            command: 'update',
                             target: message.output_set,
-                            paths: set_thumbnails,
-                            current_file: message.current_file}
+                            node: { paths: set_thumbnails, count: message.current_file }
+                        }
                         userManager.sendToUser(message.userId, wsdata);
                     // if we batch processing, don't send WS to user since this would create lot of traffic
                     }else if(!message.output_set) {
@@ -175,27 +174,28 @@ export async function processFilesHandler(request, h) {
                            
                             wsdata = {
                                 command: 'process_finished',
-                                type: 'set',
-                                target: message.output_set,
-                                process: process_rid,
+                                process: { '@rid': message.process.set_process, status: 'finished', info: 'Finished' },
+                                set: { '@rid': message.output_set, status: 'finished', count: message.current_file  },
                                 //paths: set_thumbnails,
                                 current_file: message.current_file}
+                                console.log('wsdata', wsdata)
                         } else {
                             wsdata = {
                                 command: 'process_update',
-                                type: 'set',
-                                target: message.output_set,
-                                process: process_rid,
+                                node: { '@rid': message.process.set_process, status: 'running', info: 'Running...' },
+                                set: { '@rid': message.output_set, status: 'running', count: message.current_file },
                                 current_file: message.current_file,
                                 total_files: message.total_files
                             };
                         }
                     } else {
+                        // single file processing
                         wsdata = {
                             command: 'add',
                             type: message.file.type,  // node type
                             input: process_rid,
-                            node: fileNode
+                            node: fileNode,
+                            process: { '@rid': process_rid, status: 'finished' } // process is finished after file is added
                         };
                     }
                     userManager.sendToUser(message.userId, wsdata);

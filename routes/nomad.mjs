@@ -106,8 +106,9 @@ export default [
                     if(!message.output_set) {
                         await userManager.sendToUser(message.userId, {
                             command: 'add',
-                            target: message.process['@rid'],
-                            type: 'error.json',
+                            input: message.process['@rid'],
+                            type: 'error',
+                            process: { '@rid': message.process['@rid'], status: 'finished' },
                             node: errornode
                         })
                     }
