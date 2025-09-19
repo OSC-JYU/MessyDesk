@@ -9,7 +9,7 @@ import media from '../media.mjs';
 
 import path from 'path';
 
-import { processFilesHandler } from '../controllers/processFilesController.mjs';
+import { processFilesHandler, processMetadataHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = 'http://localhost:8200/';
@@ -208,5 +208,20 @@ export default [
             }
         },
         handler: processFilesHandler
+    },
+    {
+        method: 'POST',
+        path: '/api/nomad/process/files/metadata',
+        options: {
+            payload: {
+                maxBytes: 209715200,
+                output: 'file',
+                parse: true,
+                multipart: {
+                    output: 'file'
+                }
+            }
+        },
+        handler: processMetadataHandler
     }
 ];

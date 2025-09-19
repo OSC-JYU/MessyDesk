@@ -182,7 +182,9 @@ media.uploadFile = async function(uploadpath, filegraph) {
 		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
 			await fse.move(uploadpath, filegraph.path);
-			filedata = await this.getImageSize(filegraph.path)
+			if(filegraph.type == 'image') {
+				filedata = await this.getImageSize(filegraph.path)
+			}
 			console.log('File moved successfully!')
 			//ctx.body = 'done';
 		} else {

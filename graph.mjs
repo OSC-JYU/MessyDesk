@@ -1727,6 +1727,37 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 
 }
 
+graph.writeUsage = async function (usage, service, process_rid, userRID) {
+	const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+	
+	// Extract values with defaults to prevent undefined/null errors
+	const metadata = usage?.metadata || {};
+	const tokens = metadata?.tokens || {};
+	const inTokens = tokens?.in || {};
+	const outTokens = tokens?.out || {};
+	
+	const inCount = inTokens?.count || 0;
+	const outCount = outTokens?.count || 0;
+	const totalCount = tokens?.total || 0;
+	const inModality = inTokens?.modality || 'UNKNOWN';
+	const outModality = outTokens?.modality || 'UNKNOWN';
+	const model = metadata?.model || 'unknown';
+	const serviceName = service || 'unknown';
+	
+	var query = `INSERT INTO Usage CONTENT { 
+		'user': '${userRID}', 
+		'process': '${process_rid}', 
+		'in': ${inCount}, 
+		'out': ${outCount}, 
+		'model': '${model}', 
+		'service': '${serviceName}', 
+		'in_modality': '${inModality}', 
+		'out_modality': '${outModality}', 
+		'total': ${totalCount}, 
+		'time': '${now}' };`
+	var response = await web.sql(query)
+	return response
+}
 
 graph.sanitizeRID = function(rid) {
 
