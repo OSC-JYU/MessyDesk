@@ -139,6 +139,8 @@ const init = async () => {
 	// Error handling
 	server.ext('onPreResponse', (request, h) => {
 		const response = request.response;
+		
+		// Handle Boom errors (already formatted)
 		if (response.isBoom) {
 			logger.error({
 				user: request.headers[AUTH_HEADER],
@@ -148,7 +150,28 @@ const init = async () => {
 				body: request.payload,
 				error: response
 			});
+			return h.continue;
 		}
+		
+		// Handle other thrown errors
+		if (response instanceof Error) {
+			logger.error({
+				user: request.headers[AUTH_HEADER],
+				message: response.message,
+				params: request.params,
+				path: request.path,
+				body: request.payload,
+				error: response.stack
+			});
+			
+			// Return a proper error response to the client
+			return h.response({
+				error: 'Internal Server Error',
+				message: response.message,
+				statusCode: 500
+			}).code(500);
+		}
+		
 		return h.continue;
 	});
 

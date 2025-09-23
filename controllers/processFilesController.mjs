@@ -100,7 +100,7 @@ export async function processFilesHandler(request, h) {
             console.log('creating file node', message.file.type)
             let info = '';
             // for text nodes we create a description from the content of the file
-            if (message.file.type == 'text' || message.file.type == 'osd.json' || message.file.type == 'ner.json' || message.file.type == 'ocr.json') {
+            if (message.file.type == 'text' || message.file.type.includes('json')) {
                 info = await media.getTextDescription(contentFilepath, message.file.type);
             }
 

@@ -281,17 +281,71 @@ graph.getPrompts = async function (userRID) {
 
 graph.savePrompt = async function (prompt, userRID) {
 	
-	prompt.content = prompt.content.replace(/\n/g, '\\n')
-	prompt.description = prompt.description.replace(/\n/g, '\\n')
+	prompt.content = prompt.content.replace(/\n/g, '\\n').replace(/['"]/g, "'")
+	prompt.description = prompt.description.replace(/\n/g, '\\n').replace(/['"]/g, "'")
+	prompt.name = prompt.name.replace(/['"]/g, "'")
+	if(prompt.json_schema) {
+		// Validate that json_schema is valid JSON
+		try {
+			// Parse the JSON to validate it's valid
+			const parsedJson = JSON.parse(prompt.json_schema);
+			
+			// Check that the root JSON is an object, not an array
+			if (Array.isArray(parsedJson)) {
+				throw new Error('JSON schema must be an object, not an array. Arrays are allowed as values within the object.');
+			}
+			
+			// Re-stringify to ensure consistent formatting and escape quotes for database storage
+			prompt.json_schema = JSON.stringify(parsedJson).replace(/"/g, '\\"');
+		} catch (error) {
+			// Try to fix JSON by adding missing quotes around keys
+			try {
+				let fixedJson = prompt.json_schema;
+				
+				// Add quotes around unquoted keys (but preserve existing quoted keys)
+				fixedJson = fixedJson.replace(/([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:/g, '$1"$2":');
+				
+				// Add quotes around unquoted string values (but preserve numbers, booleans, null, objects, arrays)
+				fixedJson = fixedJson.replace(/:\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*([,}\]])/g, (match, value, ending) => {
+					// Don't quote if it's a known keyword or starts with { or [
+					if (/^(true|false|null|\d+\.?\d*|\{|\[)/.test(value)) {
+						return match;
+					}
+					return `: "${value}"${ending}`;
+				});
+				
+				// Validate the fixed JSON
+				const parsedFixedJson = JSON.parse(fixedJson);
+				
+				// Check that the root JSON is an object, not an array
+				if (Array.isArray(parsedFixedJson)) {
+					throw new Error('JSON schema must be an object, not an array. Arrays are allowed as values within the object.');
+				}
+				
+				// Re-stringify and escape quotes for database storage
+				prompt.json_schema = JSON.stringify(parsedFixedJson).replace(/"/g, '\\"');
+			} catch (fixError) {
+				throw new Error('Invalid JSON schema: ' + error.message + '. Attempted fix also failed: ' + fixError.message)
+			}
+		}
+	} else {
+		prompt.json_schema = ''
+	}
+	if(!prompt.output_type) {
+		prompt.output_type = 'text'
+	}
+	if(prompt.output_type != 'json' && prompt.output_type != 'text') {
+		prompt.output_type = 'text'
+	} 
 	
 	if(prompt['@rid']) {
-		var query =  `UPDATE Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}" WHERE @rid = ${prompt['@rid']}`	
+		var query =  `UPDATE Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}" WHERE @rid = ${prompt['@rid']}`	
 
 		var response = await web.sql(query)
 		return response.result
 
 	} else {
-		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", type = "${prompt.type}", owner = "${userRID}"`
+		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
 		
 		var response = await web.sql(query)
 		return response.result
@@ -658,7 +712,11 @@ graph.createProcessNode = async function (topic, service, data, filegraph, me_em
 	var process_rid = null
 	const process_attrs = { label: topic }
 	process_attrs.service = service.name
-	process_attrs.params = JSON.stringify(data)
+	// we remove json_schema from database record (might get messy)
+	var data_copy = structuredClone(data)
+	if(data_copy.system_params) delete data_copy.system_params.json_schema
+
+	process_attrs.params = JSON.stringify(data_copy)
 	if(data.info) {
 		process_attrs.info = data.info
 	}

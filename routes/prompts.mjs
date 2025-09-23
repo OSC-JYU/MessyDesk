@@ -1,9 +1,6 @@
 
 import Graph from '../graph.mjs';
-import logger from '../logger.mjs';
-
-const DATA_DIR = process.env.DATA_DIR || 'data';
-const API_URL = 'http://localhost:8200/';
+import Boom from '@hapi/boom';
 
 
 export default [
@@ -18,7 +15,12 @@ export default [
         method: 'POST',
         path: '/api/prompts',
         handler: async (request) => {
-            return await Graph.savePrompt(request.payload, request.auth.credentials.user.rid);
+            try {
+                return await Graph.savePrompt(request.payload, request.auth.credentials.user.rid);
+            } catch (e) {
+                console.log('Error saving prompt:', e);
+                throw Boom.badData(e.message);
+            }
         }
     }
 ];

@@ -327,17 +327,13 @@ media.getTextDescription = async function (filePath, file_type) {
 	const maxCharacters = 150;
 	try {
 		const data = await fse.readFile(filePath, 'utf8');
+		console.log('data', data)
 		// get number of characters	
 		const linecount = data.split(/\n/).length
 
 		if(file_type == 'ner.json') {
 			return NERsummary(data)
-
-		} else if(file_type == 'osd.json') {
-			var json_str = JSON2text(data)
-			if(json_str) {
-				return json_str.substring(0, maxCharacters);
-			}	
+	
 		} else if(file_type == 'ocr.json') {
 			// let's assume the json looks like this:
 			// [{"coordinates":[{"x":0.05599300087489064,"y":0.164519906323185},{"x":0.5433070866141733,"y":0.15515222482435598},{"x":0.5441819772528433,"y":0.1797423887587822},{"x":0.0568678915135608,"y":0.18969555035128804}],"text":"kapäiväinen lentoyhteys Uumajaan.","confidence":0.9961017370223999}]
@@ -349,6 +345,13 @@ media.getTextDescription = async function (filePath, file_type) {
 			}
 			return text.substring(0, maxCharacters)
 
+		} else if(file_type.includes('json')) {
+			console.log('reading json file')
+			var json_str = JSON2text(data)
+			console.log('tulo json file', json_str)
+			if(json_str) {
+				return json_str.substring(0, maxCharacters);
+			}
 		} else {
 			var first = data.substring(0, maxCharacters);
 			first = first.replace(/[^a-zA-Z0-9.,<>\s\/äöåÄÖÅøØæÆ-]/g, '') + '...'
@@ -440,16 +443,52 @@ function JSON2text(data) {
 	try {
 		var str_json = []
 		var json = JSON.parse(data)
-		for(var key in json) {
-			if(typeof json[key] == 'object') {
-				str_json.push(key + ': ' + JSON.stringify(json[key], null, 2))
+		
+		function processValue(key, value, indent = '') {
+			if (Array.isArray(value)) {
+				// Handle arrays
+				str_json.push(indent + key + ':')
+				value.forEach((item) => {
+					if (typeof item === 'object' && item !== null) {
+						processObject(item, indent + '  ')
+					} else {
+						str_json.push(indent + '  - ' + item)
+					}
+				})
+			} else if (typeof value === 'object' && value !== null) {
+				// Handle objects
+				str_json.push(indent + key + ':')
+				processObject(value, indent + '  ')
 			} else {
-				str_json.push(key + ': ' + json[key])
+				// Handle primitives
+				str_json.push(indent + key + ': ' + value)
 			}
 		}
+		
+		function processObject(obj, indent = '') {
+			for (var key in obj) {
+				processValue(key, obj[key], indent)
+			}
+		}
+		
+		// Handle root level
+		if (Array.isArray(json)) {
+			// If root is an array
+			json.forEach((item) => {
+				if (typeof item === 'object' && item !== null) {
+					processObject(item, '')
+				} else {
+					str_json.push('- ' + item)
+				}
+			})
+		} else {
+			// If root is an object
+			processObject(json)
+		}
+		
 		return str_json.join('\n')
 	} catch(e) {
-		return null
+		return ''
 	}
 }
 
