@@ -14,6 +14,7 @@ const DB = process.env.DB_NAME || 'messydesk';
 const PORT = process.env.DB_PORT || 2480;
 const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`;
 
+const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
 const AUTH_HEADER = 'mail';
 const DEFAULT_USER = 'local.user@localhost';
@@ -767,7 +768,7 @@ graph.createSetAndProcessNodes = async function (topic, service, data, filegraph
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 	
 	// create process output Set
-	if(service.output != 'always file') {
+	if(service.tasks[data.task].output != 'always file') {
 		setNode = await this.create('Set', {path: processNode.path})
 		// and link it to SetProcess
 		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
@@ -777,6 +778,32 @@ graph.createSetAndProcessNodes = async function (topic, service, data, filegraph
 
 }
 
+
+graph.createManyToOneProcessNode = async function (topic, service, data, setgraph ) {
+
+	const set_rid = setgraph['@rid']
+
+	const process_attrs = { label: topic, path:'' }
+	process_attrs.service = service.name
+	if(data.info) {
+		process_attrs.info = data.info
+	}
+	const processNode = await this.create('Process', process_attrs)
+	const process_rid = processNode['@rid']
+
+	const data_dir = process.env.DATA_DIR || 'data'
+	const process_path = path.join(data_dir, 'projects', media.rid2path(setgraph.project_rid), 'processes', media.rid2path(process_rid))
+	await media.createProcessDir(process_path)
+	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
+	var update_response = await web.cypher(update)
+	processNode.path = process_path
+
+	// finally, connect Process node to source Set node
+	await this.connect(set_rid, 'PROCESSED_BY', process_rid)
+
+	return processNode
+	
+}
 
 
 graph.createOutputSetNode = async function (label, processNode) {
@@ -1067,13 +1094,15 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 			where:(@rid = ${user_rid})}
 		-IS_OWNER->
 			{type:Project, as:project}--> 
-			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
+			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file, project`
 		var set_response = await web.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content
-			const extensions = await getSetFileTypes(file_rid)
+			const {extensions, types} = await getSetFileTypes(file_rid)
 			//console.log('extensions', extensions)
 			set_response.result[0].file.extensions = extensions
+			set_response.result[0].file.types = types
+			set_response.result[0].file.project_rid = set_response.result[0].project['@rid']
 			return set_response.result[0].file
 
 		// check if file is source (not file at all!)
@@ -1876,13 +1905,15 @@ function isIntegerString(value) {
 
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
-	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group`
+	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
 	var response = await web.sql(query)	
 	var extensions = []
+	var types = []
 	for(var result of response.result) {
 		extensions.push(result.extension_group)
+		types.push(result.type_group)
 	}
-	return extensions
+	return {extensions, types}
 }
 
 

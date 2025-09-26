@@ -6,6 +6,7 @@ import media from '../media.mjs';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import services from '../services.mjs';
+import Boom from '@hapi/boom';
 
 const DATA_DIR = process.env.DATA_DIR || 'data';
 const API_URL = process.env.API_URL || '/';
@@ -100,7 +101,7 @@ export async function processFilesHandler(request, h) {
             console.log('creating file node', message.file.type)
             let info = '';
             // for text nodes we create a description from the content of the file
-            if (message.file.type == 'text' || message.file.type.includes('json')) {
+            if (message.file.type == 'text' || message.file.type.includes('json') || message.file.type == 'csv') {
                 info = await media.getTextDescription(contentFilepath, message.file.type);
             }
 
@@ -198,9 +199,11 @@ export async function processFilesHandler(request, h) {
             console.log(infoFilepath, contentFilepath);
             console.log('PROCESS FAILED!');
             console.log(request.payload);
+            throw Boom.badData('File processing failed');
         }
     } catch (e) {
         console.log(e);
+        throw Boom.badData(e.message);
     }
 
     return {
@@ -208,6 +211,37 @@ export async function processFilesHandler(request, h) {
         message: 'Files processed successfully'
     };
 } 
+
+// HOW THIS SHOULD WORK:
+// 1. Get the request and content files
+// 2. check that 
+export async function processCSVAppendHandler(request, h) {
+    console.log('append process file call...');
+    let infoFilepath = null;
+    let contentFilepath = null;
+    let message = {};
+
+
+    
+    try {
+        if (request.payload.request && request.payload.content) {
+            infoFilepath = request.payload.request.path;
+            const info = await fse.readFile(infoFilepath);
+            message = JSON.parse(info);
+            contentFilepath = request.payload.content.path;
+            let content = await fse.readFile(contentFilepath, 'utf8');
+            console.log(content);
+        }
+    } catch (e) {
+        console.log(e);
+        throw Boom.badData(e.message);
+    }
+
+    return {
+        success: true,
+        message: 'Files appended successfully'
+    };
+}
 
 export async function processMetadataHandler(request, h) {
     console.log('save process metadata call...');

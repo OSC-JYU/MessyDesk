@@ -1,0 +1,24 @@
+{
+    "local_url": "http://localhost:8888",
+    "id": "md-json",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"JSON Processing",
+    "source_url": "https://github.com/MD-python/MD-json",
+    "status": "experimental",
+    "supported_formats": ["json"],
+    "supported_types": [],
+
+    "description": "Generic JSON scripts. ",
+
+
+    "tasks": {
+        "json2csv": {
+            "name": "Convert JSON to CSV",
+            "output": "many-to-one",
+            "description": "Create comma separated values from JSON files",
+            "info": "JSON to CSV"
+        }
+    }
+}

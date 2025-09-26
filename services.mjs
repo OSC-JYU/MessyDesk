@@ -6,65 +6,6 @@ import nomad from './nomad.mjs';
 
 const services = {service_list: {}}
 
-function pickTasks(service, extensions, filter, user, prompts, node_type) {
-	const service_object = JSON.parse(JSON.stringify(service))
-	service_object.tasks = {}
-
-	// if service has service groups, check if user has access to any of them
-	// if not, return empty object
-	if(service_object.service_groups) {
-		if(!service_object.service_groups.some(value => user.service_groups.includes(value))) {
-			return 
-		}
-	}
-
-	// LLM services have tasks defined in prompts
-	if(service_object.external_tasks) {
-		service_object.tasks = promptsToTasks(filter,prompts, node_type, extensions, service_object)
-		return service_object
-	}
-
-	for(var task in service.tasks) {
-
-		// task can be disabled/enabled by service_groups
-		if(service.tasks[task].service_groups) {
-			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
-				continue
-			}
-		}
-		
-		// task can be disabled for Sets
-		if(node_type == 'Set') {
-			if(service.tasks[task].set_disabled) {
-				continue
-			}
-		}
-
-		// if task has its own supported formats then compare to file extension
-		if(service.tasks[task].supported_formats) {
-			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
-			}
-		// if task has its own supported types then compare to node type
-		} else if(service.tasks[task].supported_types) {
-			if(service.tasks[task].supported_types.includes(node_type)) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
-			}
-		// otherwise compare file extension to service's supported formats
-		} else {
-			if(service.supported_formats && service.supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
-			}
-			
-		}
-		
-	}	
-	return service_object
-}
-
 function filterTask(filter, task) {
 	// When filter is provided, we return only tasks that has that filter that matches to query filter
 	if(filter) {
@@ -81,47 +22,7 @@ function filterTask(filter, task) {
 	return false
 }
 
-function promptsToTasks(filter, prompts, type, extensions, service) {
-	var tasks = {}
 
-	// currently there are no filtered prompts
-	if(filter) {
-		return tasks
-	}
-
-	// if type is Set, we return all tasks that have supported formats
-	if(type == 'Set') {
-		for(var prompt of prompts) {
-			prompt.system_params = {prompts: {content: prompt.content}}
-			if(extensions.includes('txt') && prompt.type == 'text') {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			} else if(extensions.includes('pdf') && prompt.type == 'pdf') {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			} else if(extensions.includes('jpg') && prompt.type == 'image') {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			} else if(extensions.includes('png') && prompt.type == 'image') {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			}
-		}
-		// for(var prompt of prompts) {
-		// 	prompt.system_params = {prompts: {content: prompt.content}}
-		// 	if(service.supported_formats.some(value => extensions.includes(value))) {
-		// 		if(service.supported_types.includes(prompt.type)) {
-		// 			tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-		// 		}
-		// 	}
-		// }
-	} else {
-		for(var prompt of prompts) {
-			prompt.system_params = {prompts: {content: prompt.content}}
-			if(type == prompt.type) {
-				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
-			}	
-		}
-	}
-
-	return tasks
-}
 
 function checkService(array, service) {
 	// check if service already exists
@@ -207,6 +108,9 @@ services.getService = function (service) {
 
 services.getServicesForNode = async function(node, filter, user, prompts) {
 
+	// we first check supporter types (internal types)
+	// if not found, we check supported formats
+
 	const matches = {for_type: [], for_format: []}
 	if(!node) return matches
 
@@ -220,7 +124,7 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 				continue
 			}
 			if(this.service_list[service].consumers.length > 0) {
-				var service_with_tasks = pickTasks(this.service_list[service], node.extensions, filter, user, prompts, node['@type'])
+				var service_with_tasks = pickTasks(this.service_list[service], node.extensions, node.types, filter, user, prompts, node['@type'])
 				if(service_with_tasks) {
 					matches.for_format.push(service_with_tasks)
 				}
@@ -234,23 +138,138 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 				}
 			}			
 				
-		// for Files we compare first type and then extension
+		// for Files we compare first (internal)type and then extension
 		} else if (node['@type'] == 'File') {
 			// check service for supported types
-			if(this.service_list[service]?.supported_types?.includes(node.type)) {
+			console.group(node.type)
+			console.log(this.service_list[service]?.supported_types)
+			console.groupEnd()
+			//if(this.service_list[service]?.supported_types?.includes(node.type)) {
 				// we take only services that has consumer app listening (i.e are active services)
 				if(this.service_list[service].consumers.length > 0) {
-					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], filter, user, prompts, node.type)
+					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], [node.type], filter, user, prompts, node.type)
 					if(service_with_tasks) {
 						matches.for_format.push(service_with_tasks)
 					}
 				}
-			} 
+			//} 
 		}
 
 
 	}
 	return matches
+}
+
+function pickTasks(service, extensions, types, filter, user, prompts, node_type) {
+	const service_object = JSON.parse(JSON.stringify(service))
+	service_object.tasks = {}
+
+
+	//console.log(service_object)
+	// if service has service groups, check if user has access to any of them
+	// if not, return empty object
+	if(service_object.service_groups) {
+		if(!service_object.service_groups.some(value => user.service_groups.includes(value))) {
+			return 
+		}
+	}
+
+	// LLM services have tasks defined in prompts
+	if(service_object.external_tasks) {
+		service_object.tasks = promptsToTasks(filter,prompts, node_type, extensions, service_object)
+		return service_object
+	}
+
+	for(var task in service.tasks) {
+
+		// task can be disabled/enabled by service_groups
+		if(service.tasks[task].service_groups) {
+			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+				continue
+			}
+		}
+		
+		// task can be disabled for Sets
+		if(node_type == 'Set') {
+			if(service.tasks[task].set_disabled) {
+				continue
+			}
+		}
+
+		
+		// if task has its own supported types then compare to node type (NOT @type!)
+		if(service.tasks[task].supported_types && service.tasks[task].supported_types.length > 0) {
+			if(service.tasks[task].supported_types.some(value => types.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+		// if task has its own supported formats then compare to file extension
+		} else if(service.tasks[task].supported_formats && service.tasks[task].supported_formats.length > 0) {
+			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+		
+
+		// otherwise compare file extension to service's supported formats
+		} else if(service.supported_types && service.supported_types.length > 0) {
+			if(service.supported_types.some(value => types.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+			
+		} else if(service.supported_formats && service.supported_formats.length > 0) {
+			if(service.supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, service.tasks[task]))
+					service_object.tasks[task] = service.tasks[task]
+			}
+		}
+		
+	}	
+	return service_object
+}
+
+
+function promptsToTasks(filter, prompts, type, extensions, service) {
+	var tasks = {}
+
+	// currently there are no filtered prompts
+	if(filter) {
+		return tasks
+	}
+
+	// if type is Set, we return all tasks that have supported formats
+	if(type == 'Set') {
+		for(var prompt of prompts) {
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(extensions.includes('txt') && prompt.type == 'text') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('pdf') && prompt.type == 'pdf') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('jpg') && prompt.type == 'image') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			} else if(extensions.includes('png') && prompt.type == 'image') {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			}
+		}
+		// for(var prompt of prompts) {
+		// 	prompt.system_params = {prompts: {content: prompt.content}}
+		// 	if(service.supported_formats.some(value => extensions.includes(value))) {
+		// 		if(service.supported_types.includes(prompt.type)) {
+		// 			tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+		// 		}
+		// 	}
+		// }
+	} else {
+		for(var prompt of prompts) {
+			prompt.system_params = {prompts: {content: prompt.content}}
+			if(type == prompt.type) {
+				tasks[prompt.name.toLowerCase().replace(/ /g, '_')] = prompt
+			}	
+		}
+	}
+
+	return tasks
 }
 
 // note: consumer here means service adapter, not NATS consumers

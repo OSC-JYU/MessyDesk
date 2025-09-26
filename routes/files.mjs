@@ -130,9 +130,9 @@ export default [
 
                         
                         // TEXT
-                        if (file_type === 'text') {
+                        if (['text', 'html', 'json', 'csv'].includes(file_type)) {
                             try {
-                                const info = await media.getTextDescription(filegraph.path);
+                                const info = await media.getTextDescription(filegraph.path, file_type);
                                 filegraph.info = info
                                 await Graph.setNodeAttribute(filegraph['@rid'], {
                                     key: 'info',
@@ -141,15 +141,6 @@ export default [
                             } catch (error) {
                                 console.log('Error getting text description:', error);
                             }
-
-                            // const index_msg = {
-                            //     id: 'solr',
-                            //     task: 'index',
-                            //     file: filegraph,
-                            //     userId: request.auth.credentials.user.rid,
-                            //     target: filegraph['@rid']
-                            // };
-                            // nats.publish(index_msg.id, JSON.stringify(index_msg));
                         }
 
 
@@ -329,6 +320,8 @@ export default [
                     response.type('application/pdf');
                 } else if (file_metadata.type === 'image') {
                     response.type('image/png');
+                } else if (file_metadata.extension === 'csv') {
+                    response.type('text/csv; charset=utf-8');
                 } else if (file_metadata.type === 'text' || file_metadata.type === 'data') {
                     response.type('text/plain; charset=utf-8');
                 } else if (file_metadata.type === 'error.json') {

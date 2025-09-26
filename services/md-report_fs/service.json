@@ -6,8 +6,6 @@
     "adapter": "elg_fs",
     "api": "/process",
     "name" :"Report",
-    
-    "supported_types": ["text"],
     "supported_formats": ["txt"],
 
     "description": "Create reports (very experimental)",

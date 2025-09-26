@@ -53,7 +53,7 @@
                     "display": "dropdown"
                 }
             },
-            "supported_formats": ["dspace7.json"]
+            "supported_types": ["dspace7.json"]
         }
     }
 }

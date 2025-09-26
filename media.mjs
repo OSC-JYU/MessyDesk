@@ -10,7 +10,7 @@ import logger from './logger.mjs';
 import unzipper from 'unzipper';
 
 
-const TYPES = ['image', 'text'] 
+const TYPES = ['image'] 
 
 
 let media = {}
@@ -155,6 +155,7 @@ media.createProjectDir = async function(project, data_dir) {
 	const rid = this.rid2path(project['@rid'])
 	try {
 		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
+		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'processes'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -290,21 +291,27 @@ media.writeJSON =  async function(data, filename, fpath) {
 media.detectType = async function(file) {
 	const originalFilename = file.hapi.filename;
 	const mimeType = file.hapi.headers['content-type'];
-    var extension = path.extname(originalFilename)
+    var extension = path.extname(originalFilename).toLowerCase()
 
     var ftype = mimeType.split('/')[0]
     if(mimeType == 'application/zip' || extension == '.zip') {
         return 'zip'
     }
 
-    if(TYPES.includes(ftype)) {
+    if(ftype == 'image') {  // image formats
         return ftype
-    } else if(mimeType == 'application/pdf') {
+    } else if(mimeType == 'application/pdf' || extension == '.pdf') {
         return 'pdf'
-    } else if(mimeType == 'application/octet-stream') {
+    } else if(mimeType == 'application/octet-stream' || extension == '.csv') {
         if(extension == '.csv') {
-            return 'data'
+            return 'csv'
         }
+    } else if(mimeType == 'application/json' || extension == '.json') {
+        return 'json'
+    } else if(mimeType == 'application/html'  || extension == '.html') {
+        return 'html'
+    } else if(mimeType == 'text/plain' || extension == '.txt') {
+        return 'text'
     }
 
 }
@@ -348,7 +355,6 @@ media.getTextDescription = async function (filePath, file_type) {
 		} else if(file_type.includes('json')) {
 			console.log('reading json file')
 			var json_str = JSON2text(data)
-			console.log('tulo json file', json_str)
 			if(json_str) {
 				return json_str.substring(0, maxCharacters);
 			}
@@ -443,6 +449,9 @@ function JSON2text(data) {
 	try {
 		var str_json = []
 		var json = JSON.parse(data)
+		console.log('json', JSON.stringify(json))
+		console.log('title', Object.keys(json))
+		console.log('title', data.title)
 		
 		function processValue(key, value, indent = '') {
 			if (Array.isArray(value)) {
