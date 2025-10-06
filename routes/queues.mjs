@@ -119,18 +119,22 @@ export default [
             try {
                 console.log('****************** set queue ******************');
                 const service = services.getServiceAdapterByName(topic);
-                var msg = JSON.parse(JSON.stringify(request.payload));
+                if(!service.tasks[request.payload.task]) {
+                    throw new Error('Task not found in service')
+                }
+                var task = JSON.parse(JSON.stringify(request.payload));
+                task.name = service.tasks[request.payload.task].name;
+                var msg = {task: task}
                 var task_name = '';
                 var task_output = 'file';
                 // LLM services have tasks defined in prompts
                 if(service.external_tasks) {
                     msg.external = 'yes';
-                    msg.info = request.payload.info;
-                    msg.params = request.payload.system_params;
-                    task_name = request.payload.name;
-                } else {
-                    task_name = service.tasks[request.payload.task].name;
-                }
+                    msg.info = request.payload.task.info;
+                    msg.params = request.payload.task.system_params;
+                    task_name = request.payload.task.name;
+                } 
+
                 if(service.tasks[request.payload.task].output) {
                     task_output = service.tasks[request.payload.task].output;
                 }
@@ -183,26 +187,23 @@ export default [
                 // normal "set to set" output
                 } else {
                     console.log('Creating set and process nodes');
-                    var nodes = await Graph.createSetAndProcessNodes(task_name, service, request.payload, set_metadata, request.auth.credentials.user.rid);
+                    var nodes = await Graph.createSetAndProcessNodes(service, task, set_metadata, request.auth.credentials.user.rid);
                     // add node to UI
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
-                    // normally we create process nodes for each file in set and put them in queue
-                    // TODO: we should use sqlscipt here
-                    console.log('Processing files: ', set_files.files.length);
+                    
                     var file_count = 1;
-
                     for(var file of set_files.files) {
                         var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
 
                         var msg = {
-                            current_file: file_count,
-                            total_files: set_files.files.length,
-                            file: file_metadata,
-                            task_name: task_name,
                             service: service,
-                            payload: request.payload,
+                            task: task,
+                            file: file_metadata,
+                            process: null,   // process node will be created in the queue
                             output_set: nodes.set['@rid'],
+                            total_files: set_files.files.length,
+                            current_file: file_count,
                             user_rid: request.auth.credentials.user.rid
                         }
                         nats.createSetProcessNodesAndPublish(msg)

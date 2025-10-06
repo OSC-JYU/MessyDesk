@@ -335,19 +335,23 @@ nats.listenDBQueue = async function(topic) {
           try {
             var payload = m.json()
             var msg_data = JSON.parse(payload)
-            var data = msg_data.value
+            var msg = msg_data.value
             //console.log(data)
 
             // CREATE AND PUBLISH
             if(msg_data.topic == 'create_and_publish') {
-              console.log('creating and publishing received...', data.current_file)
+              console.log('creating and publishing received...', msg.current_file)
               // Add 500ms delay
              // await new Promise(resolve => setTimeout(resolve, 500));
-              var processNode = await Graph.createProcessNode_queue(data);
+              var processNode = await Graph.createProcessNode_queue(msg);
               await media.createProcessDir(processNode.path);
               //delete data.service.tasks
-              await media.writeJSON(data, 'message.json', path.join(path.dirname(processNode.path)));
+              await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
               //console.log(data)
+              msg.process = processNode
+              
+              console.log('message', msg)
+              nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
               // we call database writes here and then we publish the message to actual processing queue
             } else {
               console.log('no topic defined!')

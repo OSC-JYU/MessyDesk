@@ -738,27 +738,38 @@ graph.createProcessNode = async function (topic, service, data, filegraph, me_em
 
 graph.createProcessNode_queue = async function (msg) {
 
+	if(!msg.task) {
+		throw new Error('Task not found in message')
+	}
+
+
 	var file_rid = msg.file['@rid']
 	
 	// create process node
 	var processNode = {}
 	var process_rid = null
-	const process_attrs = { label: msg.task_name }
-	process_attrs.service = msg.service.name
+	const process_attrs = { 
+		label: msg.task.name,
+		service: msg.service.name
+	}
+
 	// we remove json_schema from database record (might get messy)
-	var data_copy = structuredClone(msg.payload)
-	if(data_copy.system_params) delete data_copy.system_params.json_schema
+	console.log('***************** msg.task ***************')
+	console.log(msg.task)
+
+	var data_copy = structuredClone(msg.task)
+	if(data_copy.system_params?.json_schema) delete data_copy.system_params.json_schema
 
 	process_attrs.params = JSON.stringify(data_copy)
-	if(msg.payload.info) {
-		process_attrs.info = msg.payload.info
+	if(msg.task.info) {
+		process_attrs.info = msg.task.info
 	}
-	if(msg.payload.description) {
-		process_attrs.description = data.description
+	if(msg.task.description) {
+		process_attrs.description = msg.task.description
 	}
 	// mark if this is part of set processing = not displayed in UI by default
-	if(msg.set_metadata) {
-		process_attrs.set = msg.set_metadata['@rid']
+	if(msg.output_set) {
+		process_attrs.set = msg.output_set
 	}
 	if(msg.set_process_rid) {
 		process_attrs.set_process = msg.set_process_rid
@@ -775,6 +786,8 @@ graph.createProcessNode_queue = async function (msg) {
 
 	// create process output file node
 	//await this.createProcessFileNode(process_rid, data, '', '')
+	console.log('***************** processNode ***************')
+	console.log(processNode)
 
 	return processNode
 
@@ -782,7 +795,7 @@ graph.createProcessNode_queue = async function (msg) {
 
 
 // Create SetProcess and output Set 
-graph.createSetAndProcessNodes = async function (topic, service, data, filegraph ) {
+graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 
 	var file_rid = filegraph['@rid']
 	
@@ -790,10 +803,10 @@ graph.createSetAndProcessNodes = async function (topic, service, data, filegraph
 	var processNode = {}
 	var process_rid = null
 	var setNode = null
-	const process_attrs = { label: topic, path:'' }
+	const process_attrs = { label: task.name, path:'' }
 	process_attrs.service = service.name
-	if(data.info) {
-		process_attrs.info = data.info
+	if(task.info) {
+		process_attrs.info = task.info
 	}
 
 	processNode = await this.create('SetProcess', process_attrs)
@@ -803,7 +816,7 @@ graph.createSetAndProcessNodes = async function (topic, service, data, filegraph
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 	
 	// create process output Set
-	if(service.tasks[data.task].output != 'always file') {
+	if(service.tasks[task.task].output != 'always file') {
 		setNode = await this.create('Set', {path: processNode.path})
 		// and link it to SetProcess
 		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
