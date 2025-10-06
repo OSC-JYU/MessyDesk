@@ -3,22 +3,14 @@ import path from 'path';
 
 
 
-import web from "./web.mjs";
+import db from "./db.mjs";
 import media from "./media.mjs";
 
 import timers from 'timers-promises';
+import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
 
 const MAX_STR_LENGTH = 2048;
-const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1';
-const DB = process.env.DB_NAME || 'messydesk';
-const PORT = process.env.DB_PORT || 2480;
-const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`;
-
-const DATA_DIR = process.env.DATA_DIR || 'data';
-const API_URL = process.env.API_URL || '/';
-const AUTH_HEADER = 'mail';
 const DEFAULT_USER = 'local.user@localhost';
-
 const MAX_POSITION = 10000; // max x and y for project nodes
 const graph = {};
 
@@ -37,12 +29,12 @@ const entityTypes = [
 
 
 graph.initDB = async function () {
-	web.initURL(URL)
-	console.log(`ArcadeDB: ${web.getURL()}`)
-	console.log(`Checking database...jooko`)
+	db.initURL(DB_URL)
+	console.log(`ArcadeDB: ${db.getURL()}`)
+	console.log(`Checking database...`)
 	let db_exists = false
 	try {
-		db_exists = await web.checkDB()
+		db_exists = await db.checkDB()
 		if (db_exists)
 			console.log('Database found!')
 		else
@@ -52,17 +44,17 @@ graph.initDB = async function () {
 
 		try {
 			console.log('Database not found, creating...')
-			await web.createDB()
+			await db.createDB()
 			await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 		} catch (e) {
 			console.log(e)
 			console.log(`Could not init database. \nTrying again in 10 secs...`)
 			await timers.setTimeout(10000)
 			try {
-				await web.createDB()
+				await db.createDB()
 				await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 			} catch (e) {
-				console.log(`Could not init database. \nIs Arcadedb running at ${web.getURL()}?`)
+				console.log(`Could not init database. \nIs Arcadedb running at ${db.getURL()}?`)
 				throw ('Could not init database. exiting...')
 			}
 		}
@@ -73,7 +65,7 @@ graph.initDB = async function () {
 graph.hasAccess = async function (item_rid, user_rid) {
 	if (!item_rid.match(/^#/)) item_rid = '#' + item_rid
 	const query = `TRAVERSE in() FROM ${item_rid}`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	var user = response.result.filter(function (x) { return x['@rid'] == user_rid })
 	if (!user.length) {
 		return false
@@ -86,7 +78,7 @@ graph.createProject = async function (data, me_rid) {
 
 	var project = {}
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 	console.log(response.result[0])
 	if (response.result[0].projects == 0) {
 		project = await this.create('Project', data)
@@ -102,7 +94,7 @@ graph.createProject = async function (data, me_rid) {
 
 graph.deleteProject = async function (project_rid, user_rid, nats) {
 	const query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	if(response.result.length == 1) {
 		await this.deleteNode(response.result[0]['rid'], nats)
 	}
@@ -114,7 +106,7 @@ graph.createSet = async function (project_rid, data, me_rid) {
 	//const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
 	const query = `MATCH {type:User, as:p, where:(@rid = ${me_rid})}-IS_OWNER->{type:Project, as:pr, where:(@rid = ${project_rid})} RETURN pr`
 
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 
 	if (response.result.length == 1) {
 		var set = await this.create('Set', data)
@@ -131,7 +123,7 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
 	console.log(query)
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 	console.log(response)
 	console.log(response.result[0])
 	if (response.result.length == 1) {
@@ -139,7 +131,7 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 		var source = await this.create('Source', data)
 		var source_rid = source['@rid']
 		// DATA_DIR + '/projects/' + project_rid + '/sources/' + source_rid
-		const source_path = path.join(process.env.DATA_DIR || 'data', 'projects', media.rid2path(project_rid), 'sources', media.rid2path(source_rid))
+		const source_path = path.join(DATA_DIR, 'projects', media.rid2path(project_rid), 'sources', media.rid2path(source_rid))
 		source.path = source_path
 		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
 		await media.createProcessDir(source.path)
@@ -182,7 +174,7 @@ graph.index = async function (userRid) {
         ? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
         : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
-    const response = await web.sql(filesQuery);
+    const response = await db.sql(filesQuery);
 
     let documents = [];
     let count = 0;
@@ -214,14 +206,14 @@ graph.index = async function (userRid) {
         
         if (count % 1000 === 0) {
 			//console.log(documents)
-            await web.indexDocuments(documents);
+            await db.indexDocuments(documents);
             documents = [];
         }
     }
 
     // Index any remaining documents
     if (documents.length > 0) {
-        await web.indexDocuments(documents);
+        await db.indexDocuments(documents);
     }
 
     console.log(`${response.result.length} documents indexed`);
@@ -230,7 +222,7 @@ graph.index = async function (userRid) {
 
 graph.getUsers = async function () {
 	const query = `SELECT FROM User ORDER by label`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response.result
 }
 
@@ -244,7 +236,7 @@ graph.createUser = async function (data) {
 
 	// email must be unique
 	const query = `MATCH (p:User) WHERE p.id = "${data.id}" RETURN count(p) as users`
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
 	//data['service_groups'] = []
@@ -265,10 +257,10 @@ graph.initUserData = async function (user) {
 	// Create Desks
 	//-tee Desk:
 	//http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" 'mail:local.user@localhost' 
-	//await web.internal({label: 'DEMO 1', description: 'Käännellään kuvia'}, user['id'])
+	//await db.internal({label: 'DEMO 1', description: 'Käännellään kuvia'}, user['id'])
 
 	// create demo Projects
-	//await web.runPipeline(pipeline, user['id'])
+	//await db.runPipeline(pipeline, user['id'])
 	//http POST :8200/api/pipeline/files/82:6 @pipeline.json 'mail:ari.hayrinen@jyu.fi'
 }
 
@@ -276,7 +268,7 @@ graph.initUserData = async function (user) {
 graph.getPrompts = async function (userRID) {
 
 	const query = `SELECT FROM Prompt WHERE owner = "public" OR owner = "${userRID}" ORDER BY label`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response.result
 }
 
@@ -342,13 +334,13 @@ graph.savePrompt = async function (prompt, userRID) {
 	if(prompt['@rid']) {
 		var query =  `UPDATE Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}" WHERE @rid = ${prompt['@rid']}`	
 
-		var response = await web.sql(query)
+		var response = await db.sql(query)
 		return response.result
 
 	} else {
 		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
 		
-		var response = await web.sql(query)
+		var response = await db.sql(query)
 		return response.result
 	}
 
@@ -361,33 +353,27 @@ graph.createEntityTypes = async function (userRID) {
 	}
 }
 
-graph.getProject_old = async function (rid, me_email) {
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(pr) = "#${rid}" AND p.id = "${me_email}" RETURN pr`
-	var result = await web.cypher(query)
+graph.getProjectMetadata = async function (rid, me_email) {
+	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})} RETURN project`
+	var result = await db.sql(query)
 	return result
 }
 
 
-graph.getProject = async function (rid, me_email) {
+graph.getProject_old = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	schema_relations = await this.getSchemaRelations()
+
 	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
 				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
 				RETURN file`
-
-	const options = {
-		serializer: 'graph',
-		format: 'cytoscape',
-		schemas: schema_relations
-	}
 	
-	var result = await web.sql(query, options)
+	var result = await db.sql(query)
 
 	return result
 }
 
 
-graph.getProject_backup = async function (rid, user_rid) {
+graph.getProject = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
 	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
@@ -400,7 +386,7 @@ graph.getProject_backup = async function (rid, user_rid) {
 		format: 'vueflow'
 	}
 	
-	var result = await web.sql2(query, options)
+	var result = await db.sql(query, options)
 	result = await getSetThumbnails(user_rid, result, rid)
 	return result
 }
@@ -409,7 +395,7 @@ graph.getProject_backup = async function (rid, user_rid) {
 
 graph.getProjects = async function (user_rid, data_dir) {
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
 		return {
@@ -440,7 +426,7 @@ graph.getProjects = async function (user_rid, data_dir) {
 graph.getSetThumbnailsForNode = async function(set_rid) {
 	if(!set_rid.match(/^#/)) set_rid = '#' + set_rid
 	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 4`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response.result.map(item => {
 		const dirPath = item.path.split('/').slice(0, -1).join('/')
 		return dirPath.replace('data/', 'api/thumbnails/data/')
@@ -452,7 +438,7 @@ async function getProjectThumbnails(user_rid, data, data_dir) {
 
 	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 
 	for (var project of data) {
 		for (var thumbs of response.result) {
@@ -478,7 +464,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 		WHERE id(p) = "${user_rid}" AND id(pr) = "${project_rid}" AND file.type = "image"
 		WITH file, set ORDER BY file.label
 	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 
 	for (var set of data.nodes) {
 		for (var thumbs of response.result) {
@@ -502,38 +488,41 @@ graph.getProjectFiles = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
 	
-	var result = await web.cypher(query)
+	var result = await db.cypher(query)
 	return result
 }
 
 graph.getSetFiles = async function (set_rid, user_rid, params) {
 	if(!params || !isIntegerString(params.skip)) params.skip = 0
 	if(!params || !isIntegerString(params.limit)) params.limit = 10
+	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
 	// TODO: it would be more efficient if project_rid was used in the query
 	const count_query = `select count() AS file_count from File where set=${set_rid}`
-	var response_count = await web.sql(count_query)
+	var response_count = await db.sql(count_query)
 
 	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
 		{type:Project, as:project}.out() 
 		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND @type = 'File'),  while:($depth < 30)}
                  return  DISTINCT node ORDER by label SKIP ${params.skip} LIMIT ${params.limit}`
-	var response = await web.sql(query)
-	console.log(query)
+	var response = await db.sql(query)
+	
 
 	var files = response.result.map(obj => obj.node);
-	console.log(files)
 	
 	
 	// thumbnails and entities
-	for (var file of files) {
-		file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
-		// TODO: do this in one query!
-		const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
-		var entity_response = await web.cypher(entity_query)
-		file.entities = entity_response.result
+	if(params.thumbnails) {
+		for (var file of files) {
+			file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+				// TODO: do this in one query!
+				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
+				var entity_response = await db.cypher(entity_query)
+				file.entities = entity_response.result
+			}
 	}
+	
 	return { 
 		file_count: response_count.result[0].file_count, 
 		limit: params.limit,
@@ -549,7 +538,7 @@ graph.getSourceFiles = async function (source_rid, user_rid, params) {
 		if (!source_rid.match(/^#/)) source_rid = '#' + source_rid
 	
 		const query = `MATCH {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
-		var response = await web.sql(query)
+		var response = await db.sql(query)
 	
 		var source_file = await media.readJSON(path.join(response.result[0].path, 'source.json'))
 		var source_json = JSON.parse(source_file)
@@ -702,10 +691,8 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, service, data, filegraph, me_email, set_rid, set_process_rid) {
+graph.createProcessNode = async function (topic, service, data, filegraph, me_email, set_rid, set_process_rid, tid) {
 
-	//const params_str = JSON.stringify(params).replace(/"/g, '\\"')
-	//params.topic = topic
 	var file_rid = filegraph['@rid']
 	
 	// create process node
@@ -731,20 +718,68 @@ graph.createProcessNode = async function (topic, service, data, filegraph, me_em
 	if(set_process_rid) {
 		process_attrs.set_process = set_process_rid
 	}
-	processNode = await this.create('Process', process_attrs)
+	processNode = await this.create('Process', process_attrs, null,tid)
 	process_rid = processNode['@rid']
 	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
 	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
 	// update process path to record
-	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${processNode.path}" RETURN p`
-	var update_response = await web.cypher(update)
+	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process', tid)
 	
 	// finally, connect process node to file node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+	await this.connect(file_rid, 'PROCESSED_BY', process_rid, tid)
+
+	// create process output file node
+	//await this.createProcessFileNode(process_rid, data, '', '')
 
 	return processNode
 
 }
+
+
+graph.createProcessNode_queue = async function (msg) {
+
+	var file_rid = msg.file['@rid']
+	
+	// create process node
+	var processNode = {}
+	var process_rid = null
+	const process_attrs = { label: msg.task_name }
+	process_attrs.service = msg.service.name
+	// we remove json_schema from database record (might get messy)
+	var data_copy = structuredClone(msg.payload)
+	if(data_copy.system_params) delete data_copy.system_params.json_schema
+
+	process_attrs.params = JSON.stringify(data_copy)
+	if(msg.payload.info) {
+		process_attrs.info = msg.payload.info
+	}
+	if(msg.payload.description) {
+		process_attrs.description = data.description
+	}
+	// mark if this is part of set processing = not displayed in UI by default
+	if(msg.set_metadata) {
+		process_attrs.set = msg.set_metadata['@rid']
+	}
+	if(msg.set_process_rid) {
+		process_attrs.set_process = msg.set_process_rid
+	}
+	processNode = await this.create('Process', process_attrs)
+	process_rid = processNode['@rid']
+	var file_path = msg.file.path.split('/').slice(0, -1).join('/')
+	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	// update process path to record
+	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process')
+	
+	// finally, connect process node to file node
+	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
+
+	// create process output file node
+	//await this.createProcessFileNode(process_rid, data, '', '')
+
+	return processNode
+
+}
+
 
 // Create SetProcess and output Set 
 graph.createSetAndProcessNodes = async function (topic, service, data, filegraph ) {
@@ -791,11 +826,11 @@ graph.createManyToOneProcessNode = async function (topic, service, data, setgrap
 	const processNode = await this.create('Process', process_attrs)
 	const process_rid = processNode['@rid']
 
-	const data_dir = process.env.DATA_DIR || 'data'
+	const data_dir = DATA_DIR
 	const process_path = path.join(data_dir, 'projects', media.rid2path(setgraph.project_rid), 'processes', media.rid2path(process_rid))
 	await media.createProcessDir(process_path)
 	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
-	var update_response = await web.cypher(update)
+	var update_response = await db.cypher(update)
 	processNode.path = process_path
 
 	// finally, connect Process node to source Set node
@@ -846,26 +881,27 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	if(file.hapi.description) description = file.hapi.description
 	if(file.hapi.info) info = file.hapi.info
 	var extension = path.extname(file.hapi.filename).replace('.', '').toLowerCase()
-	const query = `MATCH (p:Project) WHERE id(p) = "${project_rid}" 
-		CREATE (file:File 
-			{
-				type: "${file_type}",
-				extension: "${extension}",
-				label: "${file.hapi.filename}",
-				original_filename: "${file.hapi.filename}",
-				description: "${description}",
-				info: "${info}",
-				metadata: {size: 0},
-				_active: true
-			}
-		) <- [r:HAS_FILE] - (p) 
-		RETURN file`
-	var response = await web.cypher(query)
 
+	var vertex_params = {
+		type: file_type,
+		extension: extension,
+		label: file.hapi.filename,
+		original_filename: file.hapi.filename,
+		description: description,
+		info: info,
+		expand: false,
+		metadata: {size: 0},
+		_active: true
+	}
+	
+	const query = `CREATE VERTEX File CONTENT ${JSON.stringify(vertex_params)}`
+	
+	var response = await db.sql(query)
 	var file_rid = response.result[0]['@rid']
+	await this.connect(project_rid, 'HAS_FILE', file_rid)
 	var file_path = path.join(data_dir, 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
-	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
-	var update_response = await web.cypher(update)
+	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
+	response.result[0]['path'] = file_path
 	
 	// link file to set
 	if(set_rid) {
@@ -875,43 +911,41 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 		await this.updateFileCount(set_rid)
 	}
 	
-	return update_response.result[0]
+	return response.result[0]
 }
 
 
 
 graph.createErrorNode = async function (error, message, data_dir) {
 
-	const file_type = message.file.type
-	const extension = message.file.extension
 	const label = message.file.label
 	const description = error.code || 'unknown'
 	const info = error.message || 'There was an error processing your file.'
 
-	let setquery = ''
-	if(message.set) setquery = 'set:"' + message.set + '",'
 	const process_rid = message.process['@rid']
-	const query = `MATCH (p:Process) WHERE id(p) = "${process_rid}" 
-		CREATE (file:File 
-			{
-				type: "error.json",
-				extension: "json",
-				label: "${label}.error.json",
-				description: "${description}",
-				info: "${info}",
-				set: null,
-				${setquery}
-				_active: true
-			}
-		)
-		RETURN file, p.path as process_path`
+	const path_query = `SELECT path FROM ${process_rid}`
+	const path_response = await db.sql(path_query)
+	const process_path = path_response.result[0].path
 
-	var response = await web.cypher(query)
+	const vertex_params = {
+		type: "error.json",
+		extension: "json",
+		label: `${label}.error.json`,
+		description: description,
+		info: info,
+		metadata: {size: 0},
+		_active: true
+	}
+	const query = `CREATE VERTEX File CONTENT ${JSON.stringify(vertex_params)}`
 
-	var file_rid = response.result[0].file['@rid']
-	var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.json')
-	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
-	var update_response = await web.cypher(update)
+	if(message.set) vertex_params.set = message.set
+
+	var response = await db.sql(query)
+
+	var file_rid = response.result[0]['@rid']
+	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.json')
+	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
+	response.result[0]['path'] = file_path
 
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
@@ -923,7 +957,7 @@ graph.createErrorNode = async function (error, message, data_dir) {
 		await this.connect(process_rid, 'PRODUCED', file_rid)
 	}
 
-	return update_response.result[0]
+	return response.result[0]
 }
 
 
@@ -966,15 +1000,15 @@ graph.createROIs = async function(rid, data) {
 			rids.push(roi['@rid'])
 			if(roi['locked']) continue // locked ROIs are not updated
 			const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
-			var response = await web.cypher(query)
+			var response = await db.cypher(query)
 			if(response.result.length > 0) {
 				// update
 				const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
-				var update_response = await web.sql(update)
+				var update_response = await db.sql(update)
 			} 
 		} else {
 			const query_c = `CREATE Vertex ROI CONTENT ${JSON.stringify(roi)}`
-			var response_c = await web.sql(query_c)
+			var response_c = await db.sql(query_c)
 			await this.connect(rid, 'HAS_ROI', response_c.result[0]['@rid'])
 			rids.push(response_c.result[0]['@rid'])
 		}
@@ -984,10 +1018,10 @@ graph.createROIs = async function(rid, data) {
 	// now we must delete all ROIs that are not in the rids array
 	const query_delete = `DELETE FROM ROI WHERE @rid NOT IN [${rids.join(',')}] AND in().@rid = [${rid}]`
 	console.log(query_delete)
-	var response_delete = await web.sql(query_delete)
+	var response_delete = await db.sql(query_delete)
 
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
-	var response_count = await web.sql(query_count)
+	var response_count = await db.sql(query_count)
 	await this.setNodeAttribute_old(rid, {key:"roi_count", value: response_count.result[0].count}, 'File' )
 	return response_count.result[0].count
 
@@ -996,7 +1030,7 @@ graph.createROIs = async function(rid, data) {
 graph.getROIs = async function(rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	const query = `MATCH (file:File)-[r:HAS_ROI]->(roi:ROI) WHERE id(file) = "${rid}" RETURN roi`
-	var response = await web.cypher(query)
+	var response = await db.cypher(query)
 	return response.result
 }
 
@@ -1005,12 +1039,12 @@ graph.updateFileCount = async function (set_rid) {
 
 	const count_query = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
 	RETURN count(file) as count`
-	var count_response = await web.sql(count_query)
+	var count_response = await db.sql(count_query)
 
 	var count = count_response.result[0].count
 
 	const query = `UPDATE Set SET count = ${count} WHERE @rid = "${set_rid}" `
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return count
 }
 
@@ -1025,35 +1059,32 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	var f_description = ''
 	if(description) f_description = description
 	if(info) f_info = info
-	//if(!description) description = label
-	let setquery = ''
-	if(message.set) setquery = 'set:"' + message.set + '",'
-	var type = 'Process'
-	
-	const query = `MATCH (p:${type}) WHERE id(p) = "${process_rid}" 
-		CREATE (file:File 
-			{
-				type: "${file_type}",
-				extension: "${extension}",
-				label: "${label}",
-				description: "${f_description}",
-				info: "${f_info}",
-				expand: false,
-				set: null,
-				${setquery}
-				_active: true
-			}
-		) 
-		RETURN file, p.path as process_path`
 		
+	const path_query = `SELECT path FROM ${process_rid}`
+	const path_response = await db.sql(path_query)
+	const process_path = path_response.result[0].path
 
-		console.log(query)
-	var response = await web.cypher(query)
-
-	var file_rid = response.result[0].file['@rid']
-	var file_path = path.join(response.result[0].process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
-	const update = `MATCH (file:File) WHERE id(file) = "${file_rid}" SET file.path = "${file_path}" RETURN file`
-	var update_response = await web.cypher(update)
+	var vertex_params = {
+		type: file_type,
+		extension: extension,
+		label: label,
+		description: f_description,
+		info: f_info,
+		expand: false,
+		_active: true
+	}
+	if(message.set) vertex_params.set = message.set
+	
+	const query = `CREATE VERTEX File CONTENT ${JSON.stringify(vertex_params)}`
+	
+	var response = await db.sql(query)
+	var file_rid = response.result[0]['@rid']
+	console.log('file_rid', file_rid)
+	console.log('process_path', process_path)
+	console.log('extension', extension)
+	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
+	response.result[0]['path'] = file_path
 
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
@@ -1065,7 +1096,7 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 		await this.connect(process_rid, 'PRODUCED', file_rid)
 	}
 
-	return update_response.result[0]
+	return response.result[0]
 }
 
 
@@ -1081,7 +1112,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		{type:Project, as:project}--> 
 		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
 
-	var file_response = await web.sql(query)
+	var file_response = await db.sql(query)
 
 	if(file_response.result[0] && file_response.result[0].file)
 		return file_response.result[0].file
@@ -1095,7 +1126,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		-IS_OWNER->
 			{type:Project, as:project}--> 
 			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file, project`
-		var set_response = await web.sql(query_set)
+		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content
 			const {extensions, types} = await getSetFileTypes(file_rid)
@@ -1115,7 +1146,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 				{type:Project, as:project}--> 
 				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file`
 				
-			var source_response = await web.sql(query_source)
+			var source_response = await db.sql(query_source)
 			if(source_response.result[0] && source_response.result[0].file) {
 				return source_response.result[0].file
 			}
@@ -1127,7 +1158,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 graph.getFileSource = async function (file_rid) {
 	const clean_file_rid = this.sanitizeRID(file_rid)
 	const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
-	var response = await web.sql(sql)
+	var response = await db.sql(sql)
 	if(response.result[0] && response.result[0].source) return response.result[0].source
 
 	return null
@@ -1135,11 +1166,11 @@ graph.getFileSource = async function (file_rid) {
 
 
 graph.query = async function (body) {
-	return web.cypher(body.query)
+	return db.cypher(body.query)
 }
 
-graph.create = async function (type, data, admin) {
-	console.log('create', type, data)
+graph.create = async function (type, data, admin, tid) {
+	//console.log('create', type, data)
 	var data_str_arr = []
 	// expression data to string
 	for (var key in data) {
@@ -1176,11 +1207,15 @@ graph.create = async function (type, data, admin) {
 	// _active
 	if (!data['active']) data_str_arr.push(`active: true`)
 
-	var query = `CREATE (n:${type} {${data_str_arr.join(',')}}) return n`
+	var query = `CREATE VERTEX ${type} CONTENT {${data_str_arr.join(',')}} `
 
-	
-	const response = await web.cypher(query)
-	return response.result[0]
+	if(tid) {
+		const response = await db.writeWithTransaction(query, {}, 3, 5000, tid)
+		return response.result[0]
+	} else {
+		const response = await db.sql(query)
+		return response.result[0]
+	}
 }
 
 graph.createWithSQL = async function (type, data, admin) {
@@ -1212,7 +1247,7 @@ graph.createWithSQL = async function (type, data, admin) {
 
 	var query = `CREATE VERTEX ${type} CONTENT {${data_str_arr.join(',')}}`
 	
-	const response = await web.sql(query)
+	const response = await db.sql(query)
 	return response.result[0]
 }
 
@@ -1224,41 +1259,41 @@ graph.deleteNode = async function (rid, nats) {
 	
 	// remove node and all children (out nodes) from solr index
 	const q = `TRAVERSE out() FROM ${rid}`
-	var traverse = await web.sql(q)
+	var traverse = await db.sql(q)
 	var targets = []
 	for(var node of traverse.result) {
-		console.log(node)
 		targets.push({id: node['@rid']})
 		// remove of path is only necessary for setProcess nodes TODO: make smarter
 		if(node['path'])
 			await media.deleteNodePath(node['path'])
 	}
 
-	if(nats) {
-		var index_msg = {
-			id:'solr', 
-			task: 'delete', 
-			target: targets
-		}
-		nats.publish(index_msg.id, JSON.stringify(index_msg))
-	}
+	// if(nats) {
+	// 	var index_msg = {
+	// 		id:'solr', 
+	// 		task: 'delete', 
+	// 		target: targets
+	// 	}
+	// 	nats.publish(index_msg.id, JSON.stringify(index_msg))
+	// }
 
 	// if this is setProcess, then delete all Process nodes that has property set_process = rid
 	if(parent.result[0]['@type'] == 'SetProcess') {
 		const query_delete_process = `DELETE FROM Process WHERE set_process = "${rid}"`
-		await web.sql(query_delete_process)
+		await db.sql(query_delete_process)
 	}
 
 	// get path for directory deletion
 	const query_path = `SELECT path FROM ${rid}`
-	var path_result = await web.sql(query_path)
+	var path_result = await db.sql(query_path)
 
 	// delete all children and node
-	var query = `MATCH (n)
-		WHERE id(n) = "${rid}" 
-		OPTIONAL MATCH (n)-[*]->(child)
-		DETACH delete n,child`
-	var response = await web.cypher(query)
+// var query = `MATCH (n)
+// 	WHERE id(n) = "${rid}" 
+// 	OPTIONAL MATCH (n)-[*]->(child)
+// 	DETACH delete n,child`
+// var response = await db.cypher(query)
+	await db.deleteMany(targets)
 
 	const node_path = parent.result[0].path
 	const is_project = parent.result[0]['@type'] == 'Project'
@@ -1279,46 +1314,41 @@ graph.deleteNode = async function (rid, nats) {
 
 
 // data = {from:[RID] ,relation: '', to: [RID]}
-graph.connect = async function (from, relation, to) {
-	var relation_type = ''
-	var attributes = ''
+graph.connect = async function (from, relation, to, tid) {
 
 	if (!from.match(/^#/)) from = '#' + from
 	if (!to.match(/^#/)) to = '#' + to
 
-	// check for existing link
-	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" RETURN r`
-
-	var response = await web.cypher(query)
-	if (response.result.length > 0) {
-		throw ('Link already exists!')
+	var query = `CREATE EDGE ${relation} FROM ${from} TO ${to} IF NOT EXISTS`
+	//nats.writeToDB(query)
+	//return {result: 'ok'}
+	if(tid) {
+		return await db.writeWithTransaction(query, {}, 3, 5000, tid)
+	} else {
+		return await db.sql(query)
 	}
-
-	if (typeof relation == 'object') {
-		relation_type = relation.type
-		if (relation.attributes)
-			attributes = this.createAttributeCypher(relation.attributes)
-	} else if (typeof relation == 'string') {
-		relation_type = relation
-	}
-	var query = `MATCH (from), (to) WHERE id(from) = "${from}" AND id(to) = "${to}" CREATE (from)-[:${relation_type} ${attributes}]->(to) RETURN from, to`
-
-	return web.cypher(query)
 }
 
+graph.startTransaction = async function () {
+	return await db.startTransaction()
+}
 
-graph.unconnect = async function (from, relation, to) {
+graph.commitTransaction = async function (tid) {
+	return await db.commit(tid)
+}
+
+graph.unconnect = async function (from, relation, to, tid) {
 	if (!from.match(/^#/)) from = '#' + from
 	if (!to.match(/^#/)) to = '#' + to
 	var query = `MATCH (from)-[r:${relation}]->(to) WHERE id(from) = "${from}" AND id(to) = "${to}" DELETE r RETURN from`
-	return web.cypher(query)
+	return db.sql(query, {}, tid)
 }
 
 
-graph.deleteEdge = async function (rid) {
+graph.deleteEdge = async function (rid, tid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	var query = `MATCH (from)-[r]->(to) WHERE id(r) = '${rid}' DELETE r`
-	return web.cypher(query)
+	return db.sql(query, {}, tid)
 }
 
 
@@ -1337,7 +1367,7 @@ graph.setEdgeAttribute = async function (rid, data) {
 	} else if (typeof data.value == 'string') {
 		query = query + `SET r.${data.name} = '${data.value.replace(/'/g, "\\'")}'`
 	}
-	return web.cypher(query)
+	return db.cypher(query)
 }
 
 graph.isProjectOwner = async function (rid, userRID) {
@@ -1348,7 +1378,7 @@ graph.isProjectOwner = async function (rid, userRID) {
 	-IS_OWNER->
 		{type:Project, as:project,  where:(@rid = :rid)} return project`
 
-	var response = await web.sql_params(query, {rid: rid, userRID: userRID}, true)
+	var response = await db.sql_params(query, {rid: rid, userRID: userRID}, true)
 	return response.result.length > 0
 }
 
@@ -1362,8 +1392,9 @@ graph.isNodeOwner = async function (rid, userRID) {
 	-IS_OWNER->
 		{type:Project, as:project}--> 
 		{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
+	
 
-	var file_response = await web.sql(query)
+	var file_response = await db.sql(query)
 	if(file_response.result.length > 0) return file_response.result[0]
 	return null
 }
@@ -1382,7 +1413,7 @@ graph.setNodeError = async function (rid, error, userRID) {
 
 	// get error count from node
 	let count_query = `SELECT error_count FROM ${rid}`
-	let count_response = await web.sql(count_query)
+	let count_response = await db.sql(count_query)
 	
 	let error_count = count_response.result[0].error_count
 	if(!error_count) error_count = 1
@@ -1397,7 +1428,7 @@ graph.setNodeError = async function (rid, error, userRID) {
 	if(error.code) params.code = error.code
 	
 	try {
-		await web.sql_params(query, params)
+		await db.sql(query, params)
 		return error_count
 	} catch (e) {
 		throw({'message': 'Error setting node error'})
@@ -1408,21 +1439,21 @@ graph.setNodeError = async function (rid, error, userRID) {
 graph.getSetProcessNode = async function (set, userRID) {
 	if(!await this.isNodeOwner(set, userRID)) throw({'message': 'You are not the owner of this set'})
 	let query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
-	console.log(query)
-	let response = await web.sql(query)
+	let response = await db.sql(query)
 	return response.result[0]
 }
 
 graph.setNodePosition = async function (rid, position) {
 
 	// check that position is an object with x and y properties
-	if(typeof position != 'object' || !position.x || !position.y) throw({'message': 'Invalid position'})
+	if(typeof position != 'object' || (position.x === undefined || position.y === undefined)) throw({'message': 'Invalid position'})
 	// check that x and y are integers between -2000 and 2000, or zero
 	if(!Number.isInteger(position.x) || position.x > MAX_POSITION || position.x < -MAX_POSITION) throw({'message': `Position x must be an integer between -${MAX_POSITION} and ${MAX_POSITION}`})
 	if(!Number.isInteger(position.y) || position.y > MAX_POSITION || position.y < -MAX_POSITION) throw({'message': `Position y must be an integer between -${MAX_POSITION} and ${MAX_POSITION}`})
 
 	let query = `UPDATE ${rid} SET position = {x: ${position.x}, y: ${position.y}}`
-	return web.sql(query)
+
+	return db.sql(query)
 }
 
 graph.setProjectAttribute = async function (rid, data, userRID) {
@@ -1443,7 +1474,7 @@ graph.setProjectAttribute = async function (rid, data, userRID) {
 		throw({'message': 'Invalid data'})
 	}
 
-	return web.sql_params(query, params)
+	return db.sql_params(query, params)
 }	
 
 
@@ -1460,11 +1491,12 @@ graph.setNodeAttribute = async function (rid, data, userRID) {
 		throw({'message': 'Invalid data'})
 	}
 
-	return web.sql_params(query, params)
+	//return db.sql_params(query, params)
+	return db.sql_params(query, params)
 }
 
 
-graph.setNodeAttribute_old = async function (rid, data, type) {
+graph.setNodeAttribute_old = async function (rid, data, type, tid) {
 	const clean_file_rid = this.sanitizeRID(rid)
 	if (!type) throw('Type is required')
 
@@ -1483,8 +1515,14 @@ graph.setNodeAttribute_old = async function (rid, data, type) {
 	} else {
 		throw('Illegal data', data)
 	}
-	console.log(query)
-	return web.sql(query)
+	
+	if(tid) {
+		const response = await db.writeWithTransaction(query, {}, 3, 5000, tid)
+		return response.result[0]
+	} else {
+		const response = await db.sql(query)
+		return response.result[0]
+	}
 
 }
 
@@ -1492,7 +1530,7 @@ graph.setNodeAttribute_old = async function (rid, data, type) {
 graph.getNodeAttributes = async function (rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	var query = `MATCH (node) WHERE id(node) = '${rid}' RETURN node`
-	return web.cypher(query)
+	return db.cypher(query)
 }
 
 
@@ -1500,7 +1538,7 @@ graph.getSearchData = async function (search) {
 	if (search[0]) {
 		var arr = search[0].result.map(x => '"' + x + '"')
 		var query = `MATCH (n) WHERE id(n) in [${arr.join(',')}] AND NOT n:Schema_ return id(n) as id, n.label as label, labels(n) as type LIMIT 10`
-		return web.cypher(query)
+		return db.cypher(query)
 	} else {
 		return { result: [] }
 	}
@@ -1543,13 +1581,13 @@ graph.createAttributeCypher = async function (attributes) {
 // graph.checkMe = async function (user) {
 // 	if (!user) throw ('user not defined')
 // 	var query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group, me._access as access`
-// 	var result = await web.cypher(query)
+// 	var result = await db.cypher(query)
 // 	// add user if not found
 // 	if (result.result.length == 0) {
 // 		query = `MERGE (p:User {id: "${user}"}) SET p.label = "${user}", p._group = 'user', p._active = true`
-// 		result = await web.cypher(query)
+// 		result = await db.cypher(query)
 // 		query = `MATCH (me:User {id:"${user}"}) return id(me) as rid, me._group as group`
-// 		result = await web.cypher(query)
+// 		result = await db.cypher(query)
 // 		return result.result[0]
 // 	} else return result.result[0]
 // }
@@ -1559,18 +1597,18 @@ graph.myId = async function (user) {
 	if (!user) return null
 	if(user.startsWith('#')) {
 		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE @rid = ${user}`
-		var response = await web.sql(query)
+		var response = await db.sql(query)
 		return response.result[0]
 	} else {
 		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE id = "${user}"`
-		var response = await web.sql(query)
+		var response = await db.sql(query)
 		return response.result[0]
 	}
 }
 
 graph.getStats = async function () {
 	const query = 'MATCH (n) RETURN DISTINCT LABELS(n) as labels, COUNT(n) as count  ORDER by count DESC'
-	const result = await web.cypher(query)
+	const result = await db.cypher(query)
 	return result
 }
 graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selection) {
@@ -1607,20 +1645,20 @@ graph.traverse = async function (rid, direction, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	var query = `TRAVERSE ${direction}() FROM ${rid}`
 	console.log(query)
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response.result
 }
 
 graph.getEntityTypeSchema = async function (userRID) {
 	var query = `select FROM EntityType WHERE owner = "${userRID}" ORDER by type`
 	console.log(query)
-	var types = await web.sql(query)
+	var types = await db.sql(query)
 	return types.result
 }
 
 graph.getEntityTypes = async function (userRID) {
 	var query = `select type, count(type) AS count, LIST(label) AS labels, icon, color,LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
-	var types = await web.sql(query)
+	var types = await db.sql(query)
 	return types.result
 }
 
@@ -1630,7 +1668,7 @@ graph.getEntityItems = async function (entities, userRID) {
 	if(!entities_clean.length) return []
 	//var query = `select in("HAS_ENTITY") AS items, label, @rid From Entity WHERE owner = "${userRID}" AND @rid IN [${entities_clean.join(',')}]`
 	var query = `match {type:File, as:item}-HAS_ENTITY->{as:entity, where:(@rid IN [${entities_clean.join(',')}] AND owner = "${userRID}")} return  DISTINCT item.label AS label, item.info AS info, item.description AS description, item.@rid AS rid, item.path AS path, item.type AS type LIMIT 20`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 
 	if(!response.result.length) return []
 	var items = addThumbPaths(response.result)
@@ -1641,19 +1679,19 @@ graph.getEntityItems = async function (entities, userRID) {
 graph.getEntitiesByType = async function (type) {
 	if(!type) return []
 	var query = `select from Entity where type = "${type}" ORDER by label`
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 graph.getEntity = async function (rid, userRID) {
 	var query = `MATCH {type: Entity, as: entity, where: (id = "${rid}" AND owner = "${userRID}")} RETURN entity`
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 graph.getLinkedEntities = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity.@rid AS rid, entity.color AS color, entity.icon AS icon`
 
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response.result
 }
 
@@ -1661,7 +1699,7 @@ graph.createEntity = async function (data, userRID) {
 	if(!data.type || data.type == 'undefined') return
 	if(!data.label || data.label == 'undefined') return
 	var schema = `SELECT color, icon FROM EntityType WHERE type = "${data.type}"`
-	var response = await web.sql(schema)
+	var response = await db.sql(schema)
 	if(response.result.length) {
 		if(!data.icon) data.icon = response.result[0].icon || 'mdi-tag'
 		if(!data.color) data.color = response.result[0].color || '#ff8844'
@@ -1671,12 +1709,12 @@ graph.createEntity = async function (data, userRID) {
 	}
 	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
 	console.log(query)
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 graph.checkEntity = async function (data, node_rid, userRID) {
 	var query = `MATCH {type: Entity, as: entity, where: (type = "${data.type}" AND label = "${data.label}" AND owner = "${userRID}")}--{as: node, where: (@rid = ${node_rid}), optional: true} RETURN entity, node`
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 // data should be array of entities
@@ -1705,11 +1743,11 @@ graph.linkEntity = async function (rid, vid, userRID) {
 	if(!vid.match(/^#/)) vid = '#' + vid
 	var query = `MATCH {type: Entity, as: entity, where: (@rid = ${rid} AND owner = "${userRID}")} RETURN entity`
 	console.log(query)
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	var entity = response.result[0]
 	
 	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
-	response = await web.sql(query)
+	response = await db.sql(query)
 
 	var target = response.result[0]
 	console.log(entity, target)
@@ -1722,11 +1760,11 @@ graph.unLinkEntity = async function (rid, vid, userRID) {
 	if(!rid.match(/^#/)) rid = '#' + rid
 	if(!vid.match(/^#/)) vid = '#' + vid
 	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	var entity = response.result[0]
 	console.log(entity)
 	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
-	response = await web.sql(query)
+	response = await db.sql(query)
 	console.log(response.result)
 	var target = response.result[0]
 	if(!entity || !target) return	
@@ -1734,20 +1772,20 @@ graph.unLinkEntity = async function (rid, vid, userRID) {
 }
 graph.getTags = async function (userRID) {
 	var query = `MATCH {type:Tag, as:tag, where:(owner = "${userRID}")} RETURN tag order by tag.label`
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 graph.createTag = async function (label, userRID) {
 	if(!label) return
 	var query = `create Vertex Tag set label = "${label}", owner = "${userRID}"`
-	return await web.sql(query)
+	return await db.sql(query)
 }
 
 graph.getNode = async function (rid, userRID) {
 	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
 	console.log(query)
 	
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	if(response.result.length == 0) return []
 	return response.result[0]
 }
@@ -1768,7 +1806,7 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 	by_groups = 1
 
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var data = await web.cypher(`MATCH (source) WHERE id(source) = "${rid}" OPTIONAL MATCH (source)-[rel]-(target)  return source, rel, target ORDER by target.label`)
+	var data = await db.cypher(`MATCH (source) WHERE id(source) = "${rid}" OPTIONAL MATCH (source)-[rel]-(target)  return source, rel, target ORDER by target.label`)
 	if (data.result.length == 0) return []
 
 
@@ -1842,7 +1880,7 @@ graph.writeUsage = async function (usage, service, process_rid, userRID) {
 		'out_modality': '${outModality}', 
 		'total': ${totalCount}, 
 		'time': '${now}' };`
-	var response = await web.sql(query)
+	var response = await db.sql(query)
 	return response
 }
 
@@ -1906,7 +1944,7 @@ function isIntegerString(value) {
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
 	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
-	var response = await web.sql(query)	
+	var response = await db.sql(query)	
 	var extensions = []
 	var types = []
 	for(var result of response.result) {

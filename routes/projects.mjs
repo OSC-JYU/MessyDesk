@@ -1,7 +1,7 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import nats from '../queue.mjs';
-import path from 'path';
+import { DATA_DIR } from '../env.mjs';
 
 import Boom from '@hapi/boom';
 
@@ -14,7 +14,7 @@ export default [
                 throw new Error('label required');
             }
             const project = await Graph.createProject(request.payload, request.auth.credentials.user.rid);
-            await media.createProjectDir(project, process.env.DATA_DIR || 'data');
+            await media.createProjectDir(project, DATA_DIR);
             return project;
         }
     },
@@ -22,14 +22,14 @@ export default [
         method: 'GET',
         path: '/api/projects',
         handler: async (request) => {
-            return await Graph.getProjects(request.auth.credentials.user.rid, process.env.DATA_DIR || 'data');
+            return await Graph.getProjects(request.auth.credentials.user.rid, DATA_DIR);
         }
     },
     {
         method: 'GET',
         path: '/api/projects/{rid}',
         handler: async (request) => {
-            return await Graph.getProject_backup(
+            return await Graph.getProject(
                 Graph.sanitizeRID(request.params.rid),
                 request.auth.credentials.user.rid
             );

@@ -281,7 +281,6 @@ media.writeJSON =  async function(data, filename, fpath) {
 	try {
 		const jsonData = JSON.stringify(data, null, 2);
 		await fse.writeFile(path.join(fpath, filename), jsonData);
-		console.log('Data successfully written to params.json!');
 	  } catch (error) {
 		console.error('Error writing data to params.json:', error);
 	  }
@@ -448,10 +447,41 @@ function NERsummary(data) {
 function JSON2text(data) {
 	try {
 		var str_json = []
+		
+		// Check if data contains newlines and might be NDJSON
+		if (data.includes('\n') && data.trim().split('\n').length > 1) {
+			// Try to parse as newline-delimited JSON (NDJSON)
+			var lines = data.trim().split('\n')
+			var validJsonLines = []
+			var hasValidJson = false
+			
+			for (var i = 0; i < lines.length; i++) {
+				var line = lines[i].trim()
+				if (line) {
+					try {
+						var jsonObj = JSON.parse(line)
+						validJsonLines.push(jsonObj)
+						hasValidJson = true
+					} catch (lineError) {
+						// If any line fails to parse as JSON, fall back to regular JSON parsing
+						break
+					}
+				}
+			}
+			
+			// If we successfully parsed multiple lines as JSON objects, treat as NDJSON
+			if (hasValidJson && validJsonLines.length > 1) {
+				str_json.push('NDJSON Data (' + validJsonLines.length + ' objects):')
+				validJsonLines.forEach((jsonObj, index) => {
+					str_json.push('Object ' + (index + 1) + ':')
+					processObject(jsonObj, '  ')
+				})
+				return str_json.join('\n')
+			}
+		}
+		
+		// Fall back to regular JSON parsing
 		var json = JSON.parse(data)
-		console.log('json', JSON.stringify(json))
-		console.log('title', Object.keys(json))
-		console.log('title', data.title)
 		
 		function processValue(key, value, indent = '') {
 			if (Array.isArray(value)) {

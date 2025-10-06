@@ -19,6 +19,13 @@
             "output": "many-to-one",
             "description": "Create comma separated values from JSON files",
             "info": "JSON to CSV"
+        },
+        "json2text": {
+            "name": "Convert JSON to Text",
+            "output": "many-to-one",
+            "description": "Create text from OCR JSON files",
+            "info": "JSON to Text",
+            "supported_types": ["ocr.json"]
         }
     }
 }

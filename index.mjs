@@ -13,6 +13,7 @@ import media from './media.mjs';
 import services from './services.mjs';
 import nomad from './nomad.mjs';
 
+
 // Import route modules
 import projectRoutes from './routes/projects.mjs';
 import serviceRoutes from './routes/services.mjs';
@@ -28,8 +29,7 @@ import promptRoutes from './routes/prompts.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = process.env.DATA_DIR || 'data';
-const API_URL = process.env.API_URL || '/';
+import { DATA_DIR } from './env.mjs';
 const AUTH_HEADER = 'mail';
 
 const sseClients = new Map();
@@ -37,11 +37,13 @@ const sseClients = new Map();
 // Initialize the server
 const init = async () => {
 	console.log('initing...');
+	console.log(DATA_DIR)
 	await media.createDataDir(DATA_DIR);
 	await nomad.getStatus();
 	await services.loadServiceAdapters();
 	await nats.init(services.getServices());
 	await Graph.initDB();
+	nats.listenDBQueue('arcadedb');
 
 	// Create server instance
 	const server = Hapi.server({
@@ -65,7 +67,15 @@ const init = async () => {
 			const defaultUser = process.env.DEV_USER || "local.user@localhost";
 			// Set the auth header for all requests in development mode
 			request.headers[AUTH_HEADER] = defaultUser;
-			const user = await Graph.myId(defaultUser);
+			let user = null;
+			try {
+				user = await Graph.myId(defaultUser);
+			} catch (error) {
+				throw Boom.serverUnavailable("DB is not available");
+			}
+			if (!user) {
+				throw Boom.unauthorized('User not found');
+			}
 			request.auth = {
 				isAuthenticated: true,
 				credentials: { user },

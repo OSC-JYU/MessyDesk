@@ -7,9 +7,7 @@ import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import services from '../services.mjs';
 import Boom from '@hapi/boom';
-
-const DATA_DIR = process.env.DATA_DIR || 'data';
-const API_URL = process.env.API_URL || '/';
+import { DATA_DIR, API_URL } from '../env.mjs';
 
 export async function processFilesHandler(request, h) {
     console.log('save process file call...');
@@ -22,7 +20,7 @@ export async function processFilesHandler(request, h) {
             infoFilepath = request.payload.request.path;
             const info = await fse.readFile(infoFilepath);
             message = JSON.parse(info);
-            console.log(message);
+            //console.log(message);
         }
 
         if (request.payload.content) {
@@ -32,7 +30,7 @@ export async function processFilesHandler(request, h) {
         // EXIF-ROTATE
         if(message?.role === 'exif_rotate') {
             console.log('rotate message detected');
-            console.log(message);
+            //console.log(message);
             // exif_rotate replaces the original file with the rotated file
             const originalPath = path.join(path.dirname(message.file.path), 'original.' + message.file.extension);
             await fse.rename(message.file.path, originalPath);
@@ -106,8 +104,15 @@ export async function processFilesHandler(request, h) {
             }
 
             const process_rid = message.process['@rid'];
-            const fileNode = await Graph.createProcessFileNode(process_rid, message, '', info);
 
+            // if we have output_rid and output_path set in message, then output node and path are already created
+            let fileNode = null;
+            if(message.output_rid && message.output_path) {
+                console.log('SET: output node and path already created')
+                fileNode = await Graph.getNodeByRid(message.output_rid)
+            } else {
+                fileNode = await Graph.createProcessFileNode(process_rid, message, '', info)
+            }
             fileNode.metadata = await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
             console.log('METADATA: ', fileNode.metadata)
             
@@ -143,7 +148,7 @@ export async function processFilesHandler(request, h) {
                         
                         wsdata = {
                             command: 'process_finished',
-                            process: { '@rid': message.process.set_process, status: 'finished', info: 'Finished' },
+                            process: { '@rid': message.process.set_process|| message.process['@rid'], status: 'finished', info: 'Finished' },
                             set: { '@rid': message.output_set, status: 'finished', count: message.current_file  },
                             //paths: set_thumbnails,
                             current_file: message.current_file}

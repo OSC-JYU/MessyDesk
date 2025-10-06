@@ -2,7 +2,7 @@
 import Graph from '../graph.mjs';
 import nomad from '../nomad.mjs';
 import services from '../services.mjs';
-import web from '../web.mjs';
+import db from '../db.mjs';
 import nats from '../queue.mjs';
 import logger from '../logger.mjs';
 import media from '../media.mjs';
@@ -126,7 +126,7 @@ export default [
         method: 'GET',
         path: '/api/errors/{rid}',
         handler: async (request) => {
-            return await web.getError(Graph.sanitizeRID(request.params.rid));
+            return await db.getError(Graph.sanitizeRID(request.params.rid));
         }
     },
 

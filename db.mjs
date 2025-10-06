@@ -1,38 +1,26 @@
-import axios from 'axios';
+import got from 'got';
 import path from 'path';
-import fs from 'fs';
-import fse from 'fs-extra';
-import { pipeline } from 'stream';
+import {  DB_NAME,DB_URL, DB_USER, DB_PASSWORD } from './env.mjs';
 
-const username = process.env.DB_USER || 'root'
-const password = process.env.DB_PASSWORD
+const username = DB_USER
+const password = DB_PASSWORD
 
-const MAX_STR_LENGTH = 2048
-const DB_HOST = process.env.DB_HOST || 'http://127.0.0.1'
-const DB = process.env.DB_NAME || 'messydesk'
-const PORT = process.env.DB_PORT || 2480
-const URL = `${DB_HOST}:${PORT}/api/v1/command/${DB}`
 
-const DATA_DIR = process.env.DATA_DIR || './'
-const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr'
-const SOLR_CORE = process.env.SOLR_CORE || 'messydesk'
-const INTERNAL_URL = process.env.INTERNAL_URL || 'http://localhost:8200'
+console.log(DB_URL)
 
-console.log(URL)
+const db = {}
 
-const web = {}
-
-web.initURL = function(url) {
+db.initURL = function(url) {
 	console.log('intializing URL...')
 	console.log(url)
-	console.log(URL)
+	console.log(DB_URL)
 	console.log('done intializing URL')
 }
 
-web.checkService = async function(url) {
+db.checkService = async function(url) {
 	try {
 		console.log(url)
-		await axios.get(url)
+		await got.get(url)
 		return true
 	} catch(e) {
 		return false
@@ -40,20 +28,19 @@ web.checkService = async function(url) {
 
 }
 
-web.getURL = function() {
-	return URL
+db.getURL = function() {
+	return DB_URL
 }
 
-web.checkDB = async function() {
-	const {got} = await import('got')
-	var url = URL.replace(`/command/`, '/exists/')
-	var data = {
+db.checkDB = async function() {
+	var url = DB_URL.replace(`/command/`, '/exists/')
+	var options = {
 		username: username,
 		password: password
 	};
 
 	try {
-		var response = await got.get(url, data).json()
+		var response = await got.get(url, options).json()
 		return response.result
 		
 	} catch(e) {
@@ -63,21 +50,20 @@ web.checkDB = async function() {
 }
 
 
-web.createDB = async function() {
+db.createDB = async function() {
 	if(!password) {
 		console.log('ERROR: DB_PASSWORD not set! Exiting...')
 		process.exit(1)
 	}
 
-	var url = URL.replace(`/command/${DB}`, '/server')
-	var config = {
-		auth: {
-			username: username,
-			password: password
-		}
+	var url = DB_URL.replace(`/command/${DB_NAME}`, '/server')
+	var options = {
+		username: username,
+		password: password,
+		json: {command: `create database ${DB_NAME}`}
 	};
 	try {
-		await axios.post(url, {command: `create database ${DB}`}, config)
+		await got.post(url, options)
 		await this.createVertexType('Project')
 		await this.createVertexType('Source')
 		await this.createVertexType('User')
@@ -92,6 +78,17 @@ web.createDB = async function() {
 		await this.createVertexType('Prompt')
 		await this.createVertexType('ErrorNode')
 		
+		await this.createEdgeType('PROCESSED_BY')
+		await this.createEdgeType('PRODUCED')
+		await this.createEdgeType('HAS_ITEM')
+		await this.createEdgeType('HAS_FILE')
+		await this.createEdgeType('HAS_ROI')
+		await this.createEdgeType('HAS_ENTITY')
+		await this.createEdgeType('HAS_SET')
+		await this.createEdgeType('IS_OWNER')
+		await this.createEdgeType('HAS_SOURCE')
+
+	
 		//await this.createVertexType('Person')
 		// development/default user
 		//await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
@@ -114,133 +111,152 @@ web.createDB = async function() {
 }
 
 
-// web.runPipeline = async function(pipeline, userID) {
-// 	const {got} = await import('got')
-// 	var url = INTERNAL_URL + '/api/pipeline/run'
-
-
-// 	try {
-// 		var response = await got.post(url, data).json()
-// 		return response.result
-		
-// 	} catch(e) {
-// 		console.log(e.message)
-// 		throw({message: "Error on database check"})
-// 	}
-// }
-
-// web.internal = async function(url, data) {
-// 	const {got} = await import('got')
-// 	url = INTERNAL_URL + url
-// 	try {
-// 		var response = await got.post(url, data).json()
-// 		return response.result
-		
-// 	} catch(e) {
-// 		console.log(e.message)
-// 		throw({message: "Error on internal call! ", url})
-// 	}
-// }
-
-web.createVertexType = async function(type) {
+db.createVertexType = async function(type) {
 	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`
 	try {
 		await this.sql(query)
 	} catch (e) {
-		//console.log(e.message)
+		console.log(e.message)
 		//console.log(`${type} exists`)
 	}
 }
 
-web.sql = async function(query, options) {
+db.createEdgeType = async function(type) {
+	var query = `CREATE EDGE TYPE ${type} IF NOT EXISTS`
+	try {
+		await this.sql(query)
+	} catch (e) {
+		console.log(e.message)
+		//console.log(`${type} exists`)
+	}
+}
+
+
+db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
+
+	let response
+	try {
+		let lastError
+
+		for(var rid of rids) {
+			var gotOptions = {
+				username: username,
+				password: password,
+				json: {language:'sql', command: `DELETE FROM ${rid.id}`},
+				timeout: {
+					request: timeout
+				}
+			}
+
+			for (let attempt = 1; attempt <= retries; attempt++) {
+				try {
+					response = await got.post(DB_URL, gotOptions).json()
+					break // Success, exit retry loop
+				} catch (error) {
+					lastError = error
+					console.log(`Write attempt ${attempt} failed:`, error.message)
+					console.log(gotOptions.json)
+					
+					if (attempt < retries) {
+						// Wait before retrying (exponential backoff)
+						const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+						console.log(`Retrying write in ${delay}ms...`)
+						await new Promise(resolve => setTimeout(resolve, delay))
+					} else {
+						throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+					}
+				}
+			}
+
+		}
+		
+		return {result: 'ok'}
+
+	} catch (error) {
+		throw error
+	}
+
+}
+
+
+
+db.sql = async function(query, options, retries = 3) {
+	let response
+	let lastError
 	if(!options) var options = {}
 	
-	var config = {
-		auth: {
-			username: username,
-			password: password
+	var gotOptions = {
+		username: username,
+		password: password,
+		json: {
+			command:query,
+			language:'sql',
+			params: options.params
 		}
-	};
-	const query_data = {
-		command:query,
-		language:'sql'
 	}
 
-	if(options.serializer) query_data.serializer = options.serializer
-
-	try {
-		var response = await axios.post(URL, query_data, config)
-		//if(query && query.toLowerCase().includes('create')) return response.data
-		if(!options.serializer) return response.data
-
-		else if(options.serializer == 'graph' && options.format == 'cytoscape') {
-			options.labels = await getSchemaLabels(config)
-			return convert2CytoScapeJs(response.data, options)
-		} else {
-			return response.data
+	// Add transaction ID if provided
+	if(options.transactionId) {
+		gotOptions.headers = {
+			'arcadedb-session-id': options.transactionId
 		}
-	} catch(e) {
-		console.log(e.message)
-		throw({msg: 'error in query', query: query, error: e})
 	}
-	//var response = await axios.post(URL, query_data, config)
-	//return response.data
+
+	if(options.serializer) gotOptions.json.serializer = options.serializer
+
+	for (let attempt = 1; attempt <= retries; attempt++) {
+		try {
+			response = await got.post(DB_URL, gotOptions).json()
+			break // Success, exit retry loop
+		} catch (error) {
+			lastError = error
+			console.log(`Write attempt ${attempt} failed:`, error.message)
+			console.log(gotOptions.json)
+			
+			if (attempt < retries) {
+				// Wait before retrying (exponential backoff)
+				const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+				console.log(`Retrying write in ${delay}ms...`)
+				await new Promise(resolve => setTimeout(resolve, delay))
+			} else {
+				throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+			}
+		}
+	}
+
+	if(!options.serializer) {
+		return response
+	} else if(options.serializer == 'studio' && options.format == 'vueflow') {
+		return convert2VueFlow(response, options)
+	} else {
+		return response
+	}
+
 }
 
-web.sql2 = async function(query, options) {
-	if(!options) var options = {}
+db.sql_params = async function(query, params, raw, transactionId) {
 	
-	var config = {
-		auth: {
-			username: username,
-			password: password
+	var gotOptions = {
+		username: username,
+		password: password,
+		json: {
+			command:query,
+			language:'sql',
+			params: params
 		}
-	};
-	const query_data = {
-		command:query,
-		language:'sql',
-		params: options.params
 	}
 
-	if(options.serializer) query_data.serializer = options.serializer
-
-	try {
-		var response = await axios.post(URL, query_data, config)
-		//if(query && query.toLowerCase().includes('create')) return response.data
-		if(!options.serializer) return response.data
-
-		else if(options.serializer == 'studio' && options.format == 'vueflow') {
-			//options.labels = await getSchemaLabels(config)
-			return convert2VueFlow(response.data, options)
-		} else {
-			return response.data
+	// Add transaction ID if provided
+	if(transactionId) {
+		gotOptions.headers = {
+			'arcadedb-session-id': transactionId
 		}
-	} catch(e) {
-		console.log(e.message)
-		throw({msg: 'error in query', query: query, error: e})
-	}
-	//var response = await axios.post(URL, query_data, config)
-	//return response.data
-}
-
-web.sql_params = async function(query, params, raw) {
-	
-	var config = {
-		auth: {
-			username: username,
-			password: password
-		}
-	};
-	const query_data = {
-		command:query,
-		language:'sql',
-		params: params
 	}
 
 	try {
-		var response = await axios.post(URL, query_data, config)
-		if(raw) return response.data
-		return convert2VueFlow(response.data)
+		var response = await got.post(DB_URL, gotOptions).json()
+		if(raw) return response
+		return convert2VueFlow(response)
 
 	} catch(e) {
 		console.log(e.message)
@@ -250,36 +266,44 @@ web.sql_params = async function(query, params, raw) {
 
 }
 
-web.cypher = async function(query, options) {
+
+
+
+db.cypher = async function(query, options) {
 
 	if(!options) var options = {}
 	if(options.current && !options.current.includes('#')) options.current = '#' + options.current
 
-	var config = {
-		auth: {
-			username: username,
-			password: password
+	var gotOptions = {
+		username: username,
+		password: password,
+		json: {
+			command:query,
+			language:'cypher'
 		}
-	};
-	const query_data = {
-		command:query,
-		language:'cypher'
 	}
 
-	if(options.serializer) query_data.serializer = options.serializer
+	// Add transaction ID if provided
+	if(options.transactionId) {
+		gotOptions.headers = {
+			'arcadedb-session-id': options.transactionId
+		}
+	}
+
+	if(options.serializer) gotOptions.json.serializer = options.serializer
 	//if(process.env.MODE == 'development') console.log(query)
 
 	try {
-		var response = await axios.post(URL, query_data, config)
-		//if(query && query.toLowerCase().includes('create')) return response.data
-		if(!options.serializer) return response.data
+		var response = await got.post(DB_URL, gotOptions).json()
+		//if(query && query.toLowerCase().includes('create')) return response
+		if(!options.serializer) return response
 
 		else if(options.serializer == 'graph' && options.format == 'vueflow') {
-			//options.labels = await getSchemaLabels(config)
-			return convert2VueFlow(response.data, options)
-			//return convert2CytoScapeJs(response.data, options)
+			//options.labels = await getSchemaLabels(gotOptions)
+			return convert2VueFlow(response, options)
+			//return convert2CytoScapeJs(response, options)
 		} else {
-			return response.data
+			return response
 		}
 	} catch(e) {
 		console.log(e.message)
@@ -288,7 +312,7 @@ web.cypher = async function(query, options) {
 }
 
 // get node error
-web.getError = async function(rid) {
+db.getError = async function(rid) {
 	var query = `SELECT FROM ${rid}`
 	try {
 		var response = await this.sql(query)
@@ -304,7 +328,7 @@ web.getError = async function(rid) {
 	}
 }
 
-web.solr = async function(data, user_rid) {
+db.solr = async function(data, user_rid) {
 	//console.log(user_rid)
 	const query = data.query;
 
@@ -339,9 +363,9 @@ web.solr = async function(data, user_rid) {
 	} 
 	
 	try {
-		var response = await axios.get(finalUrl, params)
-		//console.log(response.data)
-		return response.data
+		var response = await got.get(finalUrl, {searchParams: params.params}).json()
+		//console.log(response)
+		return response
 		
 		
 	} catch(e) {
@@ -350,60 +374,31 @@ web.solr = async function(data, user_rid) {
 	}
 }
 
-web.solrDropUserData = async function(userRID) {
+db.solrDropUserData = async function(userRID) {
 	
 	var url = `${SOLR_URL}/${SOLR_CORE}/delete?q=owner:" + userRID + "&wt=json`
 	try {
-		var response = await axios.get(url)
-		return response.data	
+		var response = await got.get(url).json()
+		return response
 	} catch(e) {
 		console.log(e.message)
 		//throw({msg: 'error in query', query: data, error: e})
 	}
 }
 
-web.indexDocuments = async function(data) {
+db.indexDocuments = async function(data) {
 	if(!options) var options = {}
 	const url = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`
 
 	try {
-		var response = await axios.post(url, data)
-		return response.data
+		var response = await got.post(url, {json: data}).json()
+		return response
 	} catch(e) {
 		console.log(e.message)
 		//throw({msg: 'error in query', query: data, error: e})
 	}
 
 }
-
-
-async function getSchemaLabels(config) {
-	const query = "MATCH (s:Schema_)  RETURN COALESCE(s.label, s._type)  as label, s._type as type"
-	const query_data = {
-		command:query,
-		language:'cypher'
-	}
-	try {
-		var response = await axios.post(URL, query_data, config)
-		var labels = response.data.result.reduce(
-			(obj, item) => Object.assign(obj, { [item.type]: item.label }), {});
-		return labels
-	} catch(e) {
-		console.log(e.response)
-		console.log(query)
-		throw(e)
-	}
-}
-
-function setParent(vertices, child, parent) {
-	for(var node of vertices) {
-		if(node.data.id == child) {
-			node.data.parent = parent
-		}
-	}
-}
-
-
 
 
 async function convert2VueFlow(data, options) {
@@ -493,4 +488,4 @@ async function convert2VueFlow(data, options) {
 }
 
 
-export default web
+export default db

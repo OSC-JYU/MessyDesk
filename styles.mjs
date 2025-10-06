@@ -1,4 +1,4 @@
-import web from './web.js';
+import db from './db.js';
 
 const styles = {};
 
@@ -103,7 +103,7 @@ styles.getStyle = async function() {
 	//var styles = [...basestyle] // deep copy
 	//
 	const query = "MATCH (s:Schema) return s._type as type, s._style as style"
-	var response = await web.cypher( query)
+	var response = await db.cypher( query)
 	for(var schema of response.result) {
 		if(schema.style && schema.style !== '  cypher.null') {
 			try {

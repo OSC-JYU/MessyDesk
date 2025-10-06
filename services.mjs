@@ -140,22 +140,13 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 				
 		// for Files we compare first (internal)type and then extension
 		} else if (node['@type'] == 'File') {
-			// check service for supported types
-			console.group(node.type)
-			console.log(this.service_list[service]?.supported_types)
-			console.groupEnd()
-			//if(this.service_list[service]?.supported_types?.includes(node.type)) {
-				// we take only services that has consumer app listening (i.e are active services)
-				if(this.service_list[service].consumers.length > 0) {
-					var service_with_tasks = pickTasks(this.service_list[service], [node.extension], [node.type], filter, user, prompts, node.type)
-					if(service_with_tasks) {
-						matches.for_format.push(service_with_tasks)
-					}
+			if(this.service_list[service].consumers.length > 0) {
+				var service_with_tasks = pickTasks(this.service_list[service], [node.extension], [node.type], filter, user, prompts, node.type)
+				if(service_with_tasks) {
+					matches.for_format.push(service_with_tasks)
 				}
-			//} 
+			}
 		}
-
-
 	}
 	return matches
 }
@@ -225,7 +216,10 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 			}
 		}
 		
-	}	
+	}
+	if(Object.keys(service_object.tasks).length === 0) {
+		return null
+	}
 	return service_object
 }
 

@@ -6,6 +6,7 @@ import path from 'path';
 import Boom from '@hapi/boom';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
+import { DATA_DIR } from '../env.mjs';
 
 export default [
     {
@@ -23,12 +24,12 @@ export default [
         handler: async (request, h) => {
             try {
                 // Verify project exists and user has access
-                const response = await Graph.getProject_old(request.params.rid, request.auth.credentials.user.id);
+                const response = await Graph.getProjectMetadata(request.params.rid, request.auth.credentials.user.id);
                 if (response.result.length === 0) {
                     throw Boom.notFound('Project not found');
                 }
 
-                const project_rid = response.result[0]["@rid"];
+                const project_rid = response.result[0].project["@rid"];
                 const file = request.payload.file;
 
                 // Validate file exists in payload
@@ -52,7 +53,7 @@ export default [
                     file,
                     file_type,
                     request.params.set,
-                    process.env.DATA_DIR || 'data',
+                    DATA_DIR,
                     originalFilename
                 );
 
@@ -419,7 +420,7 @@ export default [
             const n = await Graph.getSetFiles(
                 Graph.sanitizeRID(request.params.rid), 
                 request.auth.credentials.user.rid, 
-                request.query
+                {thumbnails: true}
             );
             return h.response(n);
         }

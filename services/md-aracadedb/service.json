@@ -1,0 +1,15 @@
+{
+    "local_url": "http://localhost:2480",
+    "id": "md-arcadedb",
+    "type": "aracadedb",
+    "api_type": "aracadedb",
+    "adapter": "aracadedb",
+    "api": "/process",
+    "name" :"AracadeDB",
+    "note": "This is a SYSTEM QUEUE, do not edit!",
+    
+    "supported_types": [],
+    "supported_formats": [],
+    "description": "internal AracadeDB",
+    "tasks": {}
+}

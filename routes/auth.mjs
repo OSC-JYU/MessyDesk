@@ -1,5 +1,5 @@
 import Graph from '../graph.mjs';
-import web from '../web.mjs';
+import db from '../db.mjs';
 import Boom from '@hapi/boom';
 
 const AUTH_NAME = 'displayname';
@@ -23,7 +23,7 @@ export default [
         path: '/api/permissions/request',
         handler: async (request, h) => {
             const query = `SELECT FROM Request`;
-            const res = await web.sql(query);
+            const res = await db.sql(query);
             return res.result;
         }
     },
@@ -32,7 +32,7 @@ export default [
         path: '/api/permissions/request/{rid}',
         handler: async (request, h) => {
             const query = `DELETE FROM Request WHERE @rid = ${Graph.sanitizeRID(request.params.rid)}`;
-            const res = await web.sql(query);
+            const res = await db.sql(query);
             return res;
         }
     },
@@ -53,9 +53,9 @@ export default [
 
             try {
                 const query = `SELECT FROM Request WHERE id = "${userId}"`;
-                const res = await web.sql(query);
+                const res = await db.sql(query);
                 const query2 = `SELECT FROM User WHERE id = "${userId}"`;
-                const res2 = await web.sql(query2);
+                const res2 = await db.sql(query2);
 
                 if (res.result.length > 0 || res2.result.length > 0) {
                     throw Boom.conflict('User has already requested or has access');
