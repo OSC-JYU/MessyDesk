@@ -79,7 +79,7 @@ export default [
                         const stats = await fse.stat(filegraph.path);
                         base_metadata.size = Number((stats.size / (1024 * 1024)).toFixed(1));
                         filegraph.metadata = base_metadata
-
+console.log('filetype', file_type);
 
                         // IMAGE
                         if (file_type === 'image') {
@@ -94,16 +94,16 @@ export default [
                             if(image_metadata.rotate) {
 
                                 var rotatedata = {
-                                    id:"md-imaginary",
-                                    userId: request.auth.credentials.user.rid,
-                                    task:"rotate",
+                                    topic: {id: 'md-imaginary'},
+                                    service: {id: 'md-imaginary'},
+                                    task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
                                     file: filegraph,
-                                    target: filegraph['@rid'],
-                                    params: {rotate:`${image_metadata.rotate}`, stripmeta:'true', task:"rotate"},
-                                    role: 'exif_rotate',
-                                    info:"I auto-rotated image based on EXIF orientation.",
-                                    }
-                                nats.publish(rotatedata.id, JSON.stringify(rotatedata));
+                                    userId: request.auth.credentials.user.rid,
+                                    role: 'exif_rotate'
+                            
+                                }
+                                nats.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
+
                             // ************** EXIF FIX ENDS **************
                             } else {
                                 // we save metadata for image (resolution, etc.)
@@ -117,15 +117,14 @@ export default [
                                 }
     
                                 const data = {
+                                    topic: {id: 'md-thumbnailer'},
+                                    service: {id: 'md-imaginary'},
+                                    task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
                                     file: filegraph,
-                                    userId: request.auth.credentials.user.rid,
-                                    target: filegraph['@rid'],
-                                    task: 'thumbnail',
-                                    params: { width: 800, type: 'jpeg' },
-                                    id: 'md-thumbnailer'
+                                    userId: request.auth.credentials.user.rid
                                 };
                                 
-                                nats.publish(data.id, JSON.stringify(data));
+                                nats.publish(data.topic.id, JSON.stringify(data));
                             }
                         } 
 
@@ -148,15 +147,14 @@ export default [
                         // PDF
                         if (file_type === 'pdf') {
                             const data = {
+                                topic: {id: 'md-pdf-splitter_fs'},
+                                service: {id: 'md-pdf-splitter_fs'},
+                                task: {id: 'split', params: {}},
                                 file: filegraph,
                                 userId: request.auth.credentials.user.rid,
-                                target: filegraph['@rid'],
-                                task: 'split',
-                                params: {},
-                                role: 'pdf-splitter',
-                                id: 'md-pdf-splitter_fs'
+                                role: 'pdf-splitter'
                             };
-                            nats.publish(data.id, JSON.stringify(data));
+                            nats.publish(data.topic.id, JSON.stringify(data));
                         }
 
                         // PDF

@@ -12,7 +12,7 @@
     "supported_types": ["image"],
     "supported_formats": ["jpg", "png", "jpeg"],
 
-    "description": "Gemini 2.0 Flash",
+    "description": "Google's cloud-based AI services.",
 
     "service_groups": ["GEMINI-AI","OSC"],
 
@@ -20,5 +20,23 @@
     "set_disabled": 1,
 
     "params": {},
-    "tasks": {}
+    "tasks": {},
+    "models": {
+        "gemini-2.0-flash": {
+            "name": "Gemini 2.0 Flash",
+            "output": "text",
+            "description": "Old model, not recommended for new tasks.",
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "url": ""
+        },
+        "gemini-2.5-flash": {
+            "name": "Gemini 2.5 Flash",
+            "description": "Our best model in terms of price-performance, offering well-rounded capabilities. 2.5 Flash is best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases.",
+            "output": "text",
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "url": ""
+        }
+    }
 }

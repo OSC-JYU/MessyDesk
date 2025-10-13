@@ -11,8 +11,7 @@ import path from 'path';
 
 import { processFilesHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
-const DATA_DIR = process.env.DATA_DIR || 'data';
-const API_URL = 'http://localhost:8200/';
+import { DATA_DIR, API_URL } from '../env.mjs';
 
 
 export default [
@@ -91,7 +90,7 @@ export default [
                     });
                     
                     // create error node and update UI
-                    const errornode = await Graph.createErrorNode(error, message, process.env.DATA_DIR || 'data');
+                    const errornode = await Graph.createErrorNode(error, message, DATA_DIR);
         
                     // write error to error node file
                     const log = {info: 'Something went wrong with the file processing.', 

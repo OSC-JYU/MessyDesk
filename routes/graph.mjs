@@ -21,23 +21,6 @@ export default [
             }
         }
     },
-    // {
-    //     method: 'POST',
-    //     path: '/api/graph/query',
-    //     handler: async (request) => {
-    //         return await Graph.getGraph(request.payload, request);
-    //     }
-    // },
-    // {
-    //     method: 'POST',
-    //     path: '/api/graph/vertices',
-    //     handler: async (request) => {
-    //         const type = request.payload.type;
-    //         const result = await Graph.create(type, request.payload);
-    //         console.log(result);
-    //         return result;
-    //     }
-    // },
     {
         method: 'GET',
         path: '/api/graph/vertices/{rid}',

@@ -590,65 +590,100 @@ graph.getQueueName = function(service, data, topic) {
 }
 
 // Creates process and output Set nodes and creates queue messages
-graph.createQueueMessages =  async function(service, body, node_rid, user_rid, roi) {
+graph.createQueueMessages =  async function(service, task, node_rid, user_rid, roi) {
 
-	var data = body
+
 	console.log("****** CREATEQUEUE MESSAGE ******")
-	console.log(data.task)
+	console.log(task.id)
+	console.log(task.model)
 	console.log("****** END CREATEQUEUE MESSAGE ******")
 
 	var messages = []
-	var message = structuredClone(data)
-	var task_name = ''
-	// LLM services have tasks defined in prompts
-	if(service.external_tasks) {
-		message.external = 'yes'
-		message.info = data.info
-		message.params = data.system_params
-		task_name = data.name	
-	} else {
-		task_name = service.tasks[data.task].name
-	}
 
 	var node_metadata = await this.getUserFileMetadata(node_rid, user_rid)
 	if(!node_metadata) {
-		throw new Error('File not found: '+ node_rid )
+		throw new Error('Target file not found: '+ node_rid )
 	}
 
-	if(service.tasks[data.task] && service.tasks[data.task].system_params)
-		message.params = service.tasks[data.task].system_params
+	var msg = {
+		service: service,
+		task: task,
+		file: node_metadata,
+		process: null,   // process node will be created in the queue
+		output_set: null,
+		userId: user_rid
+	}
 
-	var processNode = await this.createProcessNode(task_name, service, data, node_metadata, user_rid)
-	await media.createProcessDir(processNode.path)
-	await media.writeJSON(data, 'params.json', path.join(path.dirname(processNode.path)))
+	// LLM services have tasks defined in prompts
+	if(service.external_tasks) {
+		msg.external = 'yes'
+		msg.task.params = task.system_params
+		// add model information if service has models
+		if(service.models && task.model) {
+			// task.model could be either a string ID or the entire model object
+			let modelId = typeof task.model === 'string' ? task.model : task.model.id
+			if(modelId && service.models[modelId]) {
+				msg.task.model = structuredClone(service.models[modelId])
+				msg.task.model.id = modelId
+			}
+		}
+	// otherwise task must be found from service tasks object
+	} else if(!service.tasks[task.id]) {
+		throw new Error('Task not found in service: '+ task.id )
+	} else {
+		// Do not trust task.name from request, use service.tasks[task.id].name instead
+		msg.task.name = service.tasks[task.id].name
+		// copy system params from service
+		if(service.tasks[task.id].system_params)
+			msg.task.params = service.tasks[task.id].system_params
+	}
+
+
+	// var message = structuredClone(task)
+	// var task_name = ''
+
+	// // LLM services have tasks defined in prompts
+	// if(service.external_tasks) {
+	// 	message.external = 'yes'
+	// 	message.info = task.info
+	// 	message.params = task.system_params
+	// 	task_name = task.name	
+	// } else {
+	// 	task.name = service.tasks[task.id].name
+	// }
+
+	//var processNode = await this.createProcessNode_queue(service, task, node_metadata, user_rid)
+	msg.process = await this.createProcessNode_queue(msg)
+	await media.createProcessDir(msg.process.path)
+	await media.writeJSON(msg, 'message.json', path.join(path.dirname(msg.process.path)))
 
 	// do we need info about "parent" file? Like for image rotation based on OSD file
-	if(service.tasks[data.task]?.source == 'source_file') {
+	if(service.tasks[task.id]?.source == 'source_file') {
 		const source = await this.getFileSource(node_rid)
 		if(source) {
 			const source_metadata = await this.getUserFileMetadata(source['@rid'], user_rid)
-			message.source = source_metadata
+			msg.file.source = source_metadata
 		}
 	}
 
 	// if output of task is "Set", then create Set node and link it to Process node
-	if(service.tasks[data.task] && service.tasks[data.task].output_set) {
-		var setNode = await this.createOutputSetNode(service.tasks[data.task].output_set, processNode)
-		message.output_set = setNode['@rid']
-		message.set_node = setNode
+	if(service.tasks[task.id] && service.tasks[task.id].output_set) {
+		var setNode = await this.createOutputSetNode(service.tasks[task.id].output_set, msg.process)
+		msg.output_set = setNode['@rid']
+		msg.set_node = setNode
 	}
 
 	// default message
-	message.process = processNode
-	message.target = node_rid
-	message.userId = user_rid
-	message.file = node_metadata
+	// message.process = processNode
+	// message.target = node_rid
+	// message.userId = user_rid
+	// message.file = node_metadata
 
 	// pdfs are splitted so we give each page its own message
 	if(node_metadata.type == 'pdf') {
-		message.pdf = true
-		const first = parseInt(data.params.firstPageToConvert)
-		var last = parseInt(data.params.lastPageToConvert)
+		msg.pdf = true
+		const first = parseInt(task.params.firstPageToConvert)
+		var last = parseInt(task.params.lastPageToConvert)
 		if(isNaN(first)) first = 0
 		
 		if(node_metadata?.metadata?.page_count) {
@@ -657,7 +692,7 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 			if(first < last) {
 				var c = 1
 				for(var i = first; i <= last; i++) {
-					var m = structuredClone(message)
+					var m = structuredClone(msg)
 					m.params.page = i
 					m.total_files = last - first + 1
 					m.current_file = c
@@ -676,13 +711,13 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 			var rois = await this.getROIs(node_rid)
 			console.log('ROIS: ', rois)
 			for(var roi_item of rois) {
-				var m = media.ROIPercentagesToPixels(roi_item, structuredClone(message))
+				var m = media.ROIPercentagesToPixels(roi_item, structuredClone(msg))
 				messages.push(m)
 			}	
 		}
 		// otherwise create normal, single message
 	} else {
-		messages.push(message)
+		messages.push(msg)
 	}
 
 	return messages
@@ -691,25 +726,32 @@ graph.createQueueMessages =  async function(service, body, node_rid, user_rid, r
 
 
 // create Process that is linked to File
-graph.createProcessNode = async function (topic, service, data, filegraph, me_email, set_rid, set_process_rid, tid) {
+graph.createProcessNode = async function (service, task, filegraph, me_email, set_rid, set_process_rid, tid) {
+
+	if(!msg.task) {
+		throw new Error('Task not found in message')
+	}
+
 
 	var file_rid = filegraph['@rid']
 	
 	// create process node
 	var processNode = {}
 	var process_rid = null
-	const process_attrs = { label: topic }
-	process_attrs.service = service.name
+	const process_attrs = { 
+		label: task.name,
+		service: service.name
+	}
 	// we remove json_schema from database record (might get messy)
-	var data_copy = structuredClone(data)
+	var data_copy = structuredClone(task)
 	if(data_copy.system_params) delete data_copy.system_params.json_schema
 
 	process_attrs.params = JSON.stringify(data_copy)
-	if(data.info) {
-		process_attrs.info = data.info
+	if(task.info) {
+		process_attrs.info = task.info
 	}
-	if(data.description) {
-		process_attrs.description = data.description
+	if(task.description) {
+		process_attrs.description = task.description
 	}
 	// mark if this is part of set processing = not displayed in UI by default
 	if(set_rid) {
@@ -757,16 +799,24 @@ graph.createProcessNode_queue = async function (msg) {
 	console.log('***************** msg.task ***************')
 	console.log(msg.task)
 
-	var data_copy = structuredClone(msg.task)
-	if(data_copy.system_params?.json_schema) delete data_copy.system_params.json_schema
+	var task_copy = structuredClone(msg.task)
+	if(task_copy.system_params?.json_schema) delete task_copy.system_params.json_schema
+	if(task_copy.model) delete task_copy.model
 
-	process_attrs.params = JSON.stringify(data_copy)
+	process_attrs.task = JSON.stringify(task_copy)
 	if(msg.task.info) {
 		process_attrs.info = msg.task.info
 	}
 	if(msg.task.description) {
 		process_attrs.description = msg.task.description
 	}
+	if(msg.task.model) {
+		process_attrs.model = msg.task.model.id
+		if(msg.task.model.version) {
+			process_attrs.model_version = msg.task.model.version
+		}
+	}
+
 	// mark if this is part of set processing = not displayed in UI by default
 	if(msg.output_set) {
 		process_attrs.set = msg.output_set
@@ -816,7 +866,7 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 	
 	// create process output Set
-	if(service.tasks[task.task].output != 'always file') {
+	if(service.tasks[task.id].output != 'always file') {
 		setNode = await this.create('Set', {path: processNode.path})
 		// and link it to SetProcess
 		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
@@ -1123,7 +1173,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		where:(@rid = ${user_rid})}
 	-IS_OWNER->
 		{type:Project, as:project}--> 
-		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file`
+		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file`
 
 	var file_response = await db.sql(query)
 
@@ -1138,7 +1188,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 			where:(@rid = ${user_rid})}
 		-IS_OWNER->
 			{type:Project, as:project}--> 
-			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 20)} return file, project`
+			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
 		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content

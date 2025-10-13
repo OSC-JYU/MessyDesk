@@ -77,6 +77,8 @@ db.createDB = async function() {
 		await this.createVertexType('Request')
 		await this.createVertexType('Prompt')
 		await this.createVertexType('ErrorNode')
+
+		await this.createDocumentType('Usage')
 		
 		await this.createEdgeType('PROCESSED_BY')
 		await this.createEdgeType('PRODUCED')
@@ -113,6 +115,16 @@ db.createDB = async function() {
 
 db.createVertexType = async function(type) {
 	var query = `CREATE VERTEX TYPE ${type} IF NOT EXISTS`
+	try {
+		await this.sql(query)
+	} catch (e) {
+		console.log(e.message)
+		//console.log(`${type} exists`)
+	}
+}
+
+db.createDocumentType = async function(type) {
+	var query = `CREATE DOCUMENT TYPE ${type} IF NOT EXISTS`
 	try {
 		await this.sql(query)
 	} catch (e) {
@@ -433,6 +445,7 @@ async function convert2VueFlow(data, options) {
 				if(v.p.error_count) node.data.error_count = v.p.error_count
 				if(v.p.metadata) node.data.metadata = v.p.metadata
 				if(v.p.service) node.data.service = v.p.service
+				if(v.p.model) node.data.model = v.p.model
 				
 				
 				// direct link to thumbnail

@@ -33,10 +33,10 @@ media.ROIPercentagesToPixels = function(roi, message) {
 	const finalWidth = Math.min(areaWidth, message.file.metadata.width - leftPixels);
 	const finalHeight = Math.min(areaHeight, message.file.metadata.height - topPixels);
 
-	message.params.left = leftPixels;
-	message.params.top = topPixels;
-	message.params.areawidth = finalWidth;
-	message.params.areaheight = finalHeight;
+	message.task.params.left = leftPixels;
+	message.task.params.top = topPixels;
+	message.task.params.areawidth = finalWidth;
+	message.task.params.areaheight = finalHeight;
 	
 	return message;
 }

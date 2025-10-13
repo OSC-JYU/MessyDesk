@@ -19,5 +19,16 @@
     "external_tasks": "prompts",
 
     "params": {},
-    "tasks": {}
+    "tasks": {},
+    "models": {
+        "gpt-4o": {
+            "name": "GPT-4o",
+            "version": "2025-01-01-preview",
+            "description": "gpt-4o is engineered for speed and efficiency. Its advanced ability to handle complex queries with minimal resources can translate into cost savings and performance.",
+            "output": "text",
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "url": "https://osc-gpt.cognitiveservices.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview"
+        }
+    }
 }

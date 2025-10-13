@@ -41,11 +41,9 @@ export async function processFilesHandler(request, h) {
             }
             const data = {
                 file: message.file,
-                userId: message.userId,
-                target: message.file['@rid'],
-                task: 'thumbnail',
-                params: { width: 800, type: 'jpeg' },
-                id: 'md-thumbnailer'
+                task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
+                service: {id: 'md-thumbnailer'},
+                userId: message.userId
             };
             
             nats.publish(data.id, JSON.stringify(data));
@@ -59,17 +57,18 @@ export async function processFilesHandler(request, h) {
 
         // THUMBNAIL
         // role' is for PDF thumbnail via Poppler)
-        } else if (message?.id === 'md-thumbnailer' || message?.role === 'thumbnail') {
+        } else if (message?.topic?.id === 'md-thumbnailer' || message?.role === 'thumbnail') {
             const filepath = message.file.path;
             const base_path = path.dirname(filepath);
             const filename = message.thumb_name || 'preview.jpg';
+            console.log('THUMBNAIL MESSAGE: ', message);
 
             try {
                 //console.log('saving thumbnail to', base_path, filename);
                 let wsdata = {};
                 await media.saveThumbnail(contentFilepath, base_path, filename);
                 if (filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
-                    //console.log('sending thumbnail WS', filename);
+                    console.log('sending thumbnail WS', filename);
                     wsdata = {
                         command: 'update',
                         target: message.file['@rid'],
@@ -124,17 +123,17 @@ export async function processFilesHandler(request, h) {
             // for image files we create normal thumbnails
             if (message.file.type == 'image') {
                 const th = {
-                    id: 'md-thumbnailer',
-                    task: 'thumbnail',
+                    topic: {id: 'md-thumbnailer'},
+                    service: {id: 'md-imaginary'},
+                    task: {id: 'thumbnail', params: {width: 800, type: 'jpeg'}},
                     file: fileNode,
                     userId: message.userId,
-                    target: fileNode['@rid'],
                     total_files: message.total_files,
                     current_file: message.current_file,
                     output_set: message.output_set,
-                    params: {width: 800, type: 'jpeg'}
+                    
                 };
-                nats.publish(th.id, JSON.stringify(th));
+                nats.publish(th.service.id, JSON.stringify(th));
             }
 
             // update set file count or add file to visual graph
