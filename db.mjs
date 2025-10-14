@@ -91,21 +91,21 @@ db.createDB = async function() {
 		await this.createEdgeType('HAS_SOURCE')
 
 	
-		//await this.createVertexType('Person')
-		// development/default user
-		//await this.sql("CREATE Vertex User CONTENT {id:'local.user@localhost', label:'Just human', access:'admin', active:true}", 'sql')
-		// const commands = [
-		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
-		// 	"CREATE PROPERTY Person.id IF NOT EXISTS STRING (mandatory true, notnull true)",
-		// 	"CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
+		await this.createVertexType('Person')  // for future use
 
-		// 	"CREATE INDEX IF NOT EXISTS ON Person (id) UNIQUE",
+		const commands = [
+			"CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
 
-		// 	"CREATE Vertex Person CONTENT {id:'local.user@localhost', label:'Just human'}"
-		// ]
-		// for(var query of commands) {
-		// 	await this.sql(query, 'sql')
-		// }
+			"CREATE PROPERTY Project.created DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
+			"CREATE PROPERTY Process.created DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
+			"CREATE PROPERTY SetProcess.created DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
+			"CREATE PROPERTY File.created DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
+
+
+		]
+		for(var query of commands) {
+			await this.sql(query, 'sql')
+		}
 	} catch(e) {
 		console.log('Database init failed', e.message)
 		throw(e)

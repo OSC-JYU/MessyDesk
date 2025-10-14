@@ -19,7 +19,26 @@
     "external_tasks": "prompts",
     "set_disabled": 1,
 
-    "params": {},
+
+    "params": {
+        "temperature": 1.0,
+        "seed": 1.0
+    },
+
+    "params_help": {
+        "temperature": {
+            "name": "temperature",
+            "default": 1.0,
+            "help": "Temperature of the model affects the creativity of the model. 0.0 is the most deterministic, 2.0 is the most creative.",
+            "display": "textinput"
+        },
+        "seed": {
+            "name": "seed",
+            "default": 0,
+            "help": "Seed ",
+            "display": "textinput"
+        }
+    },
     "tasks": {},
     "models": {
         "gemini-2.0-flash": {

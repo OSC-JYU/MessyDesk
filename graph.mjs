@@ -639,19 +639,6 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 	}
 
 
-	// var message = structuredClone(task)
-	// var task_name = ''
-
-	// // LLM services have tasks defined in prompts
-	// if(service.external_tasks) {
-	// 	message.external = 'yes'
-	// 	message.info = task.info
-	// 	message.params = task.system_params
-	// 	task_name = task.name	
-	// } else {
-	// 	task.name = service.tasks[task.id].name
-	// }
-
 	//var processNode = await this.createProcessNode_queue(service, task, node_metadata, user_rid)
 	msg.process = await this.createProcessNode_queue(msg)
 	await media.createProcessDir(msg.process.path)
@@ -673,11 +660,6 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 		msg.set_node = setNode
 	}
 
-	// default message
-	// message.process = processNode
-	// message.target = node_rid
-	// message.userId = user_rid
-	// message.file = node_metadata
 
 	// pdfs are splitted so we give each page its own message
 	if(node_metadata.type == 'pdf') {
@@ -815,6 +797,8 @@ graph.createProcessNode_queue = async function (msg) {
 		if(msg.task.model.version) {
 			process_attrs.model_version = msg.task.model.version
 		}
+		// add start of the prompt to process_attrs
+		process_attrs.info = msg.task.params.prompts?.content?.slice(0, 100) + '...'
 	}
 
 	// mark if this is part of set processing = not displayed in UI by default
@@ -1915,8 +1899,12 @@ graph.getDataWithSchema = async function (rid, by_groups) {
 
 }
 
-graph.writeUsage = async function (usage, service, process_rid, userRID) {
+graph.writeUsage = async function (usage, message) {
 	const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+	const serviceName = message.service.id || 'unknown';
+	const process_rid = message.process['@rid'] || 'unknown';
+	const userRID = message.userId || 'unknown';
 	
 	// Extract values with defaults to prevent undefined/null errors
 	const metadata = usage?.metadata || {};
@@ -1930,7 +1918,6 @@ graph.writeUsage = async function (usage, service, process_rid, userRID) {
 	const inModality = inTokens?.modality || 'UNKNOWN';
 	const outModality = outTokens?.modality || 'UNKNOWN';
 	const model = metadata?.model || 'unknown';
-	const serviceName = service || 'unknown';
 	
 	var query = `INSERT INTO Usage CONTENT { 
 		'user': '${userRID}', 

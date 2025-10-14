@@ -174,16 +174,15 @@ export default [
                         await Graph.setNodeAttribute_old(targetNode, {key: 'metadata.page_count', value: message.file.metadata.page_count}, 'File');
                     }
 
-                    message.task = 'pdf2images';
-                    message.params = {
+                    message.task = {'id': 'pdf2images'};
+                    message.task.params = {
                         page: 1,
                         firstPageToConvert: '1',
                         lastPageToConvert: '1',
-                        resolutionXYAxis: '80',
-                        task: 'pdf2images'
+                        resolutionXYAxis: '80'
                     };
                     message.role = 'thumbnail';
-                    message.id = 'md-poppler';
+                    message.service = {'id': 'md-poppler'};
                    
                     nats.publish(message.id, JSON.stringify(message));
 

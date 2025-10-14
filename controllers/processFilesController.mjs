@@ -61,7 +61,7 @@ export async function processFilesHandler(request, h) {
             const filepath = message.file.path;
             const base_path = path.dirname(filepath);
             const filename = message.thumb_name || 'preview.jpg';
-            console.log('THUMBNAIL MESSAGE: ', message);
+            //console.log('THUMBNAIL MESSAGE: ', message);
 
             try {
                 //console.log('saving thumbnail to', base_path, filename);
@@ -118,6 +118,15 @@ export async function processFilesHandler(request, h) {
             if(fileNode.metadata) {
                 await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
             }
+            // update processing time to Process node
+            if(message.response) {
+                if(message.response.time) {
+                await Graph.setNodeAttribute_old(message.process['@rid'], {key: 'time', value: message.response.time}, 'Process');
+                }
+                if(message.response.url) {
+                    await Graph.setNodeAttribute_old(message.process['@rid'], {key: 'url', value: message.response.url}, 'Process');
+                }
+            }
 
 
             // for image files we create normal thumbnails
@@ -141,21 +150,22 @@ export async function processFilesHandler(request, h) {
                 let wsdata;
                 // update set's file count if file is part of set
                 if (message.output_set) {
-                    console.log('updating set file count', message.output_set)
+                    console.log('** updating set file count **', message.output_set)
                     const count = await Graph.updateFileCount(message.output_set);
+                    // check if current file is the last file -> we are done!
                     if(message.current_file == message.total_files) {
                         
                         wsdata = {
                             command: 'process_finished',
-                            process: { '@rid': message.process.set_process|| message.process['@rid'], status: 'finished', info: 'Finished' },
+                            process: { '@rid': message.set_process|| message.process['@rid'], status: 'finished', info: 'Finished' },
                             set: { '@rid': message.output_set, status: 'finished', count: message.current_file  },
                             //paths: set_thumbnails,
                             current_file: message.current_file}
-                            console.log('wsdata', wsdata)
+                            //console.log('wsdata', wsdata)
                     } else {
                         wsdata = {
                             command: 'process_update',
-                            node: { '@rid': message.process.set_process, status: 'running', info: 'Running...' },
+                            node: { '@rid': message.set_process, status: 'running', info: 'Running...' },
                             set: { '@rid': message.output_set, status: 'running', count: message.current_file },
                             current_file: message.current_file,
                             total_files: message.total_files
@@ -264,10 +274,8 @@ export async function processMetadataHandler(request, h) {
         
             // response files are saved but not visible in the graph (azure-ai, gemini, init tasks, etc.)
             if (message.file.type == 'response') {
-                const process_rid = message.process['@rid'];
-                console.log('saving response file to', path.join(message.process.path, message.file.label))
                 await media.uploadFile(contentFilepath, {path: path.join(message.process.path, message.file.label)});
-                await Graph.writeUsage(usage, message.id, process_rid, message.userId);
+                await Graph.writeUsage(usage, message);
                 
             }
         } else {

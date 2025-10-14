@@ -333,7 +333,7 @@ media.getTextDescription = async function (filePath, file_type) {
 	const maxCharacters = 150;
 	try {
 		const data = await fse.readFile(filePath, 'utf8');
-		console.log('data', data)
+
 		// get number of characters	
 		const linecount = data.split(/\n/).length
 
@@ -352,7 +352,7 @@ media.getTextDescription = async function (filePath, file_type) {
 			return text.substring(0, maxCharacters)
 
 		} else if(file_type.includes('json')) {
-			console.log('reading json file')
+
 			var json_str = JSON2text(data)
 			if(json_str) {
 				return json_str.substring(0, maxCharacters);

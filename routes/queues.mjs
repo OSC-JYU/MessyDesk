@@ -120,24 +120,27 @@ export default [
             try {
                 console.log('****************** set queue ******************');
                 const service = services.getServiceAdapterByName(topic);
-                if(!service.tasks[request.payload.task]) {
+                console.log('request.payload: ', request.payload);
+                console.log('service.tasks: ', service.tasks);
+                var task = JSON.parse(JSON.stringify(request.payload));
+                if(!service.tasks[task.id]) {
                     throw new Error('Task not found in service')
                 }
-                var task = JSON.parse(JSON.stringify(request.payload));
-                task.name = service.tasks[request.payload.task].name;
+                
+                task.name = service.tasks[task.id].name;
                 var msg = {task: task}
                 var task_name = '';
                 var task_output = 'file';
                 // LLM services have tasks defined in prompts
                 if(service.external_tasks) {
                     msg.external = 'yes';
-                    msg.info = request.payload.task.info;
-                    msg.params = request.payload.task.system_params;
-                    task_name = request.payload.task.name;
+                    msg.info = task.info;
+                    msg.params = task.system_params;
+                    task_name = task.name;
                 } 
 
-                if(service.tasks[request.payload.task].output) {
-                    task_output = service.tasks[request.payload.task].output;
+                if(service.tasks[task.id].output) {
+                    task_output = service.tasks[task.id].output;
                 }
 
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
@@ -148,7 +151,7 @@ export default [
             
 
                 // in many-to-one outputs we do not create process nodes for each file 
-                if(service.tasks[request.payload.task].output == 'many-to-one') {
+                if(service.tasks[task.id].output == 'many-to-one') {
                     var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
                     // add node to UI
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode};
@@ -160,7 +163,7 @@ export default [
                         var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
 
                         // do we need info about "parent" file? (when processing osd.json for example)
-                        if(service.tasks[request.payload.task]?.source == 'source_file') {
+                        if(service.tasks[task.id]?.source == 'source_file') {
                             const source = await Graph.getFileSource(file['@rid']);
                             console.log('source: ', source);
                             if(source) {
@@ -173,7 +176,7 @@ export default [
 
                         msg.process = processNode;
                         msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
-                        msg.output = service.tasks[request.payload.task].output
+                        msg.output = service.tasks[task.id].output
                         msg.file = file_metadata;
                         msg.target = file_metadata['@rid'];
                         msg.total_files = set_files.files.length;
@@ -201,11 +204,12 @@ export default [
                             service: service,
                             task: task,
                             file: file_metadata,
+                            set_process: nodes.process['@rid'],
                             process: null,   // process node will be created in the queue
                             output_set: nodes.set['@rid'],
                             total_files: set_files.files.length,
                             current_file: file_count,
-                            user_rid: request.auth.credentials.user.rid
+                            userId: request.auth.credentials.user.rid
                         }
                         nats.createSetProcessNodesAndPublish(msg)
                         file_count += 1;

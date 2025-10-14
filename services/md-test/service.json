@@ -1,0 +1,36 @@
+{
+    "local_url": "http://localhost:10000",
+    "id": "md-test",
+    "type": "text",
+    "adapter": "test",
+    "api": "/api",
+    "name" :"Test Service",
+    "source_url": "https://github.com/MD-python/MD-test",
+    "status": "experimental",
+    "supported_formats": ["txt", "json", "png", "jpg", "jpeg"],
+    "supported_types": ["text", "image"],
+
+    "description": "Test service for queue testing",
+
+    "params": {
+        "delay": 5
+    },
+
+    "params_help": {
+        "delay": {
+            "name": "delay",
+            "default": 5,
+            "help": "Delay in seconds",
+            "display": "textinput"
+        }
+    },
+
+
+    "tasks": {
+        "test": {
+            "name": "Test",
+            "description": "Use some time to test the queue",
+            "info": "I delayed"
+        }
+    }
+}
