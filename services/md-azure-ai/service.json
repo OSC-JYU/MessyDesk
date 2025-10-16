@@ -9,9 +9,6 @@
     "name" :"Azure AI",
     "source_url": "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference",
 
-    "supported_types": ["text", "image"],
-    "supported_formats": ["txt", "png", "jpg", "jpeg"],
-
     "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
 
     "service_groups": ["AZURE-AI","OSC"],

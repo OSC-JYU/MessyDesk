@@ -12,25 +12,29 @@
 
     "description": "Test service for queue testing",
 
-    "params": {
-        "delay": 5
-    },
-
-    "params_help": {
-        "delay": {
-            "name": "delay",
-            "default": 5,
-            "help": "Delay in seconds",
-            "display": "textinput"
-        }
-    },
-
 
     "tasks": {
         "test": {
-            "name": "Test",
+            "name": "Test process",
             "description": "Use some time to test the queue",
-            "info": "I delayed"
+            "info": "I delayed",
+            "params": {
+                "delay": 5
+            },
+        
+            "params_help": {
+                "delay": {
+                    "name": "delay",
+                    "default": 5,
+                    "help": "Delay in seconds",
+                    "display": "textinput"
+                }
+            }
+        },
+        "json": {
+            "name": "Create JSON",
+            "description": "Create one JSON file per input",
+            "info": "I created JSON"
         }
     }
 }

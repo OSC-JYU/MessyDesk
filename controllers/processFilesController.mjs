@@ -157,19 +157,24 @@ export async function processFilesHandler(request, h) {
                         
                         wsdata = {
                             command: 'process_finished',
-                            process: { '@rid': message.set_process|| message.process['@rid'], status: 'finished', info: 'Finished' },
+                            process: { '@rid': message.set_process || message.process['@rid'], status: 'finished'},
                             set: { '@rid': message.output_set, status: 'finished', count: message.current_file  },
                             //paths: set_thumbnails,
                             current_file: message.current_file}
-                            //console.log('wsdata', wsdata)
+                            console.log('wsdata', wsdata)
                     } else {
-                        wsdata = {
-                            command: 'process_update',
-                            node: { '@rid': message.set_process, status: 'running', info: 'Running...' },
-                            set: { '@rid': message.output_set, status: 'running', count: message.current_file },
-                            current_file: message.current_file,
-                            total_files: message.total_files
-                        };
+                        // Send update message only every 10th file
+                        if(message.current_file % 10 === 0) {
+                            wsdata = {
+                                command: 'process_update',
+                                process: { '@rid': message.set_process || message.process['@rid'], status: 'running'},
+                                set: { '@rid': message.output_set, status: 'running', count: message.current_file },
+                                current_file: message.current_file,
+                                total_files: message.total_files
+                            };
+                        } else {
+                            wsdata = null; // Don't send message for non-10th files
+                        }
                     }
                 } else {
                     // single file processing
@@ -181,7 +186,10 @@ export async function processFilesHandler(request, h) {
                         process: { '@rid': process_rid, status: 'finished' } // process is finished after file is added
                     };
                 }
-                userManager.sendToUser(message.userId, wsdata);
+                // Only send WebSocket message if wsdata is not null
+                if(wsdata) {
+                    userManager.sendToUser(message.userId, wsdata);
+                }
             }
 
             // finally check if there is pipeline in message

@@ -14,7 +14,7 @@ export default [
         path: '/api/projects/{rid}/upload/{set?}',
         options: {
             payload: {
-                maxBytes: 500 * 1024 * 1024,
+                maxBytes: 1000 * 1024 * 1024,
                 output: 'stream',
                 parse: true,
                 multipart: true,
@@ -418,7 +418,7 @@ console.log('filetype', file_type);
             const n = await Graph.getSetFiles(
                 Graph.sanitizeRID(request.params.rid), 
                 request.auth.credentials.user.rid, 
-                {thumbnails: true}
+                {thumbnails: true, limit:request.query.limit, skip:request.query.skip}
             );
             return h.response(n);
         }

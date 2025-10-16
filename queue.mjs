@@ -243,11 +243,68 @@ nats.getQueueStatus = async function(topic) {
 }
 
 
+
+nats.drainQueue = async function (topic, process_rid) {
+  console.log('draining topic: ', topic)
+  console.log('  process_rid: ', process_rid)
+  let count = 0;
+  try {
+    // Find the stream for this topic
+    const streamName = await this.jsm.streams.find(`process.${topic}`);
+    const info = await this.jsm.streams.info(streamName);
+    const { first_seq, last_seq } = info.state;
+
+
+    for (let seq = last_seq; seq >= first_seq; seq--) {
+      let msg;
+      try {
+        msg = await this.jsm.streams.getMessage(streamName, { seq });
+        //await this.jsm.streams.deleteMessage(streamName, seq);
+      } catch (err) {
+        // if (!/message not found/i.test(err.message)) {
+        //   console.warn(`Skipping seq=${seq}: ${err.message}`);
+        // }
+        // stop after first already deleted
+        console.log('message not found!')
+         continue;
+      }
+
+      // Parse JSON payload
+      let payload, message;
+      try {
+        payload = msg.json();
+        try {
+          message = JSON.parse(payload);
+          console.log(message)
+          // Match and delete
+          if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
+            await this.jsm.streams.deleteMessage(streamName, seq);
+            count++;
+          }
+        } catch {
+          console.warn(`Invalid JSON seq=${seq}`);
+          continue;
+        }
+      } catch {
+
+      }
+
+
+    }
+    console.log('deleted messages: ', count)
+    return count;
+  } catch (err) {
+    console.error("drainQueue error:", err);
+    return 0;
+  }
+};
+
+
 // Queue draining
-nats.drainQueue = async function(topic, process_rid) {
+nats.drainQueue_old = async function(topic, process_rid) {
 
   // find a stream that stores a specific subject:
-  const name = await this.jsm.streams.find("system.arcadedb");
+  const name = await this.jsm.streams.find("process." + topic);
   console.log(name)
   // retrieve info about the stream by its name
   const si = await this.jsm.streams.info(name);
@@ -343,6 +400,9 @@ nats.listenDBQueue = async function(topic) {
               console.log('creating and publishing received...', msg.current_file)
               // Add 500ms delay
              // await new Promise(resolve => setTimeout(resolve, 500));
+             //var msg_copy = structuredClone(msg)
+             //if(msg_copy.system_params) delete msg_copy.system_params.json_schema
+             //if(msg_copy?.params?.json_schema) delete msg_copy.params.json_schema
               var processNode = await Graph.createProcessNode_queue(msg);
               await media.createProcessDir(processNode.path);
               //delete data.service.tasks

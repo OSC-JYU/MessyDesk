@@ -11,11 +11,6 @@
     "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif"],
 
 
-    "params": {
-        "width": 200,
-        "height": 200
-    },
-
     "params_help": {
         "width": {
             "name": "width",
@@ -129,6 +124,32 @@
                 }
             },
             "info": "I blurred image by {{sigma}}. "
+        },
+
+        "convert": {
+            "name": "Convert",
+            "output": "image",
+            "description": "Convert image to other format",
+            "params": {
+                "type": "jpg",
+                "quality": 80
+            },
+            "params_help": {
+                "type": {
+                    "name": "format",
+                    "help": "Format to convert to",
+                    "default": "jpeg",
+                    "values":[{"title": "jpg", "value": "jpeg"}, {"title": "png", "value": "png"}, {"title": "webp", "value": "webp"}],
+                    "display": "dropdown"
+                },
+                "quality": {
+                    "name": "quality",
+                    "help": "Quality of the image (only for jpg and webp, 0-100)",
+                    "default": 80,
+                    "display": "textinput"
+                }
+            },
+            "info": "I converted image to {{type}}. JPEG quality is {{quality}}. "
         }
     }
 }

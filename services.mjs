@@ -167,8 +167,10 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 
 	// LLM services have tasks defined in prompts
 	if(service_object.external_tasks) {
+
 		service_object.models = pickModels(node_type, extensions, service_object)
 		// without models we can not have tasks
+		console.log('model count: ', Object.keys(service_object.models).length)
 		if(Object.keys(service_object.models).length === 0) {
 			service_object.tasks = {}
 			return service_object
@@ -236,7 +238,7 @@ function pickModels(type, extensions, service) {
 	for(var model in service.models) {
 		// model must have same type than import node and one of the extensions must match supported formats
 		if(service.models[model].supported_formats.some(value => extensions.includes(value))) {
-			if(service.models[model].supported_types.includes(type)) {
+			if(service.models[model].supported_types.includes(type) || type == 'Set') {
 				models[model] = service.models[model]
 			}
 		}
@@ -245,6 +247,7 @@ function pickModels(type, extensions, service) {
 }
 
 function promptsToTasks(filter, prompts, type, extensions, service) {
+
 	var tasks = {}
 
 	// currently there are no filtered prompts

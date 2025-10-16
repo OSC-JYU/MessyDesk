@@ -35,11 +35,17 @@ export default [
 
     {
         method: 'GET', 
-        path: '/api/queue/{topic}/drain',
+        path: '/api/queue/{topic}/drain/{process_rid?}',
         handler: async (request) => {
             const topic = request.params.topic;
-            const process_rid = request.params.process_rid;
+            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            console.log('process_rid: ', process_rid);
             const status = await nats.drainQueue(topic, process_rid);
+            var wsdata = {
+                command: 'process_finished',
+                process: { '@rid': process_rid, status: 'finished'}
+            }
+            userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
             return status;
         }
     },
@@ -123,25 +129,38 @@ export default [
                 console.log('request.payload: ', request.payload);
                 console.log('service.tasks: ', service.tasks);
                 var task = JSON.parse(JSON.stringify(request.payload));
-                if(!service.tasks[task.id]) {
+                if(!service.external_tasks && !service.tasks[task.id]) {
                     throw new Error('Task not found in service')
                 }
                 
-                task.name = service.tasks[task.id].name;
+                if(service.external_tasks) {
+                    task.name = task.name;
+                } else {
+                    task.name = service.tasks[task.id].name;
+                }
                 var msg = {task: task}
                 var task_name = '';
-                var task_output = 'file';
+               // var task_output = 'file';
                 // LLM services have tasks defined in prompts
                 if(service.external_tasks) {
-                    msg.external = 'yes';
-                    msg.info = task.info;
-                    msg.params = task.system_params;
-                    task_name = task.name;
+                    msg.external = 'yes'
+                    msg.task.params = task.system_params
+                    // add model information if service has models
+                    if(service.models && task.model) {
+                        // task.model could be either a string ID or the entire model object
+                        let modelId = typeof task.model === 'string' ? task.model : task.model.id
+                        if(modelId && service.models[modelId]) {
+                            msg.task.model = structuredClone(service.models[modelId])
+                            msg.task.model.id = modelId
+                        }
+                    }
                 } 
 
-                if(service.tasks[task.id].output) {
-                    task_output = service.tasks[task.id].output;
-                }
+
+
+                // if(service.tasks[task.id].output) {
+                //     task_output = service.tasks[task.id].output;
+                // }
 
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
                 console.log('set_metadata: ', set_metadata);
@@ -151,7 +170,7 @@ export default [
             
 
                 // in many-to-one outputs we do not create process nodes for each file 
-                if(service.tasks[task.id].output == 'many-to-one') {
+                if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
                     var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
                     // add node to UI
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode};
@@ -192,7 +211,8 @@ export default [
                 } else {
                     console.log('Creating set and process nodes');
                     var nodes = await Graph.createSetAndProcessNodes(service, task, set_metadata, request.auth.credentials.user.rid);
-                    // add node to UI
+                    // add nodes (Process and Set) to UI
+                    console.log('nodes: ', nodes);
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                     

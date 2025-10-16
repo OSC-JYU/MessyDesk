@@ -493,8 +493,8 @@ graph.getProjectFiles = async function (rid, user_rid) {
 }
 
 graph.getSetFiles = async function (set_rid, user_rid, params) {
-	if(!params || !isIntegerString(params.skip)) params.skip = 0
-	if(!params || !isIntegerString(params.limit)) params.limit = 10
+	if(!params || !isIntegerString(params.skip) && !Number.isInteger(params.skip)) params.skip = 0
+	if(!params || !isIntegerString(params.limit) && !Number.isInteger(params.limit)) params.limit = 10
 	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
@@ -707,57 +707,57 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 
 
 
-// create Process that is linked to File
-graph.createProcessNode = async function (service, task, filegraph, me_email, set_rid, set_process_rid, tid) {
+// // create Process that is linked to File
+// graph.createProcessNode = async function (service, task, filegraph, me_email, set_rid, set_process_rid, tid) {
 
-	if(!msg.task) {
-		throw new Error('Task not found in message')
-	}
+// 	if(!msg.task) {
+// 		throw new Error('Task not found in message')
+// 	}
 
 
-	var file_rid = filegraph['@rid']
+// 	var file_rid = filegraph['@rid']
 	
-	// create process node
-	var processNode = {}
-	var process_rid = null
-	const process_attrs = { 
-		label: task.name,
-		service: service.name
-	}
-	// we remove json_schema from database record (might get messy)
-	var data_copy = structuredClone(task)
-	if(data_copy.system_params) delete data_copy.system_params.json_schema
+// 	// create process node
+// 	var processNode = {}
+// 	var process_rid = null
+// 	const process_attrs = { 
+// 		label: task.name,
+// 		service: service.name
+// 	}
+// 	// we remove json_schema from database record (might get messy)
+// 	var data_copy = structuredClone(task)
+// 	if(data_copy.system_params) delete data_copy.system_params.json_schema
 
-	process_attrs.params = JSON.stringify(data_copy)
-	if(task.info) {
-		process_attrs.info = task.info
-	}
-	if(task.description) {
-		process_attrs.description = task.description
-	}
-	// mark if this is part of set processing = not displayed in UI by default
-	if(set_rid) {
-		process_attrs.set = set_rid
-	}
-	if(set_process_rid) {
-		process_attrs.set_process = set_process_rid
-	}
-	processNode = await this.create('Process', process_attrs, null,tid)
-	process_rid = processNode['@rid']
-	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
-	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
-	// update process path to record
-	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process', tid)
+// 	process_attrs.params = JSON.stringify(data_copy)
+// 	if(task.info) {
+// 		process_attrs.info = task.info
+// 	}
+// 	if(task.description) {
+// 		process_attrs.description = task.description
+// 	}
+// 	// mark if this is part of set processing = not displayed in UI by default
+// 	if(set_rid) {
+// 		process_attrs.set = set_rid
+// 	}
+// 	if(set_process_rid) {
+// 		process_attrs.set_process = set_process_rid
+// 	}
+// 	processNode = await this.create('Process', process_attrs, null,tid)
+// 	process_rid = processNode['@rid']
+// 	var file_path = filegraph.path.split('/').slice(0, -1).join('/')
+// 	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+// 	// update process path to record
+// 	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process', tid)
 	
-	// finally, connect process node to file node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid, tid)
+// 	// finally, connect process node to file node
+// 	await this.connect(file_rid, 'PROCESSED_BY', process_rid, tid)
 
-	// create process output file node
-	//await this.createProcessFileNode(process_rid, data, '', '')
+// 	// create process output file node
+// 	//await this.createProcessFileNode(process_rid, data, '', '')
 
-	return processNode
+// 	return processNode
 
-}
+// }
 
 
 graph.createProcessNode_queue = async function (msg) {
@@ -765,7 +765,6 @@ graph.createProcessNode_queue = async function (msg) {
 	if(!msg.task) {
 		throw new Error('Task not found in message')
 	}
-
 
 	var file_rid = msg.file['@rid']
 	
@@ -777,37 +776,19 @@ graph.createProcessNode_queue = async function (msg) {
 		service: msg.service.name
 	}
 
-	// we remove json_schema from database record (might get messy)
-	console.log('***************** msg.task ***************')
-	console.log(msg.task)
+	if(msg.service.id) process_attrs.service_id = msg.service.id
+	if(msg.task.id) process_attrs.task = msg.task.id
+	if(msg.task.info) process_attrs.info = msg.task.info
 
-	var task_copy = structuredClone(msg.task)
-	if(task_copy.system_params?.json_schema) delete task_copy.system_params.json_schema
-	if(task_copy.model) delete task_copy.model
-
-	process_attrs.task = JSON.stringify(task_copy)
-	if(msg.task.info) {
-		process_attrs.info = msg.task.info
-	}
-	if(msg.task.description) {
-		process_attrs.description = msg.task.description
-	}
-	if(msg.task.model) {
-		process_attrs.model = msg.task.model.id
-		if(msg.task.model.version) {
-			process_attrs.model_version = msg.task.model.version
-		}
-		// add start of the prompt to process_attrs
-		process_attrs.info = msg.task.params.prompts?.content?.slice(0, 100) + '...'
-	}
+	if(msg.task.description) process_attrs.description = msg.task.description
+	if(msg.task.model) process_attrs.model = msg.task.model.id
+	if(msg.task.model?.version) process_attrs.model_version = msg.task.model.version
+	//if(msg.task.params.prompts?.content) process_attrs.task.params.prompts = msg.task.params.prompts.content.slice(0, 100) + '...'
 
 	// mark if this is part of set processing = not displayed in UI by default
-	if(msg.output_set) {
-		process_attrs.set = msg.output_set
-	}
-	if(msg.set_process_rid) {
-		process_attrs.set_process = msg.set_process_rid
-	}
+	if(msg.output_set) process_attrs.set = msg.output_set
+	if(msg.set_process_rid) process_attrs.set_process = msg.set_process_rid
+
 	processNode = await this.create('Process', process_attrs)
 	process_rid = processNode['@rid']
 	var file_path = msg.file.path.split('/').slice(0, -1).join('/')
@@ -850,7 +831,7 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
 	
 	// create process output Set
-	if(service.tasks[task.id].output != 'always file') {
+	if(service.external_tasks || service.tasks[task.id].output != 'always file') {
 		setNode = await this.create('Set', {path: processNode.path})
 		// and link it to SetProcess
 		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
@@ -1218,6 +1199,18 @@ graph.query = async function (body) {
 
 graph.create = async function (type, data, admin, tid) {
 	//console.log('create', type, data)
+	// We clean some data
+   if(type == 'Process') {
+	if(data.task) {
+		if(data.task.params) {
+			if(data.task.params.prompts) delete data.task.params.prompts
+		}
+		if(data.task.system_params) {
+			if(data.task.system_params.json_schema) delete data.task.system_params.json_schema
+		}
+	}
+   }
+
 	var data_str_arr = []
 	// expression data to string
 	for (var key in data) {

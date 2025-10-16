@@ -9,8 +9,6 @@
     "name" :"Google Gemini",
     "source_url": "https://deepmind.google/models/gemini",
 
-    "supported_types": ["image"],
-    "supported_formats": ["jpg", "png", "jpeg"],
 
     "description": "Google's cloud-based AI services.",
 
@@ -46,7 +44,7 @@
             "output": "text",
             "description": "Old model, not recommended for new tasks.",
             "supported_types": ["image", "text"],
-            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt", "tif", "tiff"],
             "url": ""
         },
         "gemini-2.5-flash": {
@@ -54,7 +52,7 @@
             "description": "Our best model in terms of price-performance, offering well-rounded capabilities. 2.5 Flash is best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases.",
             "output": "text",
             "supported_types": ["image", "text"],
-            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt", "tif", "tiff"],
             "url": ""
         }
     }

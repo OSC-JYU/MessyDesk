@@ -157,7 +157,7 @@ export default [
                 if(message?.output_set) {
                     const wsdata = {
                         command: 'process_finished',
-                        target: target,
+                        process: message.process,
                         metadata: message.file.metadata,
                         paths: message.paths
                     };
@@ -184,7 +184,7 @@ export default [
                     message.role = 'thumbnail';
                     message.service = {'id': 'md-poppler'};
                    
-                    nats.publish(message.id, JSON.stringify(message));
+                    nats.publish(message.service.id, JSON.stringify(message));
 
                 }
             }
