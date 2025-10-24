@@ -5,7 +5,7 @@ job "md-pdf2json" {
     count = 1
     network {
       port "node" {
-        to = 8300
+        to = 9003
       }
     }
 
@@ -15,7 +15,7 @@ job "md-pdf2json" {
       provider = "nomad"
     }
 
-    task "md-poppler" {
+    task "md-pdf2json" {
       driver = "docker"
         config {
             image = "osc.repo.kopla.jyu.fi/messydesk/md-pdf2json:0.1"

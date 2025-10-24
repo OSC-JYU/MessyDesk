@@ -1,5 +1,5 @@
 {
-    "local_url": "http://localhost:9000",
+    "local_url": "http://localhost:9003",
     "id": "md-pdf2json",
     "type": "pdf",
     "api_type": "elg",

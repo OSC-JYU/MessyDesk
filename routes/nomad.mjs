@@ -82,37 +82,36 @@ export default [
                             targetNode = setProcessNode['setprocess']['@rid'];
                         }
                     }
-                    var error_count = await Graph.setNodeError(targetNode, error, message.userId);
-                    await userManager.sendToUser(message.userId, {
-                        command: 'update',
-                        target: targetNode,
-                        error: 'errors: ' + error_count
-                    });
-                    
-                    // create error node and update UI
-                    const errornode = await Graph.createErrorNode(error, message, DATA_DIR);
-        
-                    // write error to error node file
-                    const log = {info: 'Something went wrong with the file processing.', 
-                        timestamp: new Date().toISOString(), 
-                        file: message.file,
-                        task: message.task,
-                        message: message,
-                        error: error
-                    };  
-                    await media.createProcessDir(path.dirname(errornode.path))
-                    await media.writeJSON(log, 'error.json', path.dirname(errornode.path));
-                    if(!message.output_set) {
+                    if(targetNode) {
+                        var error_count = await Graph.setNodeError(targetNode, error, message.userId);
                         await userManager.sendToUser(message.userId, {
-                            command: 'add',
-                            input: message.process['@rid'],
-                            type: 'error',
-                            process: { '@rid': message.process['@rid'], status: 'finished' },
-                            node: errornode
-                        })
-                    }
+                            command: 'update',
+                            target: targetNode,
+                            error: 'errors: ' + error_count
+                        });
 
-                    
+                        const errornode = await Graph.createErrorNode(error, message, DATA_DIR);
+            
+                        // write error to error node file
+                        const log = {info: 'Something went wrong with the file processing.', 
+                            timestamp: new Date().toISOString(), 
+                            file: message.file,
+                            task: message.task,
+                            message: message,
+                            error: error
+                        };  
+                        await media.createProcessDir(path.dirname(errornode.path))
+                        await media.writeJSON(log, 'error.json', path.dirname(errornode.path));
+                        if(!message.output_set) {
+                            await userManager.sendToUser(message.userId, {
+                                command: 'add',
+                                input: message.process['@rid'],
+                                type: 'error',
+                                process: { '@rid': message.process['@rid'], status: 'finished' },
+                                node: errornode
+                            })
+                        }
+                    }                    
                 }
             } else {
                 logger.error('Error processing files', { error: request.payload });
@@ -137,11 +136,17 @@ export default [
                 console.log('POST /api/nomad/process/files/done')
                 console.log(request.payload)
             
-                const message = request.payload
-                let target = message.target;
+                var message = request.payload
+                let target = null
 
                 if (message.process && message.process['@rid']) {
                     target = message.process['@rid'];
+                } else {
+                    target = message.file['@rid'];
+                }
+                if(!target) {
+                    logger.error('Target not found', { message: message });
+                    return [];
                 }
             
                 // update UI if metadata is available
@@ -149,7 +154,7 @@ export default [
                     const wsdata = {
                         command: 'update',
                         target: target,
-                        metadata: message.file.metadata
+                        node: {metadata: message.file.metadata}
                     };
                     await userManager.sendToUser(message.userId, wsdata);
                 }
@@ -163,15 +168,11 @@ export default [
                     };
                     await userManager.sendToUser(message.userId, wsdata);
                 }
-                // If target is a pdf, send cover page thumbnail message to md-poppler
+                // If target is a pdf (i.e. we are splitting pdf into pages), send cover page thumbnail message to md-poppler
                 if(message?.file?.type == 'pdf') {
                     // PDF page count
-
-                    // write data to node
-                    const targetNode = message.process && message.process['@rid'] ? message.process['@rid'] : target;
-
                     if(message?.file?.metadata?.page_count) {
-                        await Graph.setNodeAttribute_old(targetNode, {key: 'metadata.page_count', value: message.file.metadata.page_count}, 'File');
+                        await Graph.setNodeAttribute_old(target, {key: 'metadata', value: message.file.metadata}, 'File');
                     }
 
                     message.task = {'id': 'pdf2images'};
@@ -183,6 +184,7 @@ export default [
                     };
                     message.role = 'thumbnail';
                     message.service = {'id': 'md-poppler'};
+                    console.log('Sending message to md-poppler', message);
                    
                     nats.publish(message.service.id, JSON.stringify(message));
 

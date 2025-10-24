@@ -1,0 +1,48 @@
+{
+    "local_url": "http://localhost:9001",
+    "id": "md-stanza",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"Stanza NLP",
+    "source_url": "https://github.com/stanfordnlp/stanza",
+    "status": "experimental",
+
+    "description": "The Stanford NLP Group's official Python NLP library. It contains support for running various accurate natural language processing tools on 60+ languages.",
+
+    "params": {
+        "language": {
+            "type": "string",
+            "description": "The language of the text."
+        }
+    },
+
+    "params_help": {
+        "language": {
+            "name": "language",
+            "help": "Define the language of the text",
+            "values": [
+                {"value":"en", "title":"English"},
+                {"value":"sv", "title":"Swedish"},
+                {"value":"fi", "title":"Finnish"}
+                ],
+            "display":"dropdown"
+        }
+    },
+
+    "tasks": {
+        "pos": {
+            "name": "Stanza POS Tagging",
+            "description": "Part-of-speech (POS)tagging is the process of assigning a part-of-speech tag to each word in a sentence.",
+            "info": "POS Tagging",
+            "supported_formats": ["txt"]
+        },
+
+        "lemma": {
+            "name": "Stanza Lemma",
+            "description": "Lemmatization is the process of converting a word to its base or dictionary form.",
+            "info": "Lemma",
+            "supported_formats": ["txt"]
+        }
+    }
+}

@@ -1,5 +1,5 @@
 {
-    "local_url": "http://localhost:8888",
+    "local_url": "http://localhost:9008",
     "id": "md-json",
     "type": "text",
     "adapter": "elg",

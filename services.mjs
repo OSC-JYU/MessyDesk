@@ -66,7 +66,9 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 					}
 					else jsonData['nomad'] = false
 
-				} catch(e) {}
+				} catch(e) {
+					console.error(`Error reading nomad.hcl file in ${subdirectory}: ${e.message}`);
+				}
 
 				// Add the data to the result object with the subdirectory name as the key
 				servicesObject[subdirectory] = jsonData;
@@ -81,6 +83,17 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 		// add some default consumers (not vis)
 		//this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
 		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
+
+		// We must loop over all services and fetch params_help from API
+		for(var service in this.service_list) {
+			for(var task in this.service_list[service].tasks) {
+				for(var param in this.service_list[service].tasks[task].params_help) {
+					if(this.service_list[service].tasks[task].params_help[param].values == '/api') {
+						this.service_list[service].tasks[task].params_help[param].values = await this.getParamsHelp(service, task, param)
+					}
+				}
+			}
+		}
 		return this.service_list
 
 	} catch (error) {
@@ -89,6 +102,16 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 	}
 }
 
+services.getParamsHelp = async function(service, task, param) {
+	console.log(this.service_list[service])
+	const url = this.service_list[service].url ? this.service_list[service].url : this.service_list[service].local_url
+	if(url) {
+		const response = await fetch(`${url}/params_help/${task}/${param}`)
+		const data = await response.json()
+		return data
+	}
+	return []
+}
 
 function sleep(ms) {
 	return new Promise((resolve) => {
@@ -289,8 +312,8 @@ function promptsToTasks(filter, prompts, type, extensions, service) {
 	return tasks
 }
 
-// note: consumer here means service adapter, not NATS consumers
-services.addConsumer = async function(service, id) {
+
+services.addServiceAdapter = async function(service, id) {
 
 	if(this.service_list[service]) {
 		if(this.service_list[service].consumers.includes(id)) {
@@ -302,8 +325,7 @@ services.addConsumer = async function(service, id) {
 	return {error: 'service not found', name: service}
 }
 
-// note: consumer here means consumer application, not NATS consumers
-services.removeConsumer = async function(service, id) {
+services.removeServiceAdapter = async function(service, id) {
 
 	if(this.service_list[service]) {
 		let arr = this.service_list[service].consumers.filter(item => item !== id)

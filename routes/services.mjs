@@ -34,7 +34,7 @@ export default [
         method: 'POST',
         path: '/api/services/{service}/consumer/{id}',
         handler: async (request) => {
-            return await services.addConsumer(request.params.service, request.params.id);
+            return await services.addServiceAdapter(request.params.service, request.params.id);
         }
     },
     {
@@ -42,7 +42,7 @@ export default [
         path: '/api/services/{service}/consumer/{id}',
         handler: async (request) => {
             const adapter = await services.getServiceAdapterByName(request.params.service);
-            const response = await services.removeConsumer(request.params.service, request.params.id);
+            const response = await services.removeServiceAdapter(request.params.service, request.params.id);
             await nomad.stopService(adapter);
             return response;
         }
