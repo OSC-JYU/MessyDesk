@@ -16,7 +16,6 @@
     "tasks": {
         "wordcloud": {
             "name": "Create Wordcloud",
-            "output": "many-to-one",
             "description": "Create wordcloud from text",
             "info": "Wordcloud"
         },
@@ -36,8 +35,53 @@
                 "language": {
                     "name": "language",
                     "help": "Define the language of the text",
-                    "values": "/api",
+                    "values": [
+                        {"value":"en", "title":"English"},
+                        {"value":"fi", "title":"Finnish"},
+                        {"value":"sv", "title":"Swedish"}
+                    ],
                     "display":"dropdown"
+                }
+            }
+        },
+
+        "split_text": {
+            "name": "Split Text",
+            "description": "Split text into chunks",
+            "info": "Split Text",
+            "output_set": "Text chunks",
+            "params": {
+                "chunk_size": {
+                    "type": "integer",
+                    "description": "Chunk size",
+                    "default": 1000
+                }
+            },
+            "params_help": {
+                "chunk_size": {
+                    "name": "chunk_size",
+                    "description": "Chunk size",
+                    "display": "textinput"
+                }
+            }
+        },
+
+        "join_text": {
+            "name": "Join texts",
+            "description": "Join texts into one text",
+            "info": "Join Text",
+            "params": {
+                "separator": {
+                    "type": "string",
+                    "description": "Separator",
+                    "default": "\n"
+                }
+            },
+            "params_help": {
+                "separator": {
+                    "name": "separator",
+                    "description": "Separator",
+                    "display": "textinput"
                 }
             }
         }

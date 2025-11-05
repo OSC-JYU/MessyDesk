@@ -1,0 +1,48 @@
+{
+    "local_url": "http://localhost:9009",
+    "id": "md-gensim",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"Gensim NLP",
+    "source_url": "https://github.com/piskvorky/gensim",
+    "status": "experimental",
+
+    "description": "Gensim is a Python library for topic modelling, document indexing and similarity retrieval with large corpora. Target audience is the natural language processing (NLP) and information retrieval (IR) community.",
+
+
+    "tasks": {
+        "bow": {
+            "name": "Bag of Words",
+            "description": "Bag of Words is a method for representing text as a bag of words, i.e. a list of words with their frequencies.",
+            "info": "Bag of Words",
+            "supported_formats": ["txt"]
+        },
+        "similarity": {
+            "name": "Similarity Index",
+            "description": "Build Similarity Index is a method for building a similarity index for a document.",
+            "info": "Similarity Index allows to find similar documents in a corpus.",
+            "supported_formats": ["txt"]
+        },
+        "similarity_query": {
+            "name": "Query Similarity Index",
+            "description": "Query Similarity Index is a method for querying a similarity index for a document.",
+            "info": "Query Similarity Index",
+            "source": "source_file",
+            "params": {
+                "query": {
+                    "type": "string",
+                    "description": "Text to search for."
+                }
+            },
+            "params_help": {
+                "query": {
+                    "name": "query text",
+                    "description": "Text to search for.",
+                    "display": "textarea"
+                }
+            },
+            "supported_formats": ["tar"]
+        }
+    }
+}

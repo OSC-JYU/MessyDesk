@@ -5,6 +5,7 @@ import path from 'path';
 
 import db from "./db.mjs";
 import media from "./media.mjs";
+import solr from "./solr.mjs";
 
 import timers from 'timers-promises';
 import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
@@ -122,10 +123,8 @@ graph.createSet = async function (project_rid, data, me_rid) {
 graph.createSource = async function (project_rid, data, me_rid, nats) {
 
 	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
-	console.log(query)
+
 	var response = await db.cypher(query)
-	console.log(response)
-	console.log(response.result[0])
 	if (response.result.length == 1) {
 		data.status = 'initing...'
 		var source = await this.create('Source', data)
@@ -139,16 +138,13 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 
 		// send init request to service 
 		var init_task = {
-			id:"md-" + data.type.toLowerCase(),
-			task:"init",
+			service: {id:"md-" + data.type.toLowerCase()},
+			task: {id:"init", params: {url:`${source.url}`},},
 			file:source,
 			process:source,
-			params: {url:`${source.url}`, task:"init"},
-			info:"Fetching collection hierarchy...",
 			userId: me_rid
 		}
-		nats.publish(init_task.id, JSON.stringify(init_task))
-
+		nats.publish(init_task.service.id, JSON.stringify(init_task))
 
 		return source
 	} else {
@@ -629,6 +625,7 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 		}
 	// otherwise task must be found from service tasks object
 	} else if(!service.tasks[task.id]) {
+		console.log(service)
 		throw new Error('Task not found in service: '+ task.id )
 	} else {
 		// Do not trust task.name from request, use service.tasks[task.id].name instead
@@ -675,7 +672,7 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 				var c = 1
 				for(var i = first; i <= last; i++) {
 					var m = structuredClone(msg)
-					m.params.page = i
+					m.task.params.page = i
 					m.total_files = last - first + 1
 					m.current_file = c
 					c += 1
@@ -1045,7 +1042,6 @@ graph.createROIs = async function(rid, data) {
 
 	// now we must delete all ROIs that are not in the rids array
 	const query_delete = `DELETE FROM ROI WHERE @rid NOT IN [${rids.join(',')}] AND in().@rid = [${rid}]`
-	console.log(query_delete)
 	var response_delete = await db.sql(query_delete)
 
 	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
@@ -1291,34 +1287,34 @@ graph.createWithSQL = async function (type, data, admin) {
 	return response.result[0]
 }
 
-graph.deleteNode = async function (rid, nats) {
-	if (!rid.match(/^#/)) rid = '#' + rid
+graph.deleteNode = async function (rid, userRID) {
+	console.log('deleting node', rid, userRID)
 
-	var parent = await this.getNodeAttributes(rid)
-	if(parent.result.length == 0) throw ('Node not found')
+	var node = await this.getNodeAttributes(rid, userRID)
+
+	if(!node) throw ('Node not found')
 	
 	// remove node and all children (out nodes) from solr index
 	const q = `TRAVERSE out() FROM ${rid}`
 	var traverse = await db.sql(q)
 	var targets = []
-	for(var node of traverse.result) {
-		targets.push({id: node['@rid']})
+	for(var t of traverse.result) {
+		targets.push({id: t['@rid']})
 		// remove of path is only necessary for setProcess nodes TODO: make smarter
-		if(node['path'])
-			await media.deleteNodePath(node['path'])
+		if(t['path']) await media.deleteNodePath(t['path'])
+		if(t['service'] == 'Solr') {
+			await solr.dropSetIndex(t['@rid'])
+		}
 	}
 
-	// if(nats) {
-	// 	var index_msg = {
-	// 		id:'solr', 
-	// 		task: 'delete', 
-	// 		target: targets
-	// 	}
-	// 	nats.publish(index_msg.id, JSON.stringify(index_msg))
-	// }
+	// if node itself is a solr indexer, then delete the index
+	if(node['service'] == 'Solr') {
+		console.log('deleting solr index', rid)
+		await solr.dropSetIndex(rid)
+	}
 
 	// if this is setProcess, then delete all Process nodes that has property set_process = rid
-	if(parent.result[0]['@type'] == 'SetProcess') {
+	if(node['@type'] == 'SetProcess') {
 		const query_delete_process = `DELETE FROM Process WHERE set_process = "${rid}"`
 		await db.sql(query_delete_process)
 	}
@@ -1327,16 +1323,11 @@ graph.deleteNode = async function (rid, nats) {
 	const query_path = `SELECT path FROM ${rid}`
 	var path_result = await db.sql(query_path)
 
-	// delete all children and node
-// var query = `MATCH (n)
-// 	WHERE id(n) = "${rid}" 
-// 	OPTIONAL MATCH (n)-[*]->(child)
-// 	DETACH delete n,child`
-// var response = await db.cypher(query)
+
 	await db.deleteMany(targets)
 
-	const node_path = parent.result[0].path
-	const is_project = parent.result[0]['@type'] == 'Project'
+	const node_path = node.path
+	const is_project = node['@type'] == 'Project'
 	if(node_path)
 		await media.deleteNodePath(node_path)
 	// project node has no path
@@ -1567,10 +1558,19 @@ graph.setNodeAttribute_old = async function (rid, data, type, tid) {
 }
 
 
-graph.getNodeAttributes = async function (rid) {
+graph.getNodeAttributes = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `MATCH (node) WHERE id(node) = '${rid}' RETURN node`
-	return db.cypher(query)
+	var query = `MATCH {
+		type: User, 
+		as:p, 
+		where:(@rid = ${userRID})}
+	-IS_OWNER->
+		{type:Project, as:project}--> 
+		{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
+
+	var response = await db.sql(query)
+	if(response.result.length == 0) return null
+	return response.result[0].node
 }
 
 
@@ -1684,14 +1684,13 @@ graph.traverse = async function (rid, direction, userRID) {
 
 	if (!rid.match(/^#/)) rid = '#' + rid
 	var query = `TRAVERSE ${direction}() FROM ${rid}`
-	console.log(query)
 	var response = await db.sql(query)
 	return response.result
 }
 
 graph.getEntityTypeSchema = async function (userRID) {
 	var query = `select FROM EntityType WHERE owner = "${userRID}" ORDER by type`
-	console.log(query)
+
 	var types = await db.sql(query)
 	return types.result
 }
@@ -1823,7 +1822,6 @@ graph.createTag = async function (label, userRID) {
 
 graph.getNode = async function (rid, userRID) {
 	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
-	console.log(query)
 	
 	var response = await db.sql(query)
 	if(response.result.length == 0) return []

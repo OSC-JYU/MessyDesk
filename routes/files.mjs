@@ -87,7 +87,7 @@ console.log('filetype', file_type);
                             // Get image metadata
                             const image_metadata = await media.getImageSize(filegraph.path)
                             console.log('metadata', image_metadata);
-                            filegraph.metadata = image_metadata
+                            filegraph.metadata = {...filegraph.metadata, ...image_metadata}
 
 	                        // ************** EXIF FIX **************
 	                        // if file has EXIF orientation, then we need to rotate it
@@ -293,12 +293,14 @@ console.log('filetype', file_type);
                     request.params.file_rid,
                     request.auth.credentials.user.rid
                 );
+                console.log(file_metadata)
 
                 // we first check if file exist
                 // if not, then we search for error.json
                 // if error.json exists, then we return it
                 // if not, then we return 404
                 if (!fse.existsSync(file_metadata.path)) {
+                    console.log('file does not exist')
                     const error_json_path = path.join(path.dirname(file_metadata.path), 'error.json')
                     if (fse.existsSync(error_json_path)) {
                         const src = fse.createReadStream(error_json_path);
@@ -313,6 +315,7 @@ console.log('filetype', file_type);
 
                 const src = fse.createReadStream(file_metadata.path);
                 const response = h.response(src);
+ 
 
                 if (file_metadata.type === 'pdf') {
                     response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
@@ -323,10 +326,12 @@ console.log('filetype', file_type);
                     response.type('text/csv; charset=utf-8');
                 } else if (file_metadata.type === 'text' || file_metadata.type === 'data') {
                     response.type('text/plain; charset=utf-8');
-                } else if (file_metadata.type === 'error.json') {
+                } else if (file_metadata.type.includes('.json')) {
                     response.type('application/json');
                 } else {
-                    response.header('Content-Disposition', `attachment; filename=${file_metadata.label}`);
+                    // Make the filename URL safe using encodeURIComponent and fallback for non-ASCII characters
+                    const safeLabel = encodeURIComponent(file_metadata.label).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+                    response.header('Content-Disposition', `attachment; filename="${safeLabel}"`);
                 }
 
                 return response;

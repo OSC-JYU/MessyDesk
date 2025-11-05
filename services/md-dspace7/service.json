@@ -15,8 +15,8 @@
         "make_query": {
             "name": "Query",
             "output": "json",
-            "description": "Get items from dspace7",
-            "info": "",
+            "description": "Get metadata from dspace7",
+            "info": "{{scopeLabel}} query: {{query}}",
             "init_data": "init.json",
             "params": {
                 "query": ""
@@ -53,7 +53,7 @@
                     "display": "dropdown"
                 }
             },
-            "supported_types": ["dspace7.json"]
+            "supported_formats": ["dspace7.json"]
         }
     }
 }

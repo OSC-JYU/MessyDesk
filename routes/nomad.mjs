@@ -199,7 +199,7 @@ export default [
         path: '/api/nomad/process/files',
         options: {
             payload: {
-                maxBytes: 209715200,
+                maxBytes: 500000000,
                 output: 'file',
                 parse: true,
                 multipart: {

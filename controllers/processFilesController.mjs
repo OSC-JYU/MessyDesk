@@ -16,8 +16,8 @@ export async function processFilesHandler(request, h) {
     let message = {};
 
     try {
-        if (request.payload.request) {
-            infoFilepath = request.payload.request.path;
+        if (request.payload.message) {
+            infoFilepath = request.payload.message.path;
             const info = await fse.readFile(infoFilepath);
             message = JSON.parse(info);
             //console.log(message);
@@ -101,7 +101,7 @@ export async function processFilesHandler(request, h) {
             if (message.file.type == 'text' || message.file.type.includes('json') || message.file.type == 'csv') {
                 info = await media.getTextDescription(contentFilepath, message.file.type);
             }
-
+            console.log(message)
             const process_rid = message.process['@rid'];
 
             // if we have output_rid and output_path set in message, then output node and path are already created
@@ -118,6 +118,10 @@ export async function processFilesHandler(request, h) {
             if(fileNode.metadata) {
                 await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
             }
+            // Add "parent" file metadata to file node (like id or url of the original file)
+            if(message.file.forward) {
+                await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'forward', value: message.file.forward}, 'File');
+            }
             // update processing time to Process node
             if(message.response) {
                 if(message.response.time) {
@@ -133,7 +137,7 @@ export async function processFilesHandler(request, h) {
             if (message.file.type == 'image') {
                 const th = {
                     topic: {id: 'md-thumbnailer'},
-                    service: {id: 'md-imaginary'},
+                    service: {id: 'md-thumbnailer'},
                     task: {id: 'thumbnail', params: {width: 800, type: 'jpeg'}},
                     file: fileNode,
                     userId: message.userId,
@@ -272,8 +276,8 @@ export async function processMetadataHandler(request, h) {
     let message = {};
 
     try {
-        if (request.payload.request && request.payload.content) {
-            infoFilepath = request.payload.request.path;
+        if (request.payload.message && request.payload.content) {
+            infoFilepath = request.payload.message.path;
             const info = await fse.readFile(infoFilepath);
             message = JSON.parse(info);
             contentFilepath = request.payload.content.path;

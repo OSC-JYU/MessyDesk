@@ -1,27 +1,24 @@
 {
-    "url": "http://localhost:9003",
+    "local_url": "http://localhost:8983",
     "id": "md-solr",
     "type": "solr",
-    "api_type": "elg",
+    "adapter": "solr",
     "api": "/process",
     "name" :"Solr",
-    
-    "supported_types": ["txt"],
-    "supported_formats": ["txt"],
+
 
     "description": "Solr",
 
 
 
     "tasks": {
-        "solr": {
-            "source":"source_file",
-            "params": {
-                "task": "solr"
-            },
-            "output": "index",
-            "name": "Solr",
-            "description": "Solr"
+        "index": {
+            "params": {},
+            "output": "many-to-one",
+            "source": "source_file",
+            "name": "Search index",
+            "description": "Create a search index for the texts.",
+            "supported_formats": ["txt"]
         }
     }
 }

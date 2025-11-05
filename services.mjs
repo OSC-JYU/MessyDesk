@@ -85,15 +85,15 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
 
 		// We must loop over all services and fetch params_help from API
-		for(var service in this.service_list) {
-			for(var task in this.service_list[service].tasks) {
-				for(var param in this.service_list[service].tasks[task].params_help) {
-					if(this.service_list[service].tasks[task].params_help[param].values == '/api') {
-						this.service_list[service].tasks[task].params_help[param].values = await this.getParamsHelp(service, task, param)
-					}
-				}
-			}
-		}
+		// for(var service in this.service_list) {
+		// 	for(var task in this.service_list[service].tasks) {
+		// 		for(var param in this.service_list[service].tasks[task].params_help) {
+		// 			if(this.service_list[service].tasks[task].params_help[param].values == '/api') {
+		// 				this.service_list[service].tasks[task].params_help[param].values = await this.getParamsHelp(service, task, param)
+		// 			}
+		// 		}
+		// 	}
+		// }
 		return this.service_list
 
 	} catch (error) {
@@ -155,7 +155,7 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 		// services for data sources like Nextcloud
 		} else if (node['@type'] == 'Source') {
 			if(this.service_list[service].consumers.length > 0) {
-				var service_with_tasks = pickTasks(this.service_list[service], node.type, filter, user, prompts, node.type)
+				var service_with_tasks = pickTasks(this.service_list[service], [node.extension],[node.type], filter, user, prompts, node.type)
 				if(service_with_tasks) {
 					matches.for_format.push(service_with_tasks)
 				}
@@ -221,6 +221,8 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 		
 		// if task has its own supported types then compare to node type (NOT @type!)
 		if(service.tasks[task].supported_types && service.tasks[task].supported_types.length > 0) {
+			console.log('supported types: ', service.tasks[task].supported_types)
+			console.log('types: ', types)
 			if(service.tasks[task].supported_types.some(value => types.includes(value))) {
 				if(filterTask(filter, service.tasks[task]))
 					service_object.tasks[task] = service.tasks[task]

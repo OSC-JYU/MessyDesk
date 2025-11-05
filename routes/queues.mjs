@@ -196,8 +196,8 @@ export default [
                         msg.process = processNode;
                         msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
                         msg.output = service.tasks[task.id].output
-                        msg.file = file_metadata;
-                        msg.target = file_metadata['@rid'];
+                        msg.file = file;
+                        msg.set_process = processNode['@rid'];
                         msg.total_files = set_files.files.length;
                         msg.current_file = file_count;
                         msg.userId = request.auth.credentials.user.rid;
@@ -301,12 +301,19 @@ export default [
             try {
                 console.log('****************** source queue ******************');
                 const service = services.getServiceAdapterByName(topic);
-                var msg = JSON.parse(JSON.stringify(request.payload));
-                var task_name = service.tasks[request.payload.task].name;
+                console.log('request.payload: ', request.payload);
+                console.log('service.tasks: ', service.tasks);
+                var task = JSON.parse(JSON.stringify(request.payload));
+                console.log('task: ', task);
+                var task_name = service.tasks[task.id].name;
                 console.log('task_name: ', task_name);
 
+                // we need to add source URL to task params
                 var source_metadata = await Graph.getUserFileMetadata(source_rid, request.auth.credentials.user.rid);
                 console.log('source_metadata: ', source_metadata);
+                const source_url = source_metadata.url;
+                console.log('source_url: ', source_url);
+                task.params.url = source_url;
 
                 const process_attrs = { label: topic, path:'' }
                 process_attrs.service = service.name
@@ -318,7 +325,7 @@ export default [
                 var process_rid = processNode['@rid']
                 await Graph.connect(source_rid, 'PROCESSED_BY', process_rid)
                 // create process directory
-                var process_path = path.join(source_metadata.path, 'process', media.rid2path(process_rid))
+                var process_path = path.join(source_metadata.path, 'process', media.rid2path(process_rid), 'files')
                 await media.createProcessDir(process_path)
                 await Graph.setNodeAttribute(process_rid, {'key':'path', 'value': process_path}, request.auth.credentials.user.rid)
                 await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(process_path)));
@@ -332,15 +339,15 @@ export default [
                 var wsdata = {command: 'add', type: 'process', target: source_rid, node:processNode, set_node:setNode, image:API_URL + 'icons/wait.gif'};
                 userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
-
-                msg.process = processNode;
-                msg.file = source_metadata;
-                msg.target = source_metadata['@rid'];
-                //msg.total_files = source_files.files.length;
-                msg.current_file = 1;
-                msg.userId = request.auth.credentials.user.rid;
-                msg.output_set = setNode['@rid'];  // link file to output Set
-                msg.source = source_metadata;
+                var msg = {
+                    process: processNode,
+                    task: task,
+                    file: source_metadata,
+                    target: source_metadata['@rid'],
+                    userId: request.auth.credentials.user.rid,
+                    output_set: setNode['@rid']  // link file to output Set
+                }
+                console.log('msg: ', msg);
                 nats.publish(topic + '_batch', JSON.stringify(msg));
 
                 return source_rid;

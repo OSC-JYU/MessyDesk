@@ -21,7 +21,7 @@
             "info": "JSON to CSV"
         },
         "json2text": {
-            "name": "Convert JSON to Text",
+            "name": "Convert OCR JSON to Text",
             "output": "many-to-one",
             "description": "Create text from OCR JSON files",
             "info": "JSON to Text",

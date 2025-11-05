@@ -172,7 +172,6 @@ media.createProcessDir = async function(process_path) {
 media.uploadFile = async function(uploadpath, filegraph) {
 
 
-	var file_rid = filegraph['@rid']
 	var filepath = filegraph.path.split('/').slice( 0, -1 ).join('/')
 
 	var filedata = null
@@ -183,14 +182,13 @@ media.uploadFile = async function(uploadpath, filegraph) {
 		var exists = await checkFileExists(filegraph.path)
 		if(!exists) {
 			await fse.move(uploadpath, filegraph.path);
+			const stats = await fse.stat(filegraph.path);
+			filedata = { size: Math.round(stats.size / 1024 / 1024 * 100) / 100 }; // size in MB, rounded to 2 decimals
 			if(filegraph.type == 'image') {
-				filedata = await this.getImageSize(filegraph.path)
+				const imageData = await this.getImageSize(filegraph.path);
+				filedata = { ...filedata, ...imageData };
 			}
-			console.log('File moved successfully!')
-			//ctx.body = 'done';
 		} else {
-
-			//await fs.unlink(uploadpath)
 			throw('file exists!')
 		}
 
@@ -215,15 +213,13 @@ media.replaceFile = async function(originalPath, filegraph) {
 media.getImageSize = async function(filepath) {
 	var filedata = {}
 	try {
-		var stats = await fse.stat(filepath)
 		const dimensions = sizeOf(filepath)
-		filedata.size = Math.round(stats.size / 1024 / 1024 * 100) / 100 
 		filedata.width = dimensions.width
 		filedata.height = dimensions.height
 		filedata.imgtype = dimensions.type
 		if(dimensions.orientation && dimensions.orientation !== 1) {
 			filedata.orientation = dimensions.orientation
-			// convert exif orientation to degrees needed
+			// convert exif orientation to degrees if needed
 			switch(dimensions.orientation) {
 				case 3:
 					filedata.rotate = 180

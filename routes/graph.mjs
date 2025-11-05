@@ -73,6 +73,7 @@ export default [
         handler: async (request) => {
             const result = await Graph.deleteNode(
                 Graph.sanitizeRID(request.params.rid),
+                request.auth.credentials.user.rid,
                 nats
             );
             console.log(result);
