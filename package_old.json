@@ -1,0 +1,41 @@
+{
+  "name": "MessyDesk",
+  "version": "0.1",
+  "description": "Desktop for digital humanities",
+  "main": "index.js",
+  "scripts": {
+    "test": "mocha --timeout 50000 --exit"
+  },
+  "author": "Ari Häyrinen",
+  "license": "ISC",
+  "dependencies": {
+    "@koa/bodyparser": "^5.1.1",
+    "@koa/multer": "^3.0.2",
+    "@koa/router": "^13.1.0",
+    "archiver": "^7.0.1",
+    "axios": "^1.7.8",
+    "exifr": "^7.1.3",
+    "flexsearch": "^0.7.21",
+    "fs-extra": "^11.1.1",
+    "got": "^14.4.5",
+    "image-size": "^1.1.1",
+    "json5": "^2.2.3",
+    "koa": "^2.15.3",
+    "koa-body": "^6.0.1",
+    "koa-easy-ws": "^2.1.0",
+    "koa-json": "^2.0.2",
+    "koa-static": "^5.0.0",
+    "nats": "^2.19.0",
+    "pdf2json": "^3.1.4",
+    "timers-promises": "^1.0.1",
+    "uuidv4": "^6.2.13",
+    "winston": "^3.5.0",
+    "winston-daily-rotate-file": "^4.6.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "chai": "^4.3.6",
+    "chai-http": "^4.3.0",
+    "mocha": "^10.8.2"
+  }
+}

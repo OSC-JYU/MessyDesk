@@ -1,20 +1,15 @@
 {
-    "url": "http://localhost:9000",
+    "local_url": "http://localhost:9000",
     "id": "md-imaginary",
-    "api_type": "imaginary",
-    "api": "/",
+    "adapter": "imaginary",
     "name" :"Imaginary",
+    "location": "on-premise",
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
     "source_url": "https://github.com/h2non/node-imaginary",
     
-    "supported_types": ["image","osd.json"],
+    "supported_types": ["image"],
     "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif"],
 
-
-    "params": {
-        "width": 200,
-        "height": 200
-    },
 
     "params_help": {
         "width": {
@@ -108,7 +103,6 @@
             "source":"source_file",
             "description": "Rotate image by angle given by orientation detection.",
             "supported_types": ["osd.json"],
-            "supported_formats": ["json"],
             "params": {},
             "params_help": {
             },
@@ -130,6 +124,32 @@
                 }
             },
             "info": "I blurred image by {{sigma}}. "
+        },
+
+        "convert": {
+            "name": "Convert",
+            "output": "image",
+            "description": "Convert image to other format",
+            "params": {
+                "type": "jpg",
+                "quality": 80
+            },
+            "params_help": {
+                "type": {
+                    "name": "format",
+                    "help": "Format to convert to",
+                    "default": "jpeg",
+                    "values":[{"title": "jpg", "value": "jpeg"}, {"title": "png", "value": "png"}, {"title": "webp", "value": "webp"}],
+                    "display": "dropdown"
+                },
+                "quality": {
+                    "name": "quality",
+                    "help": "Quality of the image (only for jpg and webp, 0-100)",
+                    "default": 80,
+                    "display": "textinput"
+                }
+            },
+            "info": "I converted image to {{type}}. JPEG quality is {{quality}}. "
         }
     }
 }

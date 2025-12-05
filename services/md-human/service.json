@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:8700",
+    "local_url": "http://localhost:8700",
     "id": "md-human",
     "type": "image",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"Human Library",
     

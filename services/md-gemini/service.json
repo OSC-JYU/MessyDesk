@@ -1,62 +1,59 @@
 {
 
-    "url": "",
+    "local_url": "",
     "id": "md-gemini",
     "type": "text",
-    "api_type": "elg",
-    "api": "/process",
+    "adapter": "gemini-ai",
     "location": "external",
-    "access": "commercial",
+    "access": "proprietary",
     "name" :"Google Gemini",
+    "source_url": "https://deepmind.google/models/gemini",
 
-    "supported_types": ["image"],
-    "supported_formats": ["jpg", "png", "jpeg"],
 
-    "description": "Gemini 2.0 Flash",
+    "description": "Google's cloud-based AI services.",
 
     "service_groups": ["GEMINI-AI","OSC"],
 
     "external_tasks": "prompts",
     "set_disabled": 1,
 
-    "params": {
 
+    "params": {
+        "temperature": 1.0,
+        "seed": 1.0
     },
 
-
-    "tasks": {
-        "summary": {
-            "name": "Write image caption",
-            "output": "text",
-            "description": "Write an image caption.",
-
-            "system_params": {
-                "prompts": 
-                    {"role": "system", "content": "Write short image caption."}
-                
-            }
+    "params_help": {
+        "temperature": {
+            "name": "temperature",
+            "default": 1.0,
+            "help": "Temperature of the model affects the creativity of the model. 0.0 is the most deterministic, 2.0 is the most creative.",
+            "display": "textinput"
         },
-        "academic_metadata": {
-            "name": "Write academic metadata",
+        "seed": {
+            "name": "seed",
+            "default": 0,
+            "help": "Seed ",
+            "display": "textinput"
+        }
+    },
+    "tasks": {},
+    "models": {
+        "gemini-2.0-flash": {
+            "name": "Gemini 2.0 Flash",
             "output": "text",
-            "description": "Write academic metadata.",
-
-            "system_params": {
-                "prompts": 
-                    {"role": "system", "content": "Extract academic metadata from the text. This includes title, authors, faculty and publication series."}
-                
-            }
+            "description": "Old model, not recommended for new tasks.",
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt", "tif", "tiff"],
+            "url": ""
         },
-        "descriptive_title": {
-            "name": "Write a descriptive title",
+        "gemini-2.5-flash": {
+            "name": "Gemini 2.5 Flash",
+            "description": "Our best model in terms of price-performance, offering well-rounded capabilities. 2.5 Flash is best for large scale processing, low-latency, high volume tasks that require thinking, and agentic use cases.",
             "output": "text",
-            "description": "Write a descriptive title of the text.",
-
-            "system_params": {
-                "prompts": 
-                    {"role": "system", "content": "Write a descriptive title of the text."}
-                
-            }
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt", "tif", "tiff"],
+            "url": ""
         }
     }
 }

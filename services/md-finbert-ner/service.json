@@ -1,13 +1,16 @@
 {
-    "url": "http://localhost:8600",
+    "local_url": "http://localhost:8600",
     "id": "md-finbert-ner",
     "type": "text",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"finbert-ner",
     "source_url": "https://huggingface.co/Kansallisarkisto/finbert-ner",
+    "auto-tagger": true,
+    "auto-tagger-label": "finbert",
+    "status": "experimental",
     
-    "supported_types": ["text"],
     "supported_formats": ["txt"],
 
     "description": "The model performs named entity recognition from text input in Finnish. ",

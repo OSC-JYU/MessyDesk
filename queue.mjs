@@ -4,10 +4,11 @@ import path from 'path';
 import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
 
-import Graph from './graph.js';
-import nomad from './nomad.js';
+import Graph from './graph.mjs';
+import nomad from './nomad.mjs';
+import media from './media.mjs';
 
-import { connect, RetentionPolicy, AckPolicy } from "nats";
+import { connect, RetentionPolicy, AckPolicy, JSONCodec } from "nats";
 
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
 const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
@@ -16,10 +17,11 @@ const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
 
 
-export let queue = {}
+const nats = {}
+const jc = JSONCodec();
 
 
-queue.init = async function(services) {
+nats.init = async function(services) {
   console.log('NATS: connecting...', NATS_URL)
   this.nc = await connect({
     servers: [NATS_URL],
@@ -33,19 +35,6 @@ queue.init = async function(services) {
   });
   console.log("NATS: created the 'PROCESS' stream");
 
-  try {  // SOLR has its own consumer
-    await this.jsm.consumers.add("PROCESS", {
-      durable_name: 'solr',
-      ack_policy: AckPolicy.Explicit,
-      filter_subject: `process.solr`,  
-    })
-    console.log('NATS: created default consumer solr')
-  } catch(e) {
-    console.log(e)
-    console.log('NATS ERROR: could not create SOLR consumer! exiting...')
-    //process.exit(1)
-  }
-
 
   // create consumers for all services
   console.log("NATS: creating consumers...")
@@ -54,6 +43,10 @@ queue.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
+        redeliver_policy: {
+          max_deliveries: 1,
+          interval: 100000,
+        },
         filter_subject: `process.${key}`,
     
       });
@@ -63,6 +56,10 @@ queue.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: batch,
         ack_policy: AckPolicy.Explicit,
+        redeliver_policy: {
+          max_deliveries: 2,
+          interval: 1000,
+        },
         filter_subject: `process.${batch}`,
     
       });
@@ -76,27 +73,47 @@ queue.init = async function(services) {
       process.exit(1)
     }
   }
+
+  // SYSTEM QUEUES
+  await this.jsm.streams.add({
+    name: "SYSTEM",
+    retention: RetentionPolicy.Workqueue,
+    subjects: ["system.>"],
+  });
+  console.log("NATS: created the 'SYSTEM' stream");
+
+  await this.jsm.consumers.add("SYSTEM", {
+    durable_name: 'arcadedb',
+    ack_policy: AckPolicy.Explicit,
+    redeliver_policy: {
+      max_deliveries: 2,
+      interval: 1000,
+    },
+    filter_subject: `system.arcadedb`,
+
+  });
+  console.log('NATS: created system.arcadedb consumer')
 }
 
-queue.connect = async function() {
+nats.connect = async function() {
   this.nc = await connect({
     servers: [servers],
   });
   this.js = this.nc.jetstream();
 }
 
-queue.close = async function() {
+nats.close = async function() {
   await this.nc.close()
 }
 
-queue.checkService = async function(data) {
+nats.checkService = async function(data) {
   // get service url from nomad
   const service = await nomad.getServiceURL(data)
   return service
 }
 
 
-queue.publish = async function(topic, data) {
+nats.publish = async function(topic, data) {
   console.log(topic)
   //var service = await services.getServiceAdapterByName(topic)
   try {
@@ -114,7 +131,7 @@ queue.publish = async function(topic, data) {
 }
 
 
-queue.listConsumers = async function() {
+nats.listConsumers = async function() {
   var consumers = []
   var lister = await this.jsm.consumers.list("PROCESS")
   for await (const item of lister) {
@@ -124,7 +141,7 @@ queue.listConsumers = async function() {
 }
 
 
-queue.getFilesFromStore = async function(response, message, service) {
+nats.getFilesFromStore = async function(response, message, service) {
 
   if(response.uri) {
  
@@ -146,7 +163,7 @@ queue.getFilesFromStore = async function(response, message, service) {
 
 
 
-queue.downLoadFile = async function(message, uri, service) {
+nats.downLoadFile = async function(message, uri, service) {
   // get file type from extension
   var ext = path.extname(uri).replace('.', '')
   var filename = uri.split('/').pop()
@@ -204,7 +221,7 @@ queue.downLoadFile = async function(message, uri, service) {
   }
 }
 
-queue.getQueueStatus = async function(topic) {
+nats.getQueueStatus = async function(topic) {
   try {
     const url = NATS_URL_STATUS + '/jsz?consumers=true'
     const queues = {}
@@ -224,3 +241,189 @@ queue.getQueueStatus = async function(topic) {
     console.log('Queue status failed!')
   }
 }
+
+
+
+nats.drainQueue = async function (topic, process_rid) {
+  console.log('draining topic: ', topic)
+  console.log('  process_rid: ', process_rid)
+  let count = 0;
+  try {
+    // Find the stream for this topic
+    const streamName = await this.jsm.streams.find(`process.${topic}`);
+    const info = await this.jsm.streams.info(streamName);
+    const { first_seq, last_seq } = info.state;
+
+
+    for (let seq = last_seq; seq >= first_seq; seq--) {
+      let msg;
+      try {
+        msg = await this.jsm.streams.getMessage(streamName, { seq });
+        //await this.jsm.streams.deleteMessage(streamName, seq);
+      } catch (err) {
+        // if (!/message not found/i.test(err.message)) {
+        //   console.warn(`Skipping seq=${seq}: ${err.message}`);
+        // }
+        // stop after first already deleted
+        console.log('message not found!')
+         continue;
+      }
+
+      // Parse JSON payload
+      let payload, message;
+      try {
+        payload = msg.json();
+        try {
+          message = JSON.parse(payload);
+          console.log(message)
+          // Match and delete
+          if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
+            await this.jsm.streams.deleteMessage(streamName, seq);
+            count++;
+          }
+        } catch {
+          console.warn(`Invalid JSON seq=${seq}`);
+          continue;
+        }
+      } catch {
+
+      }
+
+
+    }
+    console.log('deleted messages: ', count)
+    return count;
+  } catch (err) {
+    console.error("drainQueue error:", err);
+    return 0;
+  }
+};
+
+
+// Queue draining
+nats.drainQueue_old = async function(topic, process_rid) {
+
+  // find a stream that stores a specific subject:
+  const name = await this.jsm.streams.find("process." + topic);
+  console.log(name)
+  // retrieve info about the stream by its name
+  const si = await this.jsm.streams.info(name);
+  console.log(si)
+  const seq = si.state.first_seq
+  var last_seq = si.state.last_seq
+
+  try {
+    for(var i = last_seq; i >= seq; i--) {
+      let payload, data
+      const message = await this.jsm.streams.getMessage(name, { seq: i });
+
+      try {
+        payload = message.json()
+        data = JSON.parse(payload)
+        console.log(data)
+      } catch (e) {
+        console.log('invalid message payload!', e.message)
+      }
+
+      await this.jsm.streams.deleteMessage(name, i);
+      //console.log(sm);
+    }
+
+  } catch(e) {
+    console.log(e.message)
+  }
+
+  //  await this.jsm.streams.purge("SYSTEM");
+  return true
+ 
+
+
+  // const co = await js.consumers.get("SYSTEM", "arcadedb");
+  // if (co) {
+  //   let messages = await co.fetch({ max_messages: 4, expires: 2000 });
+  //   for await (const m of messages) {
+  //     m.ack();
+  //   }
+  //   //co.stop();
+  //   await nc.close();
+  //   console.log(`batch completed: ${messages.getProcessed()} msgs processed`);
+  //   return true
+    
+  // }
+}
+
+
+
+// Database writing queue
+
+
+nats.writeToDB = async function(query, params) {
+  try {
+    const json = JSON.stringify({query: query, params: params})
+    await this.js.publish("system.arcadedb", jc.encode(json))
+  } catch(e) {
+    console.log('ERROR:', e.message)
+  }
+}
+
+nats.createSetProcessNodesAndPublish = function(msg) {
+  console.log('creating set process nodes and publishing...')
+
+  try {
+    const json = JSON.stringify({topic: 'create_and_publish', value: msg})
+    this.js.publish("system.arcadedb", jc.encode(json))
+  } catch(e) {
+    console.log('ERROR:', e.message)
+  }
+}
+
+nats.listenDBQueue = async function(topic) {
+  console.log('connecting to DB queue...')
+  const nc = await connect({servers: NATS_URL});
+  const js = nc.jetstream();  
+  console.log('connected to DB queue!')
+ 
+
+
+  const co = await js.consumers.get("SYSTEM", "arcadedb");
+  if (co) {
+      const messages = await co.consume({ max_messages: 1 });
+      for await (const m of messages) {
+          try {
+            var payload = m.json()
+            var msg_data = JSON.parse(payload)
+            var msg = msg_data.value
+            //console.log(data)
+
+            // CREATE AND PUBLISH
+            if(msg_data.topic == 'create_and_publish') {
+              console.log('creating and publishing received...', msg.current_file)
+              // Add 500ms delay
+             // await new Promise(resolve => setTimeout(resolve, 500));
+             //var msg_copy = structuredClone(msg)
+             //if(msg_copy.system_params) delete msg_copy.system_params.json_schema
+             //if(msg_copy?.params?.json_schema) delete msg_copy.params.json_schema
+              var processNode = await Graph.createProcessNode_queue(msg);
+              await media.createProcessDir(processNode.path);
+              //delete data.service.tasks
+              await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
+              //console.log(data)
+              msg.process = processNode
+              
+              console.log('message', msg)
+              nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
+              // we call database writes here and then we publish the message to actual processing queue
+            } else {
+              console.log('no topic defined!')
+            }
+            m.ack();
+          } catch(e) {
+              console.log('ERROR:', e.message)
+              // we do not retry, so we ack
+              m.ack();
+          }
+      } 
+  }
+}
+
+export default nats

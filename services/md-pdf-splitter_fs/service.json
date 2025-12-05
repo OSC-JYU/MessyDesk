@@ -1,0 +1,14 @@
+{
+    "local_url": "http://localhost:9002",
+    "id": "md-pdf-splitter_fs",
+    "type": "pdf",
+    "api_type": "elg",
+    "adapter": "elg_fs",
+    "api": "/process",
+    "name" :"PDF Splitter",
+    
+    "supported_types": [],
+    "supported_formats": [],
+    "description": "internal PDF Splitter",
+    "tasks": {}
+}

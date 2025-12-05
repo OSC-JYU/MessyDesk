@@ -1,0 +1,155 @@
+{
+    "local_url": "http://localhost:10001",
+    "id": "md-pillow_fs",
+    "adapter": "pillow_fs",
+    "name" :"Pillow Image Processor",
+    "location": "on-premise",
+    "description": "Pillow is a Python library that provides a wide range of image processing capabilities.",
+    "source_url": "https://github.com/python-pillow/Pillow",
+    
+    "supported_types": ["image"],
+    "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif", "pdf"],
+
+
+    "params_help": {
+        "width": {
+            "name": "width",
+            "default": 200,
+            "help": "Width of the image in pixels",
+            "display": "textinput"
+        },
+        "height": {
+            "name": "height",
+            "default": 200,
+            "help": "Height of the image in pixels",
+            "display": "textinput"
+        }
+    },
+
+    "tasks": {
+        "extract": {
+            "filter": "ROI",
+            "name": "Extract",
+            "output": "image",
+            "description": "Create images based on Regions of Interest (ROI).",
+            "info": "I extracted images based on your selections.",
+            "roi_params": { 
+                "top": 0,
+                "left": 0,
+                "areawidth": 0,
+                "areaheight": 0
+            },
+
+            "params": {                
+                "_create_set": {
+                    "name": "Create Set",
+                    "help": "Create new Set and place extracted images in it.",
+                    "display": "checkbox"
+            }},
+            "params_help": {}
+        },
+        "resize": {
+            "name": "Resize by width",
+            "output": "image",
+            "description": "Resize image.",
+            "params": {"width": 400},
+            "params_help": {
+                "width": {
+                    "name": "Image width in pixels",
+                    "help": "How much image is resized."
+                }
+            }
+        },
+        "fit": {
+            "name": "Resize",
+            "output": "image",
+            "description": "Resize image."
+        },
+
+        "flip": {
+            "name": "Flip",
+            "output": "image",
+            "description": "Flip image.",
+            "params": {},
+            "params_help": {},
+            "info": "I flipped image"
+        },
+
+
+
+        "rotate": {
+            "name": "Rotate",
+            "output": "image",
+            "description": "Rotate image by given angle.",
+            "params": {
+                "rotate": 90
+            },
+            "params_help": {
+                "rotate": {
+                    "name": "rotate angle (90, 180, 270)",
+                    "help": "How much image is rotated.",
+                    "default": 90,
+                    "values":[{"title": "90", "value": 90}, {"title": "180", "value": 180}, {"title": "-90", "value": 270}],
+                    "display": "dropdown"
+                }
+            },
+            "info": "I rotated image {{rotate}} degrees"
+           
+        },
+
+        "OSD_rotate": {
+            "name": "Auto-rotate (OSD)",
+            "output": "image",
+            "source":"source_file",
+            "description": "Rotate image by angle given by orientation detection.",
+            "supported_types": ["osd.json"],
+            "params": {},
+            "params_help": {
+            },
+            "info": "I rotated image based on orientation detection."
+        },
+
+        "blur": {
+            "name": "Blur",
+            "output": "image",
+            "description": "Blur image",
+            "params": {
+                "sigma": 2
+            },
+            "params_help": {
+                "sigma": {
+                    "name": "sigma",
+                    "help": "How much image is blurred. Note that sigma is absolute value, not a percentage. This means that same sigma value blurs small image more than large image.",
+                    "default": 2
+                }
+            },
+            "info": "I blurred image by {{sigma}}. "
+        },
+
+        "convert": {
+            "name": "Convert",
+            "output": "image",
+            "description": "Convert image to other format",
+            "params": {
+                "type": "jpg",
+                "quality": 80
+            },
+            "params_help": {
+                "type": {
+                    "name": "format",
+                    "help": "Format to convert to",
+                    "default": "jpeg",
+                    "values":[{"title": "jpg", "value": "jpeg"}, {"title": "png", "value": "png"}, {"title": "webp", "value": "webp"}],
+                    "display": "dropdown"
+                },
+                "quality": {
+                    "name": "quality",
+                    "help": "Quality of the image (only for jpg and webp, 0-100)",
+                    "default": 80,
+                    "display": "textinput"
+                }
+            },
+            "info": "I converted image to {{type}}. JPEG quality is {{quality}}. "
+        }
+    }
+}

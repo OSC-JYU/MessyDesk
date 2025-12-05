@@ -1,12 +1,14 @@
 {
-    "url": "http://localhost:8800",
+    "local_url": "http://localhost:8800",
     "id": "md-paddleocr-fin",
     "type": "image",
     "api_type": "paddleocr",
+    "adapter": "paddleocr",
     "api": "/predict",
     "name" :"paddleocr-fin",
     "source_url": "https://github.com/project-AIDA/Finnish_PaddleOCR",
-    
+    "status": "experimental",
+
     "supported_types": ["image"],
     "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif"],
 

@@ -1,0 +1,89 @@
+{
+    "local_url": "http://localhost:9008",
+    "id": "md-python4text",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"Python for Text",
+    "source_url": "https://github.com/MD-python4text",
+    "status": "experimental",
+    "supported_formats": ["txt"],
+    "supported_types": [],
+
+    "description": "Simple Python scripts for text processing.",
+
+
+    "tasks": {
+        "wordcloud": {
+            "name": "Create Wordcloud",
+            "description": "Create wordcloud from text",
+            "info": "Wordcloud"
+        },
+
+        "remove_stop_words": {
+            "name": "Remove Stop Words",
+            "description": "Remove stop words from text",
+            "info": "Remove Stop Words",
+            "params": {
+                "language": {
+                    "type": "string",
+                    "description": "Language of the text",
+                    "default": "en"
+                }
+            },
+            "params_help": {
+                "language": {
+                    "name": "language",
+                    "help": "Define the language of the text",
+                    "values": [
+                        {"value":"en", "title":"English"},
+                        {"value":"fi", "title":"Finnish"},
+                        {"value":"sv", "title":"Swedish"}
+                    ],
+                    "display":"dropdown"
+                }
+            }
+        },
+
+        "split_text": {
+            "name": "Split Text",
+            "description": "Split text into chunks",
+            "info": "Split Text",
+            "output_set": "Text chunks",
+            "params": {
+                "chunk_size": {
+                    "type": "integer",
+                    "description": "Chunk size",
+                    "default": 1000
+                }
+            },
+            "params_help": {
+                "chunk_size": {
+                    "name": "chunk_size",
+                    "description": "Chunk size",
+                    "display": "textinput"
+                }
+            }
+        },
+
+        "join_text": {
+            "name": "Join texts",
+            "description": "Join texts into one text",
+            "info": "Join Text",
+            "params": {
+                "separator": {
+                    "type": "string",
+                    "description": "Separator",
+                    "default": "\n"
+                }
+            },
+            "params_help": {
+                "separator": {
+                    "name": "separator",
+                    "description": "Separator",
+                    "display": "textinput"
+                }
+            }
+        }
+    }
+}

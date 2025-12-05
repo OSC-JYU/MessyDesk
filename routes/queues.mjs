@@ -1,0 +1,361 @@
+import { v4 as uuidv4 } from 'uuid';
+
+import Graph from '../graph.mjs';
+import services from '../services.mjs';
+import nats from '../queue.mjs';
+import userManager from '../userManager.mjs';
+import media from '../media.mjs';
+import path from 'path';
+import { API_URL } from '../env.mjs';
+
+
+export default [
+    // pipeline
+    {
+        method: 'POST',
+        path: '/api/pipeline/files/{file_rid}/{roi?}',
+        handler: async (request) => {
+            const clean_rid = Graph.sanitizeRID(request.params.file_rid);
+            var clean_roi = '';
+            if(request.params.roi) clean_roi = Graph.sanitizeRID(request.params.roi);
+            let messages = [];
+            
+            var pipelineLines = await Graph.createRequestsFromPipeline(request.payload, clean_rid, clean_roi);
+            
+            for(var line of pipelineLines) {
+                var service = services.getServiceAdapterByName(line.params.topic);
+                messages = await Graph.createQueueMessages(service, line.payload, request.params.file_rid, request.auth.credentials.user.rid );
+                for(var msg of messages) {
+                    nats.publish(line.params.topic, JSON.stringify(msg));
+                }
+            }
+            return messages;
+        }
+    },
+
+    {
+        method: 'GET', 
+        path: '/api/queue/{topic}/drain/{process_rid?}',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            console.log('process_rid: ', process_rid);
+            const status = await nats.drainQueue(topic, process_rid);
+            var wsdata = {
+                command: 'process_finished',
+                process: { '@rid': process_rid, status: 'finished'}
+            }
+            userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+            return status;
+        }
+    },
+
+
+    {
+        method: 'GET', 
+        path: '/api/queue/{topic}/status',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const status = await nats.getQueueStatus(topic);
+            return status;
+        }
+    },
+
+
+    {
+        method: 'GET', 
+        path: '/api/queue/{topic}/flush',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const status = await nats.flushQueue(topic);
+            return status;
+        }
+    },
+
+
+    // single queue
+    {
+        method: 'POST',
+        path: '/api/queue/{topic}/files/{file_rid}/{roi?}',
+        handler: async (request) => {
+            try {
+                const topic = request.params.topic;
+                const service = services.getServiceAdapterByName(topic);
+                var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.rid, request.params.roi);
+                const queue = Graph.getQueueName(service, request.payload, topic);
+                console.log('messages: ', messages);
+
+
+                // add Process node to UI
+                if(messages.length > 0) {
+                    var msg = messages[0];
+                    if(request.params.roi) {
+                        var wsdata = {command: 'add', type: 'process', input: msg.file['@rid'], node:msg.process};
+                    } else {
+                        var wsdata = {command: 'add', type: 'process', input: msg.file['@rid'], node:msg.process};
+                    }
+                    // there is output Set node (one-to-many), then add it too to UI
+                    if(msg.set_node) {
+                        wsdata.output = msg.set_node;
+                        wsdata.set_process = msg.process['@rid'];
+                    }
+                    userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+                }
+
+                for(var msg of messages) {    
+                    // send message to queue
+                    nats.publish(queue, JSON.stringify(msg));
+                }
+
+                return request.params.file_rid;
+
+            } catch(e) {
+                console.log('Queue failed!', e);
+                throw e;
+            }
+        }
+    },
+    
+    // set queue
+    {
+        method: 'POST',
+        path: '/api/queue/{topic}/sets/{set_rid}',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const set_rid = Graph.sanitizeRID(request.params.set_rid);
+            try {
+                console.log('****************** set queue ******************');
+                const service = services.getServiceAdapterByName(topic);
+                console.log('request.payload: ', request.payload);
+                console.log('service.tasks: ', service.tasks);
+                var task = JSON.parse(JSON.stringify(request.payload));
+                if(!service.external_tasks && !service.tasks[task.id]) {
+                    throw new Error('Task not found in service')
+                }
+                
+                if(service.external_tasks) {
+                    task.name = task.name;
+                } else {
+                    task.name = service.tasks[task.id].name;
+                }
+                var msg = {task: task}
+                var task_name = '';
+               // var task_output = 'file';
+                // LLM services have tasks defined in prompts
+                if(service.external_tasks) {
+                    msg.external = 'yes'
+                    msg.task.params = task.system_params
+                    // add model information if service has models
+                    if(service.models && task.model) {
+                        // task.model could be either a string ID or the entire model object
+                        let modelId = typeof task.model === 'string' ? task.model : task.model.id
+                        if(modelId && service.models[modelId]) {
+                            msg.task.model = structuredClone(service.models[modelId])
+                            msg.task.model.id = modelId
+                        }
+                    }
+                } 
+
+
+
+                // if(service.tasks[task.id].output) {
+                //     task_output = service.tasks[task.id].output;
+                // }
+
+                var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
+                console.log('set_metadata: ', set_metadata);
+
+                var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit: 10000});
+
+            
+
+                // in many-to-one outputs we do not create process nodes for each file 
+                if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
+                    var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
+                    // add node to UI
+                    var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode};
+                    userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+
+                    var file_count = 1;
+                    const output_uuid = uuidv4()
+                    for(var file of set_files.files) {
+                        var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+
+                        // do we need info about "parent" file? (when processing osd.json for example)
+                        if(service.tasks[task.id]?.source == 'source_file') {
+                            const source = await Graph.getFileSource(file['@rid']);
+                            console.log('source: ', source);
+                            if(source) {
+                                const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                                msg.source = source_metadata;
+                            }
+                        }
+
+                        await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
+
+                        msg.process = processNode;
+                        msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
+                        msg.output = service.tasks[task.id].output
+                        msg.file = file;
+                        msg.set_process = processNode['@rid'];
+                        msg.total_files = set_files.files.length;
+                        msg.current_file = file_count;
+                        msg.userId = request.auth.credentials.user.rid;
+                        nats.publish(topic + '_batch', JSON.stringify(msg));
+
+                        file_count += 1;
+                    }
+
+
+                // normal "set to set" output
+                } else {
+                    console.log('Creating set and process nodes');
+                    var nodes = await Graph.createSetAndProcessNodes(service, task, set_metadata, request.auth.credentials.user.rid);
+                    // add nodes (Process and Set) to UI
+                    console.log('nodes: ', nodes);
+                    var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
+                    userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+                    
+                    var file_count = 1;
+                    for(var file of set_files.files) {
+                        var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+
+                        var msg = {
+                            service: service,
+                            task: task,
+                            file: file_metadata,
+                            set_process: nodes.process['@rid'],
+                            process: null,   // process node will be created in the queue
+                            output_set: nodes.set['@rid'],
+                            total_files: set_files.files.length,
+                            current_file: file_count,
+                            userId: request.auth.credentials.user.rid
+                        }
+                        nats.createSetProcessNodesAndPublish(msg)
+                        file_count += 1;
+                    }
+                    // for(var file of set_files.files) {
+                    //     //console.log('PROCESS TRANSACTION: ', file_count, file['@rid']);
+                    //     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+                    //     //const tid = await Graph.startTransaction()
+                    //     var processNode = await Graph.createProcessNode(task_name, service, request.payload, file_metadata, request.auth.credentials.user.rid, set_rid, nodes.process['@rid']);
+                    //     //await Graph.commitTransaction(tid)
+                    //    // console.log('PROCESS TRANSACTION COMMITTED: ', file_count, file['@rid']);
+                    //     file_count += 1;
+                    // }
+                    console.log('All files processed: ', file_count);
+                    
+                    //var file_count = 1;
+                    // for(var file of set_files.files) {
+
+                    //     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+                    //     console.log(file_metadata);
+                    //     var processNode = await Graph.createProcessNode(task_name, service, request.payload, file_metadata, request.auth.credentials.user.rid, set_rid, nodes.process['@rid']);
+                    //     await media.createProcessDir(processNode.path);
+
+                    //     // do we need info about "parent" file? (when processing osd.json for example)
+                    //     if(service.tasks[request.payload.task]?.source == 'source_file') {
+                    //         const source = await Graph.getFileSource(file['@rid']);
+                    //         console.log('source: ', source);
+                    //         if(source) {
+                    //             const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                    //             msg.source = source_metadata;
+                    //         }
+                    //     }
+
+                    //     await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
+
+                    //     msg.process = processNode;
+                    //     msg.file = file_metadata;
+                    //     msg.target = file_metadata['@rid'];
+                    //     msg.total_files = set_files.files.length;
+                    //     msg.current_file = file_count;
+                    //     msg.userId = request.auth.credentials.user.rid;
+                    //     if(task_output !== 'always file') {
+                    //         msg.output_set = nodes.set['@rid'];  // link file to output Set
+                    //     }
+                    //     nats.publish(topic + '_batch', JSON.stringify(msg));
+
+                    //     file_count += 1;
+                    // }
+
+                }
+
+
+                return set_rid;
+
+            } catch(e) {
+                console.log('Queue failed!', e);
+                throw e;
+            }
+        }
+    },
+
+    // source queue
+    {
+        method: 'POST',
+        path: '/api/queue/{topic}/sources/{source_rid}',
+        handler: async (request) => {
+            const topic = request.params.topic;
+            const source_rid = Graph.sanitizeRID(request.params.source_rid);
+            try {
+                console.log('****************** source queue ******************');
+                const service = services.getServiceAdapterByName(topic);
+                console.log('request.payload: ', request.payload);
+                console.log('service.tasks: ', service.tasks);
+                var task = JSON.parse(JSON.stringify(request.payload));
+                console.log('task: ', task);
+                var task_name = service.tasks[task.id].name;
+                console.log('task_name: ', task_name);
+
+                // we need to add source URL to task params
+                var source_metadata = await Graph.getUserFileMetadata(source_rid, request.auth.credentials.user.rid);
+                console.log('source_metadata: ', source_metadata);
+                const source_url = source_metadata.url;
+                console.log('source_url: ', source_url);
+                task.params.url = source_url;
+
+                const process_attrs = { label: topic, path:'' }
+                process_attrs.service = service.name
+                if(request.payload.info) {
+                    process_attrs.info = request.payload.info
+                }
+
+                var processNode = await Graph.create('Process', process_attrs)
+                var process_rid = processNode['@rid']
+                await Graph.connect(source_rid, 'PROCESSED_BY', process_rid)
+                // create process directory
+                var process_path = path.join(source_metadata.path, 'process', media.rid2path(process_rid), 'files')
+                await media.createProcessDir(process_path)
+                await Graph.setNodeAttribute(process_rid, {'key':'path', 'value': process_path}, request.auth.credentials.user.rid)
+                await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(process_path)));
+
+                // create output Set
+                var setNode = await Graph.create('Set', {path: process_path})
+                 // and link it to SetProcess
+                await Graph.connect(process_rid, 'PRODUCED', setNode['@rid'])
+
+                // add node to UI
+                var wsdata = {command: 'add', type: 'process', target: source_rid, node:processNode, set_node:setNode, image:API_URL + 'icons/wait.gif'};
+                userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+
+                var msg = {
+                    process: processNode,
+                    task: task,
+                    file: source_metadata,
+                    target: source_metadata['@rid'],
+                    userId: request.auth.credentials.user.rid,
+                    output_set: setNode['@rid']  // link file to output Set
+                }
+                console.log('msg: ', msg);
+                nats.publish(topic + '_batch', JSON.stringify(msg));
+
+                return source_rid;
+
+            } catch(e) {
+                console.log('Queue failed!', e);
+                throw e;
+            }
+        }
+    }
+];

@@ -1,16 +1,13 @@
 {
 
-    "url": "",
+    "local_url": "",
     "id": "md-azure-ai",
     "type": "text",
-    "api_type": "elg",
-    "api": "/process",
-    "location": "external",
-    "access": "commercial",
+    "adapter": "azure-ai",
+    "location": "on-premise",
+    "access": "proprietary",
     "name" :"Azure AI",
-
-    "supported_types": ["text", "image"],
-    "supported_formats": ["txt", "png", "jpg", "jpeg"],
+    "source_url": "https://learn.microsoft.com/en-us/azure/ai-services/openai/reference",
 
     "description": "Azure OpenAI Service provides advanced AI models for conversational, content creation, and data grounding use cases.",
 
@@ -18,44 +15,17 @@
 
     "external_tasks": "prompts",
 
-    "params": {
-
-    },
-
-
-    "tasks": {
-        "discpiline_info": {
-            "name": "Etsi väitöskirjan tiedot",
-            "output": "json",
-            "description": "Yrittää löytää väitöskirjan tiedot teoksen tekstistä. Anna tekstinä kolme ensimmäistä sivua.",
-
-            "system_params": {
-                "prompts": [
-                    {"role": "system", "content": "Extract following information from text. \n - title\n - author\n - faculty\n - ISBN\n Give result as JSON file in following format: \n { \"title\": \"\", \"author\": \"\", \"faculty\": \"\" }"}
-                ]
-            }
-        },
-        "summary": {
-            "name": "Write a short summary",
+    "params": {},
+    "tasks": {},
+    "models": {
+        "gpt-4o": {
+            "name": "GPT-4o",
+            "version": "2025-01-01-preview",
+            "description": "gpt-4o is engineered for speed and efficiency. Its advanced ability to handle complex queries with minimal resources can translate into cost savings and performance.",
             "output": "text",
-            "description": "Write a short summary of the text.",
-
-            "system_params": {
-                "prompts": [
-                    {"role": "system", "content": "Write a short summary from text."}
-                ]
-            }
-        },
-        "descriptive_title": {
-            "name": "Write a descriptive title",
-            "output": "text",
-            "description": "Write a descriptive title of the text.",
-
-            "system_params": {
-                "prompts": [
-                    {"role": "system", "content": "Write a descriptive title of the text."}
-                ]
-            }
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "url": "https://osc-gpt.cognitiveservices.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview"
         }
     }
 }

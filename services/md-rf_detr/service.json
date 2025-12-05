@@ -1,0 +1,22 @@
+{
+    "local_url": "http://localhost:9011",
+    "id": "md-rf_detr",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"RF-DETR models",
+    "source_url": "https://github.com/Kansallisarkisto-AI/rfdetr_trocr_pipeline",
+    "status": "experimental",
+
+    "description": "Experimental API for RF-DETR models running on MessyDesk",
+
+
+    "tasks": {
+        "line_segmentation": {
+            "name": "Line segmentation",
+            "description": "Line segmentation is a method for segmenting lines from an image.",
+            "info": "Line segmentation",
+            "supported_formats": ["jpeg", "png", "tiff", "webp", "jpg"]
+        }
+    }
+}

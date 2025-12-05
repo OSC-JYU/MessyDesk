@@ -1,0 +1,26 @@
+{
+    "local_url": "http://localhost:9004",
+    "id": "md-zip_fs",
+    "type": "zip",
+    "api_type": "elg",
+    "adapter": "elg_fs",
+    "api": "/process",
+    "name" :"Zip",
+    
+    "supported_types": ["zip"],
+    "supported_formats": ["zip"],
+
+    "description": "zip file operations",
+
+
+
+    "tasks": {
+        "unzip": {
+            "params": {"task":"unzip"},
+            "output": "set",
+            "output_set": "Files from zip",
+            "name": "Unzip",
+            "description": "Unzip a zip file."
+        }
+    }
+}

@@ -1,6 +1,12 @@
 
 TODO
 
+- FIX queus for large sets. Database writes now cause problems.
+https://github.com/ArcadeData/arcadedb/discussions/475
+
+
+
+
 - NER objects to search
 - user management OK (initial, no research groups yet)
 

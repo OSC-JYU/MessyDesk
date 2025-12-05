@@ -1,8 +1,9 @@
 {
-    "url": "http://localhost:8400",
+    "local_url": "http://localhost:8400",
     "id": "md-tesseract",
     "type": "image",
     "api_type": "elg",
+    "adapter": "elg",
     "api": "/process",
     "name" :"Tesseract",
     "source_url": "https://tesseract-ocr.github.io/tessdoc/",

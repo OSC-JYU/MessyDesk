@@ -1,7 +1,8 @@
 {
-    "url": "http://localhost:9000",
+    "local_url": "http://localhost:9000",
     "id": "md-thumbnailer",
     "api_type": "thumbnail",
+    "adapter": "imaginary",
     "api": "/",
     "name" :"Imaginary",
     "description": "Supports multiple image operations such as resize, crop, zoom, watermark, rotate... and both local and remote URL based image source processing, and additionally provides a simple balancing feature to use multiple imaginary servers.",
