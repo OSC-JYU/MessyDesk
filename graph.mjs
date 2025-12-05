@@ -660,10 +660,15 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 
 	// pdfs are splitted so we give each page its own message
 	if(node_metadata.type == 'pdf') {
+		console.log('PDF: ', node_metadata)
 		msg.pdf = true
 		const first = parseInt(task.params.firstPageToConvert)
 		var last = parseInt(task.params.lastPageToConvert)
 		if(isNaN(first)) first = 0
+		console.log('TASK: ', task)
+		console.log('TASK PARAMS: ', task.params)
+		console.log('FIRST: ', first)
+		console.log('LAST: ', last)
 		
 		if(node_metadata?.metadata?.page_count) {
 			if(isNaN(last)) last = node_metadata.metadata.page_count
@@ -943,14 +948,23 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 
 graph.createErrorNode = async function (error, message, data_dir) {
 
+	if(!message || !message.file) {
+		console.log('Message or file not found')
+		throw new Error('Message or file not found')
+	}
 	const label = message.file.label
 	const description = error.code || 'unknown'
 	const info = error.message || 'There was an error processing your file.'
 
-	const process_rid = message.process['@rid']
-	const path_query = `SELECT path FROM ${process_rid}`
-	const path_response = await db.sql(path_query)
-	const process_path = path_response.result[0].path
+	if(message.process) {
+		const process_rid = message.process['@rid']
+		const path_query = `SELECT path FROM ${process_rid}`
+		const path_response = await db.sql(path_query)
+		const process_path = path_response.result[0].path
+	} else {
+		console.log('Process not found in message')
+		throw new Error('Process not found in message')
+	}
 
 	const vertex_params = {
 		type: "error.json",

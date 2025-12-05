@@ -1,15 +1,13 @@
 {
-    "local_url": "http://localhost:9100",
+    "local_url": "http://localhost:9012",
     "id": "md-trocr",
-    "type": "pdf",
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
     "name" :"TROCR",
     
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg", "jpeg"],
-    "set_disabled": 1,
+
+    "set_disabled": 0,
 
     "description": "TROCR is a library for Optical Character Recognition. It is a deep learning model that can be used to extract text from images.",
 
@@ -20,7 +18,8 @@
             "output": "store",
             "name": "Extract hand written text from image",
             "description": "This will extract text from hand written image and output a .txt file. ",
-            "info": "Text from image"
+            "info": "Text from image",
+            "supported_types": ["polygons.json"]
         }
  
     }

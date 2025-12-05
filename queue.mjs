@@ -44,8 +44,8 @@ nats.init = async function(services) {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
         redeliver_policy: {
-          max_deliveries: 3,
-          interval: 1000,
+          max_deliveries: 1,
+          interval: 100000,
         },
         filter_subject: `process.${key}`,
     

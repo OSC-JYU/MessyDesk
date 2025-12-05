@@ -1,0 +1,49 @@
+{
+    "local_url": "http://localhost:9010",
+    "id": "md-faiss",
+    "type": "text",
+    "adapter": "elg",
+    "api": "/api",
+    "name" :"FAISS",
+    "source_url": "https://github.com/facebookresearch/faiss",
+    "status": "experimental",
+
+    "description": "FAISS is a library for efficient similarity search and clustering of dense vectors.",
+
+
+    "tasks": {
+        "semantic_index": {
+            "name": "Semantic Index",
+            "output": "many-to-one",
+            "description": "Create a semantic index for the text using EmbeddingGemma and FAISS.",
+            "info": "Semantic Index",
+            "supported_formats": ["txt"]
+        },
+        "similarity": {
+            "name": "Similarity Index",
+            "description": "Build Similarity Index is a method for building a similarity index for a document.",
+            "info": "Similarity Index allows to find similar documents in a corpus.",
+            "supported_formats": ["txt"]
+        },
+        "similarity_query": {
+            "name": "Query Similarity Index",
+            "description": "Query Similarity Index is a method for querying a similarity index for a document.",
+            "info": "Query Similarity Index",
+            "source": "source_file",
+            "params": {
+                "query": {
+                    "type": "string",
+                    "description": "Text to search for."
+                }
+            },
+            "params_help": {
+                "query": {
+                    "name": "query text",
+                    "description": "Text to search for.",
+                    "display": "textarea"
+                }
+            },
+            "supported_formats": ["tar"]
+        }
+    }
+}

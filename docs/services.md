@@ -4,7 +4,7 @@ Services do the actual work. They are separate applications running outside Mess
 
 
 
-## How MessyDesk what services are available?
+## How MessyDesk knows what services are available?
 
 Services are defined in services directory with json files. These files tell the name of the service and what crunchers (tasks) there are. They also define what adapter must be used (adapters are MD-consumers) and there is also information what files are supported for each crunchers.
 
