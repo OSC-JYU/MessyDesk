@@ -8,7 +8,7 @@ sudo systemctl start podman.socket
 sudo nomad agent -dev -plugin-dir=/opt/nomad/plugins -config=/etc/nomad.d
 
 terminal 3:
-MODE=development DB_PASSWORD=node_master PODMAN=true nodemon index.js
+MODE=development DB_PASSWORD=node_master PODMAN=true NOMAD=true nodemon index.js
 
 terminal 4:
 cd MessyDesk-UI
