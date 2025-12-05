@@ -202,14 +202,14 @@ console.log('filetype', file_type);
         path: '/api/documents/{rid}',
         handler: async (request, h) => {
             const clean_rid = Graph.sanitizeRID(request.params.rid);
-            const n = await Graph.getNodeAttributes(clean_rid);
+            const n = await Graph.getNodeAttributes(clean_rid, request.auth.credentials.user.rid);
             const entities = await Graph.getLinkedEntities(clean_rid, request.auth.credentials.user.rid);
             const rois = await Graph.getROIs(clean_rid);
 
-            if (n.result && n.result.length) {
-                n.result[0].rois = rois;
-                n.result[0].entities = entities;
-                return n.result[0];
+            if (n) {
+                n.rois = rois;
+                n.entities = entities;
+                return n;
             } else {
                 return h.response({}).code(404);
             }

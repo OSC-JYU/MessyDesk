@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/arihayri/Projects/MessyDesk/src/logs/.98c11b1b8e6cbba466d5948297c9dc0e5ef5a6ec-audit.json",
+    "files": [
+        {
+            "date": 1764927942486,
+            "name": "/home/arihayri/Projects/MessyDesk/src/logs/messydesk-2025-12-05.log",
+            "hash": "5bd0dd6ef9d9f9b820c4922064c750e3378ab57ecd264ecff08079fa09e94138"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -12,5 +12,6 @@ export const NATS_URL_STATUS = process.env.NATS_URL_STATUS || 'http://localhost:
 export const DATA_DIR = 'data/' + DB_NAME;
 export const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr';
 export const SOLR_CORE = process.env.SOLR_CORE || 'messydesk';
+export const NOMAD = process.env.NOMAD || false;
 
 

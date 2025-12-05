@@ -209,7 +209,7 @@ export default [
 
                 // normal "set to set" output
                 } else {
-                    console.log('Creating set and process nodes');
+                    console.log('****************Creating set and process nodes');
                     var nodes = await Graph.createSetAndProcessNodes(service, task, set_metadata, request.auth.credentials.user.rid);
                     // add nodes (Process and Set) to UI
                     console.log('nodes: ', nodes);
@@ -231,6 +231,17 @@ export default [
                             current_file: file_count,
                             userId: request.auth.credentials.user.rid
                         }
+
+                        if(service.tasks[request.payload.task]?.source == 'source_file') {
+                            const source = await Graph.getFileSource(file['@rid']);
+                            console.log('source: ', source);
+                            if(source) {
+                                const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                                msg.source = source_metadata;
+                            }
+                        }
+
+
                         nats.createSetProcessNodesAndPublish(msg)
                         file_count += 1;
                     }

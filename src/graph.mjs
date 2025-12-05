@@ -48,7 +48,7 @@ graph.initDB = async function () {
 			await db.createDB()
 			await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 		} catch (e) {
-			console.log(e)
+			console.log(e.message)
 			console.log(`Could not init database. \nTrying again in 10 secs...`)
 			await timers.setTimeout(10000)
 			try {
@@ -56,7 +56,8 @@ graph.initDB = async function () {
 				await graph.createUser({id: DEFAULT_USER, label: 'Just human', access: 'admin', active: true})
 			} catch (e) {
 				console.log(`Could not init database. \nIs Arcadedb running at ${db.getURL()}?`)
-				throw ('Could not init database. exiting...')
+				console.log('exiting...')
+				process.exit(1)
 			}
 		}
 		console.log('Database created!')

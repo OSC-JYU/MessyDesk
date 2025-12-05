@@ -33,7 +33,7 @@ function checkService(array, service) {
 	}
 }
 
-services.loadServiceAdapters = async function (service_path = 'services') {
+services.loadServiceAdapters = async function (service_path = 'services', nomad = false) {
 	const directoryPath = service_path
 	try {
 		// Create an object to store the results
@@ -79,7 +79,7 @@ services.loadServiceAdapters = async function (service_path = 'services') {
 
 		}
 
-		this.service_list = await markRegisteredAdapter(servicesObject)
+		this.service_list = await markRegisteredAdapter(servicesObject, nomad)
 		// add some default consumers (not vis)
 		//this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
 		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
@@ -346,11 +346,11 @@ services.getServiceAdapterByName = function(name) {
 }
 
 
-async function markRegisteredAdapter(services) {
+async function markRegisteredAdapter(services, nomad = false) {
 	
 	for(var key in services) {
-		const service_url = await nomad.getServiceURL(key)
-		if(service_url) {
+		if(nomad) {
+			const service_url = await nomad.getServiceURL(key)
 			services[key].url = service_url
 			services[key].nomad = true
 		} else {

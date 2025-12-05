@@ -30,7 +30,7 @@ import searchRoutes from './routes/search.mjs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-import { DATA_DIR } from './env.mjs';
+import { DATA_DIR, NOMAD } from './env.mjs';
 const AUTH_HEADER = 'mail';
 
 const sseClients = new Map();
@@ -40,8 +40,10 @@ const init = async () => {
 	console.log('initing...');
 	console.log(DATA_DIR)
 	await media.createDataDir(DATA_DIR);
-	await nomad.getStatus();
-	await services.loadServiceAdapters();
+	if(NOMAD) {
+		await nomad.getStatus();
+	}
+	await services.loadServiceAdapters('services', NOMAD);
 	await nats.init(services.getServices());
 	await Graph.initDB();
 	nats.listenDBQueue('arcadedb');
