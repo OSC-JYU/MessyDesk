@@ -17,7 +17,7 @@ Make sure that you have git, docker (or podman on RHEL linux) and NodeJS working
 
 
 
-## Aracadedb (graph database)
+## Arcadedb (graph database)
 
 Let's start ArcadeDB:
 
