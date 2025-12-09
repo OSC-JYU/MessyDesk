@@ -43,7 +43,7 @@ You should see simple user interface here: http://localhost:8222/
 	git clone https://github.com/OSC-JYU/MessyDesk.git
 	cd MessyDesk
 	npm install
-	MODE=development DB_PASSWORD=node_master nodemon index.js
+	MODE=development DB_PASSWORD=node_master nodemon src/index.mjs
 
 You should see something like this:
 
