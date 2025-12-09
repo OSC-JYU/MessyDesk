@@ -25,7 +25,16 @@
             "output": "text",
             "supported_types": ["image", "text"],
             "supported_formats": ["jpg", "png", "jpeg", "txt"],
-            "url": "https://osc-gpt.cognitiveservices.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview"
+            "url": ""
+        },
+        "gpt-5.1": {
+            "name": "GPT-5.1",
+            "version": "2025-01-01-preview",
+            "description": "gpt-5.1 is the latest model from OpenAI.",
+            "output": "text",
+            "supported_types": ["image", "text"],
+            "supported_formats": ["jpg", "png", "jpeg", "txt"],
+            "url": ""
         }
     }
 }

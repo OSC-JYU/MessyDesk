@@ -63,7 +63,7 @@ Let's fetch user interface next.
 
 Aim your browser to http://localhost:3000
 
-You should have an user interface but you can't do much. You can upload files but you don't get even thumbnails for images or PDFs.
+You should have an user interface but you can't do much. You can upload files but you don't get even thumbnails for images.
 
 We can now start some basic services.
 

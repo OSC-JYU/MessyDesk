@@ -668,50 +668,50 @@ ${fileList.map(file => file.original_filename || file.label || file.path).join('
     }
 }
 
-media.extractZip = async function(zipPath, destinationPath) {
-    try {
-        // Ensure the destination directory exists
-        await fse.ensureDir(destinationPath);
+// media.extractZip = async function(zipPath, destinationPath) {
+//     try {
+//         // Ensure the destination directory exists
+//         await fse.ensureDir(destinationPath);
 
-        logger.info('Starting zip extraction', { 
-            zipPath,
-            destinationPath
-        });
+//         logger.info('Starting zip extraction', { 
+//             zipPath,
+//             destinationPath
+//         });
 
-        // Create a read stream for the zip file
-        const zipStream = fs.createReadStream(zipPath);
+//         // Create a read stream for the zip file
+//         const zipStream = fs.createReadStream(zipPath);
         
-        // Use unzipper for extraction
-        await new Promise((resolve, reject) => {
-            zipStream
-                .pipe(unzipper.Extract({ path: destinationPath }))
-                .on('close', () => {
-                    logger.info('Zip extraction completed', { 
-                        zipPath,
-                        destinationPath
-                    });
-                    resolve();
-                })
-                .on('error', (err) => {
-                    logger.error('Extraction error', { 
-                        error: err.message,
-                        zipPath,
-                        destinationPath
-                    });
-                    reject(err);
-                });
-        });
+//         // Use unzipper for extraction
+//         await new Promise((resolve, reject) => {
+//             zipStream
+//                 .pipe(unzipper.Extract({ path: destinationPath }))
+//                 .on('close', () => {
+//                     logger.info('Zip extraction completed', { 
+//                         zipPath,
+//                         destinationPath
+//                     });
+//                     resolve();
+//                 })
+//                 .on('error', (err) => {
+//                     logger.error('Extraction error', { 
+//                         error: err.message,
+//                         zipPath,
+//                         destinationPath
+//                     });
+//                     reject(err);
+//                 });
+//         });
 
-        return true;
-    } catch (err) {
-        logger.error('Error in extractZip', { 
-            error: err.message,
-            zipPath,
-            destinationPath,
-            stack: err.stack
-        });
-        throw err;
-    }
-}
+//         return true;
+//     } catch (err) {
+//         logger.error('Error in extractZip', { 
+//             error: err.message,
+//             zipPath,
+//             destinationPath,
+//             stack: err.stack
+//         });
+//         throw err;
+//     }
+// }
 
 export default media

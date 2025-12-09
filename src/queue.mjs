@@ -8,26 +8,23 @@ import Graph from './graph.mjs';
 import nomad from './nomad.mjs';
 import media from './media.mjs';
 
-import { connect, RetentionPolicy, AckPolicy, JSONCodec } from "nats";
+import { connect } from "@nats-io/transport-node";
+import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-io/jetstream";
+
 
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
 const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
-
-
-
-
 const nats = {}
-const jc = JSONCodec();
 
 
 nats.init = async function(services) {
   console.log('NATS: connecting...', NATS_URL)
   this.nc = await connect({
-    servers: [NATS_URL],
+    servers: NATS_URL,
   });
-  this.js = this.nc.jetstream();
-  this.jsm = await this.js.jetstreamManager();
+  this.js = jetstream(this.nc);
+  this.jsm = await jetstreamManager(this.nc);
   await this.jsm.streams.add({
     name: "PROCESS",
     retention: RetentionPolicy.Workqueue,
@@ -97,9 +94,9 @@ nats.init = async function(services) {
 
 nats.connect = async function() {
   this.nc = await connect({
-    servers: [servers],
+    servers: NATS_URL,
   });
-  this.js = this.nc.jetstream();
+  this.js = jetstream(this.nc);
 }
 
 nats.close = async function() {
@@ -124,7 +121,8 @@ nats.publish = async function(topic, data) {
     //const service_url = await nomad.getServiceURL(topic)
     //service.url = service_url
     //service.queue.add(service, data, filenode)
-    await this.js.publish(`process.${topic}`, JSON.stringify(data))
+    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    await this.js.publish(`process.${topic}`, payload)
   } catch(e) {
     console.log(`ERROR: Could not add topic ${topic} to queue!\n`, e)
   }
@@ -270,23 +268,18 @@ nats.drainQueue = async function (topic, process_rid) {
       }
 
       // Parse JSON payload
-      let payload, message;
+      let message;
       try {
-        payload = msg.json();
-        try {
-          message = JSON.parse(payload);
-          console.log(message)
-          // Match and delete
-          if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
-            await this.jsm.streams.deleteMessage(streamName, seq);
-            count++;
-          }
-        } catch {
-          console.warn(`Invalid JSON seq=${seq}`);
-          continue;
+        message = msg.json();
+        console.log(message)
+        // Match and delete
+        if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
+          await this.jsm.streams.deleteMessage(streamName, seq);
+          count++;
         }
       } catch {
-
+        console.warn(`Invalid JSON seq=${seq}`);
+        continue;
       }
 
 
@@ -318,8 +311,7 @@ nats.drainQueue_old = async function(topic, process_rid) {
       const message = await this.jsm.streams.getMessage(name, { seq: i });
 
       try {
-        payload = message.json()
-        data = JSON.parse(payload)
+        data = message.json()
         console.log(data)
       } catch (e) {
         console.log('invalid message payload!', e.message)
@@ -360,18 +352,18 @@ nats.drainQueue_old = async function(topic, process_rid) {
 nats.writeToDB = async function(query, params) {
   try {
     const json = JSON.stringify({query: query, params: params})
-    await this.js.publish("system.arcadedb", jc.encode(json))
+    await this.js.publish("system.arcadedb", json)
   } catch(e) {
     console.log('ERROR:', e.message)
   }
 }
 
-nats.createSetProcessNodesAndPublish = function(msg) {
+nats.createSetProcessNodesAndPublish = async function(msg) {
   console.log('creating set process nodes and publishing...')
 
   try {
     const json = JSON.stringify({topic: 'create_and_publish', value: msg})
-    this.js.publish("system.arcadedb", jc.encode(json))
+    await this.js.publish("system.arcadedb", json)
   } catch(e) {
     console.log('ERROR:', e.message)
   }
@@ -380,7 +372,7 @@ nats.createSetProcessNodesAndPublish = function(msg) {
 nats.listenDBQueue = async function(topic) {
   console.log('connecting to DB queue...')
   const nc = await connect({servers: NATS_URL});
-  const js = nc.jetstream();  
+  const js = jetstream(nc);  
   console.log('connected to DB queue!')
  
 
@@ -390,8 +382,7 @@ nats.listenDBQueue = async function(topic) {
       const messages = await co.consume({ max_messages: 1 });
       for await (const m of messages) {
           try {
-            var payload = m.json()
-            var msg_data = JSON.parse(payload)
+            var msg_data = m.json()
             var msg = msg_data.value
             //console.log(data)
 
