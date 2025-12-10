@@ -40,6 +40,7 @@ nats.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
+        ack_wait: 120_000, // 2 minutes
         redeliver_policy: {
           max_deliveries: 1,
           interval: 100000,
@@ -47,7 +48,12 @@ nats.init = async function(services) {
         filter_subject: `process.${key}`,
     
       });
-      console.log('NATS: created consumer', key)
+     // console.log('NATS: created consumer', key, services[key].nomad_hcl)
+      if(services[key].nomad_hcl) {
+        console.log('NATS: created consumer', key, ' NOMAD=true')
+      } else {
+        console.log('NATS: created consumer', key, ' NOMAD=false')
+      }
 
       var batch = key + '_batch'
       await this.jsm.consumers.add("PROCESS", {
@@ -64,10 +70,14 @@ nats.init = async function(services) {
 
 
     } catch(e) {
-      console.log('NATS ERROR: could not create consumer', key)
-      console.log(e.message)
-      console.log('HINT: remove all consumers from NATS and try again.')
-      process.exit(1)
+      if(e.message.includes('already exists')) {
+        console.log('NATS: consumer already exists', key)
+      } else {
+        console.log('NATS ERROR: could not create consumer', key)
+        console.log(e.message)
+        console.log('HINT: remove all consumers from NATS and try again.')
+        process.exit(1)
+      }
     }
   }
 

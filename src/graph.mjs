@@ -957,11 +957,14 @@ graph.createErrorNode = async function (error, message, data_dir) {
 	const description = error.code || 'unknown'
 	const info = error.message || 'There was an error processing your file.'
 
+	let process_path = ''
+	let process_rid = ''
+
 	if(message.process) {
-		const process_rid = message.process['@rid']
+		process_rid = message.process['@rid']
 		const path_query = `SELECT path FROM ${process_rid}`
 		const path_response = await db.sql(path_query)
-		const process_path = path_response.result[0].path
+		process_path = path_response.result[0].path
 	} else {
 		console.log('Process not found in message')
 		throw new Error('Process not found in message')

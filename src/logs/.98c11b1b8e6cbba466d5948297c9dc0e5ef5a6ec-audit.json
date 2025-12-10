@@ -9,6 +9,21 @@
             "date": 1764927942486,
             "name": "/home/arihayri/Projects/MessyDesk/src/logs/messydesk-2025-12-05.log",
             "hash": "5bd0dd6ef9d9f9b820c4922064c750e3378ab57ecd264ecff08079fa09e94138"
+        },
+        {
+            "date": 1765179314127,
+            "name": "/home/arihayri/Projects/MessyDesk/src/logs/messydesk-2025-12-08.log",
+            "hash": "eac4fab8ff0d727dc6e816fe6b6d35b1618a89152963cb9fa622fea005115391"
+        },
+        {
+            "date": 1765265073437,
+            "name": "/home/arihayri/Projects/MessyDesk/src/logs/messydesk-2025-12-09.log",
+            "hash": "a90abb5f513de257ea1ff80e328dc61faa654dac79f692af25905a19a224cb63"
+        },
+        {
+            "date": 1765348197576,
+            "name": "/home/arihayri/Projects/MessyDesk/src/logs/messydesk-2025-12-10.log",
+            "hash": "a9c35b90dd7ecb87c0bfbb6f26b4b7e4bca5220f138988db1411adf2e7191dde"
         }
     ],
     "hashType": "sha256"

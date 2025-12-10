@@ -67,7 +67,7 @@ services.loadServiceAdapters = async function (service_path = 'services', nomad 
 					else jsonData['nomad'] = false
 
 				} catch(e) {
-					console.error(`Error reading nomad.hcl file in ${subdirectory}: ${e.message}`);
+					//console.error(`Error reading nomad.hcl file in ${subdirectory}: ${e.message}`);
 				}
 
 				// Add the data to the result object with the subdirectory name as the key

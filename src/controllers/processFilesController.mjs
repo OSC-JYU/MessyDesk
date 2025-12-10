@@ -40,13 +40,14 @@ export async function processFilesHandler(request, h) {
                 //await Graph.setNodeAttribute_old(message.file['@rid'], {key: 'description', value: 'EXIF rotation applied'}, 'File');
             }
             const data = {
-                file: message.file,
-                task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
+                topic: {id: 'md-thumbnailer'},
                 service: {id: 'md-thumbnailer'},
+                task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
+                file: message.file,
                 userId: message.userId
             };
             
-            nats.publish(data.id, JSON.stringify(data));
+            nats.publish(data.topic.id, JSON.stringify(data));
 
             var wsdata = {
                 command: 'update',

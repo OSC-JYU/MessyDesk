@@ -16,6 +16,7 @@
     "tasks": {
         "extract_text": {
             "output": "store",
+            "source":"source_file",
             "name": "Extract hand written text from image",
             "description": "This will extract text from hand written image and output a .txt file. ",
             "info": "Text from image",
