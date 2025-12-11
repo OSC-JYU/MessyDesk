@@ -34,7 +34,7 @@ Note that there is no actual database yet. MessyDesk will create it on first sta
 
 MessyDesk sends messages to services when something needs to be done. Let's start message queue next.
 
-	docker run -d --name nats-main -p 4222:4222 -p 6222:6222 -p 8222:8222 nats -js
+	docker run -d --name nats-main -p 4222:4222 -p 6222:6222 -p 8222:8222 nats:2.11-linux -js
 
 You should see simple user interface here: http://localhost:8222/
 
