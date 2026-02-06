@@ -1,6 +1,6 @@
 {
     "local_url": "http://localhost:9011",
-    "id": "md-rf_detr",
+    "id": "md-rfdetr",
     "type": "text",
     "adapter": "elg",
     "api": "/api",

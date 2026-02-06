@@ -14,7 +14,7 @@
 
     "tasks": {
         "html-text": {
-            "params": {"task":"html-text"},
+            "params": {},
             "output": "always file",
             "name": "HTML text",
             "description": "Combine text files to one HTML file."

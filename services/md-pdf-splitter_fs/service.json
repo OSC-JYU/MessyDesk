@@ -8,7 +8,7 @@
     "name" :"PDF Splitter",
     
     "supported_types": [],
-    "supported_formats": [],
+    "supported_formats": ["pdf"],
     "description": "internal PDF Splitter",
     "tasks": {}
 }

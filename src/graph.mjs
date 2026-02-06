@@ -804,8 +804,8 @@ graph.createProcessNode_queue = async function (msg) {
 
 	// create process output file node
 	//await this.createProcessFileNode(process_rid, data, '', '')
-	console.log('***************** processNode ***************')
-	console.log(processNode)
+	//console.log('***************** processNode ***************')
+	//console.log(processNode)
 
 	return processNode
 
@@ -1273,7 +1273,7 @@ graph.create = async function (type, data, admin, tid) {
 }
 
 graph.createWithSQL = async function (type, data, admin) {
-	console.log('create', type, data)
+	
 	var data_str_arr = []
 	// expression data to string
 	for (var key in data) {

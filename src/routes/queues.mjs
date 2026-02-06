@@ -83,7 +83,7 @@ export default [
                 const service = services.getServiceAdapterByName(topic);
                 var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.rid, request.params.roi);
                 const queue = Graph.getQueueName(service, request.payload, topic);
-                console.log('messages: ', messages);
+                //console.log('messages: ', messages);
 
 
                 // add Process node to UI
@@ -126,8 +126,8 @@ export default [
             try {
                 console.log('****************** set queue ******************');
                 const service = services.getServiceAdapterByName(topic);
-                console.log('request.payload: ', request.payload);
-                console.log('service.tasks: ', service.tasks);
+                //console.log('request.payload: ', request.payload);
+                //console.log('service.tasks: ', service.tasks);
                 var task = JSON.parse(JSON.stringify(request.payload));
                 if(!service.external_tasks && !service.tasks[task.id]) {
                     throw new Error('Task not found in service')
@@ -163,11 +163,8 @@ export default [
                 // }
 
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
-                console.log('set_metadata: ', set_metadata);
 
                 var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit: 10000});
-
-            
 
                 // in many-to-one outputs we do not create process nodes for each file 
                 if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
@@ -176,43 +173,64 @@ export default [
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
-                    var file_count = 1;
-                    const output_uuid = uuidv4()
-                    for(var file of set_files.files) {
-                        var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+                    var set_type = ''
+                    if(set_files.files.length > 0) {
+                        set_type = set_files.files[0].type;
+                    }
+                    if(set_type == 'text' || set_type.includes('json') || set_type == 'csv') {
+                        console.log('just one request');
 
-                        // do we need info about "parent" file? (when processing osd.json for example)
-                        if(service.tasks[task.id]?.source == 'source_file') {
-                            const source = await Graph.getFileSource(file['@rid']);
-                            console.log('source: ', source);
-                            if(source) {
-                                const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
-                                msg.source = source_metadata;
-                            }
-                        }
-
-                        await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
-
+                        var file_metadata = await Graph.getUserFileMetadata(set_files.files[0]['@rid'], request.auth.credentials.user.rid);
+                        msg.file = file_metadata;
                         msg.process = processNode;
-                        msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
-                        msg.output = service.tasks[task.id].output
-                        msg.file = file;
+                        msg.input_set = set_rid;  // processing endpoint should ask all files at once as a zip file
+             
+                        msg.output = service.tasks[task.id].output;
                         msg.set_process = processNode['@rid'];
                         msg.total_files = set_files.files.length;
-                        msg.current_file = file_count;
+                   
                         msg.userId = request.auth.credentials.user.rid;
                         nats.publish(topic + '_batch', JSON.stringify(msg));
 
-                        file_count += 1;
+                    } else {
+                        console.log('many-to-many output');
+                        var file_count = 1;
+                        const output_uuid = uuidv4()
+                        for(var file of set_files.files) {
+                            var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+    
+                            // do we need info about "parent" file? (when processing osd.json for example)
+                            if(service.tasks[task.id]?.source == 'source_file') {
+                                const source = await Graph.getFileSource(file['@rid']);
+                                console.log('source: ', source);
+                                if(source) {
+                                    const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                                    msg.source = source_metadata;
+                                }
+                            }
+    
+                            await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
+    
+                            msg.process = processNode;
+                            msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
+                            msg.output = service.tasks[task.id].output
+                            msg.file = file;
+                            msg.set_process = processNode['@rid'];
+                            msg.total_files = set_files.files.length;
+                            msg.current_file = file_count;
+                            msg.userId = request.auth.credentials.user.rid;
+                            nats.publish(topic + '_batch', JSON.stringify(msg));
+    
+                            file_count += 1;
+                        }
                     }
-
 
                 // normal "set to set" output
                 } else {
-                    console.log('****************Creating set and process nodes');
+                    console.log('**************** Creating set and process nodes *********');
                     var nodes = await Graph.createSetAndProcessNodes(service, task, set_metadata, request.auth.credentials.user.rid);
                     // add nodes (Process and Set) to UI
-                    console.log('nodes: ', nodes);
+                    //console.log('nodes: ', nodes);
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                     
@@ -245,51 +263,9 @@ export default [
                         nats.createSetProcessNodesAndPublish(msg)
                         file_count += 1;
                     }
-                    // for(var file of set_files.files) {
-                    //     //console.log('PROCESS TRANSACTION: ', file_count, file['@rid']);
-                    //     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
-                    //     //const tid = await Graph.startTransaction()
-                    //     var processNode = await Graph.createProcessNode(task_name, service, request.payload, file_metadata, request.auth.credentials.user.rid, set_rid, nodes.process['@rid']);
-                    //     //await Graph.commitTransaction(tid)
-                    //    // console.log('PROCESS TRANSACTION COMMITTED: ', file_count, file['@rid']);
-                    //     file_count += 1;
-                    // }
+
                     console.log('All files processed: ', file_count);
                     
-                    //var file_count = 1;
-                    // for(var file of set_files.files) {
-
-                    //     var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
-                    //     console.log(file_metadata);
-                    //     var processNode = await Graph.createProcessNode(task_name, service, request.payload, file_metadata, request.auth.credentials.user.rid, set_rid, nodes.process['@rid']);
-                    //     await media.createProcessDir(processNode.path);
-
-                    //     // do we need info about "parent" file? (when processing osd.json for example)
-                    //     if(service.tasks[request.payload.task]?.source == 'source_file') {
-                    //         const source = await Graph.getFileSource(file['@rid']);
-                    //         console.log('source: ', source);
-                    //         if(source) {
-                    //             const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
-                    //             msg.source = source_metadata;
-                    //         }
-                    //     }
-
-                    //     await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
-
-                    //     msg.process = processNode;
-                    //     msg.file = file_metadata;
-                    //     msg.target = file_metadata['@rid'];
-                    //     msg.total_files = set_files.files.length;
-                    //     msg.current_file = file_count;
-                    //     msg.userId = request.auth.credentials.user.rid;
-                    //     if(task_output !== 'always file') {
-                    //         msg.output_set = nodes.set['@rid'];  // link file to output Set
-                    //     }
-                    //     nats.publish(topic + '_batch', JSON.stringify(msg));
-
-                    //     file_count += 1;
-                    // }
-
                 }
 
 
@@ -358,7 +334,7 @@ export default [
                     userId: request.auth.credentials.user.rid,
                     output_set: setNode['@rid']  // link file to output Set
                 }
-                console.log('msg: ', msg);
+                //console.log('msg: ', msg);
                 nats.publish(topic + '_batch', JSON.stringify(msg));
 
                 return source_rid;

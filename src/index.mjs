@@ -13,6 +13,8 @@ import media from './media.mjs';
 import services from './services.mjs';
 import nomad from './nomad.mjs';
 
+import logger from './logger.mjs';
+
 
 // Import route modules
 import projectRoutes from './routes/projects.mjs';
@@ -37,8 +39,8 @@ const sseClients = new Map();
 
 // Initialize the server
 const init = async () => {
-	console.log('initing...');
-	console.log(DATA_DIR)
+	logger.info('initing...');
+	logger.info(DATA_DIR)
 	await media.createDataDir(DATA_DIR);
 	if(NOMAD) {
 		await nomad.getStatus();
@@ -128,27 +130,6 @@ const init = async () => {
 		server.auth.default('mail');
 	}
 
-	// Setup logging
-	winston.transports.DailyRotateFile = DailyRotateFile;
-	
-	const rotatedLog = new winston.transports.DailyRotateFile({
-		filename: 'logs/messydesk-%DATE%.log',
-		datePattern: 'YYYY-MM',
-		zippedArchive: false,
-		maxSize: '20m'
-	});
-
-	const logger = winston.createLogger({
-		format: winston.format.combine(
-			winston.format.timestamp(),
-			winston.format.prettyPrint()
-		),
-		transports: [
-			new winston.transports.Console(),
-			rotatedLog
-		]
-	});
-
 	// Error handling
 	server.ext('onPreResponse', (request, h) => {
 		const response = request.response;
@@ -229,14 +210,14 @@ const init = async () => {
 
 	// Start the server
 	await server.start();
-	console.log('MessyDesk running at:', server.info.uri);
+	logger.info('MessyDesk running at:', server.info.uri);
 
 	return server;
 };
 
 // Handle process termination
 process.on('SIGINT', async () => {
-	console.log('\nGracefully shutting down from SIGINT (Ctrl-C)');
+	logger.info('\nGracefully shutting down from SIGINT (Ctrl-C)');
 	if (process.env.NODE_ENV !== 'production') {
 		// Cleanup code if needed
 	}
@@ -245,7 +226,7 @@ process.on('SIGINT', async () => {
 
 // Initialize and start the server
 init().catch((err) => {
-	console.error(err);
+	logger.error(err);
 	process.exit(1);
 });
 

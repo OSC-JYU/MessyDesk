@@ -26,7 +26,7 @@ ephemeral_disk {
         ports = ["node"]
       }      
       resources {
-        memory = 4000  # Memory in MB
+        memory = 2000  # Memory in MB
         cpu    = 1000  # CPU shares (500 = 50% of 1 CPU)
       }
     }

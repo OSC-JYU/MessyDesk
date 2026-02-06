@@ -32,14 +32,14 @@ export default [
     },
     {
         method: 'POST',
-        path: '/api/services/{service}/consumer/{id}',
+        path: '/api/services/{service}/adapter/{id}',
         handler: async (request) => {
             return await services.addServiceAdapter(request.params.service, request.params.id);
         }
     },
     {
         method: 'DELETE', 
-        path: '/api/services/{service}/consumer/{id}',
+        path: '/api/services/{service}/adapter/{id}',
         handler: async (request) => {
             const adapter = await services.getServiceAdapterByName(request.params.service);
             const response = await services.removeServiceAdapter(request.params.service, request.params.id);

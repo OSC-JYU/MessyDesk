@@ -2,16 +2,18 @@ import winston from 'winston';
 import 'winston-daily-rotate-file';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import {  DB_NAME } from './env.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Create logs directory if it doesn't exist
-const logsDir = path.join(__dirname, 'logs');
+const logsDir = path.join(path.dirname(__dirname), 'data', DB_NAME, 'logs');
+console.log(logsDir);
 
 // Configure the daily rotate transport
 const dailyRotateTransport = new winston.transports.DailyRotateFile({
-    filename: path.join(logsDir, 'messydesk-%DATE%.log'),
+    filename: logsDir + '/%DATE%.log',
     datePattern: 'YYYY-MM-DD',
     zippedArchive: true,
     maxSize: '20m',

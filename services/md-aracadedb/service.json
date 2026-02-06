@@ -1,9 +1,9 @@
 {
     "local_url": "http://localhost:2480",
     "id": "md-arcadedb",
-    "type": "aracadedb",
-    "api_type": "aracadedb",
-    "adapter": "aracadedb",
+    "type": "arcadedb",
+    "api_type": "arcadedb",
+    "adapter": "arcadedb",
     "api": "/process",
     "name" :"AracadeDB",
     "note": "This is a SYSTEM QUEUE, do not edit!",

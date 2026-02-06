@@ -1,5 +1,6 @@
 data
 uploads
 node_modules
+logs
 *.env
 .git

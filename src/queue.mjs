@@ -40,7 +40,8 @@ nats.init = async function(services) {
       await this.jsm.consumers.add("PROCESS", {
         durable_name: key,
         ack_policy: AckPolicy.Explicit,
-        ack_wait: 120_000, // 2 minutes
+        ack_wait: 2 * 60 * 1e9, // 2 minutes
+        max_deliver: 1, 
         redeliver_policy: {
           max_deliveries: 1,
           interval: 100000,
@@ -58,6 +59,8 @@ nats.init = async function(services) {
       var batch = key + '_batch'
       await this.jsm.consumers.add("PROCESS", {
         durable_name: batch,
+        ack_wait: 2 * 60 * 1e9,
+        max_deliver: 1, 
         ack_policy: AckPolicy.Explicit,
         redeliver_policy: {
           max_deliveries: 2,
@@ -398,7 +401,7 @@ nats.listenDBQueue = async function(topic) {
 
             // CREATE AND PUBLISH
             if(msg_data.topic == 'create_and_publish') {
-              console.log('creating and publishing received...', msg.current_file)
+              //console.log('creating and publishing received...', msg.current_file)
               // Add 500ms delay
              // await new Promise(resolve => setTimeout(resolve, 500));
              //var msg_copy = structuredClone(msg)
@@ -411,7 +414,7 @@ nats.listenDBQueue = async function(topic) {
               //console.log(data)
               msg.process = processNode
               
-              console.log('message', msg)
+              //console.log('message', msg)
               nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
               // we call database writes here and then we publish the message to actual processing queue
             } else {

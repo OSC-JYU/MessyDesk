@@ -14,4 +14,4 @@ EXPOSE  8100
 # change user
 USER node
 
-CMD ["node", "index.mjs"]
+CMD ["node", "src/index.mjs"]

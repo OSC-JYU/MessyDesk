@@ -33,7 +33,7 @@ function checkService(array, service) {
 	}
 }
 
-services.loadServiceAdapters = async function (service_path = 'services', nomad = false) {
+services.loadServiceAdapters = async function (service_path = 'services', nomad_bool = false) {
 	const directoryPath = service_path
 	try {
 		// Create an object to store the results
@@ -79,7 +79,7 @@ services.loadServiceAdapters = async function (service_path = 'services', nomad 
 
 		}
 
-		this.service_list = await markRegisteredAdapter(servicesObject, nomad)
+		this.service_list = await markRegisteredAdapter(servicesObject, nomad_bool)
 		// add some default consumers (not vis)
 		//this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
 		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
@@ -218,6 +218,12 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 			}
 		}
 
+		// task can be disabled for individual files
+		if(node_type == 'text' || node_type == 'pdf' || node_type == 'image' || node_type == 'json' ) {
+			if(service.tasks[task].set_only) {
+				continue
+			}
+		}
 		
 		// if task has its own supported types then compare to node type (NOT @type!)
 		if(service.tasks[task].supported_types && service.tasks[task].supported_types.length > 0) {
@@ -346,10 +352,9 @@ services.getServiceAdapterByName = function(name) {
 }
 
 
-async function markRegisteredAdapter(services, nomad = false) {
-	
+async function markRegisteredAdapter(services, nomad_bool = false) {
 	for(var key in services) {
-		if(nomad) {
+		if(nomad_bool) {
 			const service_url = await nomad.getServiceURL(key)
 			services[key].url = service_url
 			services[key].nomad = true
