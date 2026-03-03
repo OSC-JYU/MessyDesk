@@ -1,6 +1,7 @@
 import services from '../services.mjs';
 import nomad from '../nomad.mjs';
 import Graph from '../graph.mjs';
+import filters from '../filters.mjs';
 
 export default [
     {
@@ -56,16 +57,20 @@ export default [
                 request.auth.credentials.user.rid
             );
             const prompts = await Graph.getPrompts(request.auth.credentials.user.rid);
+            const filterList = await filters.loadFilters();
+            const filtersArray = Object.values(filterList);
 
             if (file) {
-                return await services.getServicesForNode(
+                const matches = await services.getServicesForNode(
                     file,
                     request.query.filter,
                     request.auth.credentials.user,
                     prompts
                 );
+                matches.filters = filtersArray;
+                return matches;
             }
-            return [];
+            return { for_type: [], for_format: [], filters: filtersArray };
         }
     }
 ]; 

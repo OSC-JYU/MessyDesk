@@ -28,6 +28,7 @@ import nomadRoutes from './routes/nomad.mjs';
 import queueRoutes from './routes/queues.mjs';
 import promptRoutes from './routes/prompts.mjs';
 import searchRoutes from './routes/search.mjs';
+import filterRoutes from './routes/filters.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -205,7 +206,8 @@ const init = async () => {
 		...nomadRoutes,
 		...queueRoutes,
 		...promptRoutes,
-		...searchRoutes
+		...searchRoutes,
+		...filterRoutes
 	]);
 
 	// Start the server

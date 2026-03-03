@@ -204,10 +204,10 @@ console.log('filetype', file_type);
             const clean_rid = Graph.sanitizeRID(request.params.rid);
             const n = await Graph.getNodeAttributes(clean_rid, request.auth.credentials.user.rid);
             const entities = await Graph.getLinkedEntities(clean_rid, request.auth.credentials.user.rid);
-            const rois = await Graph.getROIs(clean_rid);
+            //const rois = await Graph.getROIs(clean_rid);
 
             if (n) {
-                n.rois = rois;
+                //n.rois = rois;
                 n.entities = entities;
                 return n;
             } else {

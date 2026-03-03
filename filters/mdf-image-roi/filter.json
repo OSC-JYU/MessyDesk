@@ -1,0 +1,10 @@
+{
+    "id": "mdf-image-roi",
+    "type": "filter",
+    "name" :"Image ROI",
+
+    "supported_types": ["image"],
+    "supported_formats": ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"],
+
+    "description": "Image ROI"
+}

@@ -6,6 +6,7 @@ import path from 'path';
 import db from "./db.mjs";
 import media from "./media.mjs";
 import solr from "./solr.mjs";
+import filters from "./filters.mjs";
 
 import timers from 'timers-promises';
 import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
@@ -375,7 +376,7 @@ graph.getProject = async function (rid, user_rid) {
 
 	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
-		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
+		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source" OR @type="Filter") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
 
 
 	const options = {
@@ -709,6 +710,24 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 }
 
 
+graph.createFilter = async function(filter_id, file_rid, user_rid) {
+	const filter = filters.getFilter(filter_id)
+	var node = await this.getNodeAttributes(file_rid, user_rid)
+	console.log('NODE: ', node)
+	if(!filter || !node) {
+		throw new Error('Filter or file not found: '+ filter_id + ' ' + file_rid )
+	}
+	const filter_node = await this.create('Filter', {filter_id: filter_id})
+	// link filter to file
+	await this.connect(file_rid, 'HAS_FILTER', filter_node['@rid'])
+
+	// we create Set and link it to Filter
+	var set_node = await this.create('Set', {label: 'Filter ' + filter_id, 'type': 'filter-set'})
+	await this.connect(filter_node['@rid'], 'HAS_SET', set_node['@rid'])
+
+	return filter_node
+}
+
 
 // // create Process that is linked to File
 // graph.createProcessNode = async function (service, task, filegraph, me_email, set_rid, set_process_rid, tid) {
@@ -1004,76 +1023,85 @@ graph.createErrorNode = async function (error, message, data_dir) {
 }
 
 
-graph.createROIsFromJSON =  async function(process_rid, message, fileNode) {
-	console.log(fileNode)
-	// read file from fileNode.path
-	const content = await media.getText(fileNode.path)
-	const json = JSON.parse(content)
 
-	if(json.length == 0) return
-	var data = {rois:[]}
+graph.createImageROIs = async function(image_rid, set_rid, data, user_rid) {
 
-	for(var roi of json) {
-		data.rois.push(roi)		
+	if (!image_rid.match(/^#/)) image_rid = '#' + image_rid
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+	const set_node = await this.getNodeAttributes(image_rid, user_rid)
+	if(!set_node) {
+		throw new Error('Set not found: '+ image_rid
+		)
 	}
-	await this.createROIs(process_rid, data)
-	
+	// find out images path by stripping filename from file path
+	var image_path = set_node.path
+	if(image_path) image_path = image_path.split('/').slice(0, -1).join('/')
+	else {
+		console.log('Image path not found for node: ', set_node)
+		throw new Error('Image path not found for node: '+ image_rid )
+	}
+	// create ROI node and connect it to file node.
+	let roi = null
+	try {
+		roi = await this.create('ROI', {type: 'roi'}, null, null, true)
+		await this.connect(image_rid, 'HAS_ROI', roi['@rid'])
+		await this.connect(set_rid, 'HAS_ITEM', roi['@rid'])
+		var roi_rid = roi['@rid'].replace('#', '').replace(':', '_')
+		media.writeJSON(data, 'roi_' + roi_rid + '.json', image_path)
+		var roi_path = path.join(image_path, 'roi_' + roi_rid + '.json')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'ROI')
+	} catch (error) {
+		console.log('Error creating ROI node: ', error)
+		throw new Error('Error creating ROI node: '+ error.message )
+	}
+
+	return roi
+
 }
 
-graph.createROIs = async function(rid, data) {
-	// ROI can be user defined or auto generated
-	// user defined ROIs are linked to source node
-	// auto generated ROIs are linked to process node
+graph.editImageROIs = async function(roi_rid, data, user_rid) {
 
-	if (!rid.match(/^#/)) rid = '#' + rid
+	if (!roi_rid.match(/^#/)) roi_rid = '#' + roi_rid
+	const roi_node = await this.getNodeAttributes(roi_rid, user_rid)
+	if(!roi_node) {
+		throw new Error('ROI not found: '+ roi_rid
+		)
+	}
+	if(roi_node.path) {
+		try {
+			media.writeJSON(data, path.basename(roi_node.path), path.dirname(roi_node.path))
+			return {message: 'ROI updated successfully'}
+		} catch (error) {
+			console.log('Error updating ROI JSON file: ', error)
+			throw new Error('Error updating ROI JSON file: '+ error.message )
+		}
+	} else {
+		console.log('ROI path not found for node: ', roi_node)
+		throw new Error('ROI path not found for node: '+ roi_rid )
+	}
+}
 
-	// we must gather all ROIs that has @rid or that are new ones
-	var rids = []
-
-
-
-	for(var roi of data.rois) {
-		// only image ROIs have coordinates
-		// if (roi.coordinates) {
-		// 	roi.rel_coordinates = await this.getSelectionAsPercentage(data.width, data.height, roi.coordinates)
-		// }
-		
-		// check if this is update by user
-		if(roi['@rid']) {
-			rids.push(roi['@rid'])
-			if(roi['locked']) continue // locked ROIs are not updated
-			const query = `MATCH (roi:ROI) WHERE id(roi) = "${roi['@rid']}" RETURN roi`
-			var response = await db.cypher(query)
-			if(response.result.length > 0) {
-				// update
-				const update = `UPDATE ROI CONTENT ${JSON.stringify(roi)} WHERE @rid = "${roi['@rid']}"`
-				var update_response = await db.sql(update)
-			} 
+graph.getImageROIs = async function(rid, set_rid, user_rid) {
+	if (!rid.match(/^#/)) rid = '#' + rid.replace('_', ':')
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid.replace('_', ':')
+	const query = `MATCH {type:File, where:(@rid = ${rid})}-HAS_ROI->{as:roi}<-HAS_ITEM-{type:Set, where:(@rid = ${set_rid})} RETURN roi`
+	var response = await db.sql(query)
+	if(!response.result[0] || !response.result[0].roi) {
+		console.log('ROI not found for file: ', rid)
+		throw new Error('ROI not found for file: '+ rid )
+	}
+	try {
+		var f = await media.readJSON(response.result[0].roi.path)
+		return f
+	} catch (error) {
+		console.log('Error reading ROI JSON: ', error)
+		// return 404 error if file not found, otherwise 500
+		if (error.code === 'ENOENT') {
+			throw new Error('ROI JSON file not found: ' + response.result[0].roi.path)
 		} else {
-			const query_c = `CREATE Vertex ROI CONTENT ${JSON.stringify(roi)}`
-			var response_c = await db.sql(query_c)
-			await this.connect(rid, 'HAS_ROI', response_c.result[0]['@rid'])
-			rids.push(response_c.result[0]['@rid'])
+			throw new Error('Error reading ROI JSON: ' + error.message)
 		}
 	}
-
-
-	// now we must delete all ROIs that are not in the rids array
-	const query_delete = `DELETE FROM ROI WHERE @rid NOT IN [${rids.join(',')}] AND in().@rid = [${rid}]`
-	var response_delete = await db.sql(query_delete)
-
-	const query_count = `MATCH {type:File, where:(@rid=${rid})}-HAS_ROI->{type:ROI, as:roi} return count(roi) as count`
-	var response_count = await db.sql(query_count)
-	await this.setNodeAttribute_old(rid, {key:"roi_count", value: response_count.result[0].count}, 'File' )
-	return response_count.result[0].count
-
-}
-
-graph.getROIs = async function(rid) {
-	if (!rid.match(/^#/)) rid = '#' + rid
-	const query = `MATCH (file:File)-[r:HAS_ROI]->(roi:ROI) WHERE id(file) = "${rid}" RETURN roi`
-	var response = await db.cypher(query)
-	return response.result
 }
 
 graph.updateFileCount = async function (set_rid) {
@@ -1206,6 +1234,13 @@ graph.getFileSource = async function (file_rid) {
 	return null
 }
 
+graph.getFileSet = async function (file_rid) {
+	const clean_file_rid = this.sanitizeRID(file_rid)
+	const sql = `Match {type:Set, as:set}-HAS_ITEM->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+	var response = await db.sql(sql)
+	if(response.result[0] && response.result[0].set) return response.result[0].set
+	return null
+}
 
 graph.query = async function (body) {
 	return db.cypher(body.query)

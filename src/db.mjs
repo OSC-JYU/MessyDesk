@@ -70,6 +70,7 @@ db.createDB = async function() {
 		await this.createVertexType('File')
 		await this.createVertexType('Process')
 		await this.createVertexType('Set')
+		//await this.createVertexType('FilterSet')
 		await this.createVertexType('SetProcess')
 		await this.createVertexType('ROI')
 		await this.createVertexType('Entity')

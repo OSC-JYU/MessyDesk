@@ -38,16 +38,7 @@ export default [
             return await Graph.getSourceInit(Graph.sanitizeRID(request.params.rid), request.auth.credentials.user.rid);
         }
     },
-    {
-        method: 'POST',
-        path: '/api/graph/vertices/{rid}/rois',
-        handler: async (request) => {
-            const n = await Graph.createROIs(Graph.sanitizeRID(request.params.rid), request.payload)
-            const wsdata = {command: 'update', type: 'image', target: '#'+request.params.rid, roi_count: n}
-            userManager.sendToUser(request.auth.credentials.user.rid, wsdata)
-            return n
-        }
-    },
+
     {
         method: 'POST',
         path: '/api/graph/vertices/{rid}',
