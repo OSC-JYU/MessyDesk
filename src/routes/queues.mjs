@@ -128,7 +128,7 @@ export default [
                 const service = services.getServiceAdapterByName(topic);
                 //console.log('request.payload: ', request.payload);
                 //console.log('service.tasks: ', service.tasks);
-                var task = JSON.parse(JSON.stringify(request.payload));
+                const task = JSON.parse(JSON.stringify(request.payload));
                 if(!service.external_tasks && !service.tasks[task.id]) {
                     throw new Error('Task not found in service')
                 }
@@ -163,7 +163,6 @@ export default [
                 // }
 
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
-
                 var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit: 10000});
 
                 // in many-to-one outputs we do not create process nodes for each file 
@@ -233,10 +232,12 @@ export default [
                     //console.log('nodes: ', nodes);
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:nodes.process, output:nodes.set};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+                    //console.log('set_files: ', set_files);
                     
                     var file_count = 1;
                     for(var file of set_files.files) {
                         var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+                        console.log('file_metadata: ', file_metadata);
 
                         var msg = {
                             service: service,
@@ -250,15 +251,15 @@ export default [
                             userId: request.auth.credentials.user.rid
                         }
 
-                        if(service.tasks[request.payload.task]?.source == 'source_file') {
-                            const source = await Graph.getFileSource(file['@rid']);
+
+                        if(service.tasks[task.id]?.source == 'source_file') {
+                            const source = await Graph.getFileSource(file['@rid'], msg.file['@type']);
                             console.log('source: ', source);
                             if(source) {
                                 const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
-                                msg.source = source_metadata;
+                                msg.file.source = source_metadata;
                             }
                         }
-
 
                         nats.createSetProcessNodesAndPublish(msg)
                         file_count += 1;

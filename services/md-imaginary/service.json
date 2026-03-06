@@ -27,27 +27,6 @@
     },
 
     "tasks": {
-        "extract": {
-            "filter": "ROI",
-            "name": "Extract",
-            "output": "image",
-            "description": "Create images based on Regions of Interest (ROI).",
-            "info": "I extracted images based on your selections.",
-            "roi_params": { 
-                "top": 0,
-                "left": 0,
-                "areawidth": 0,
-                "areaheight": 0
-            },
-
-            "params": {                
-                "_create_set": {
-                    "name": "Create Set",
-                    "help": "Create new Set and place extracted images in it.",
-                    "display": "checkbox"
-            }},
-            "params_help": {}
-        },
         "resize": {
             "name": "Resize by width",
             "output": "image",

@@ -4,12 +4,26 @@ import Boom from '@hapi/boom';
 export default [
     {
         method: 'POST',
-        path: '/api/graph/files/{rid}/rois',
+        path: '/api/images/{rid}/sets/{set_rid}/rois',
         handler: async (request) => {
-            const n = await Graph.createROIs(Graph.sanitizeRID(request.params.rid), request.payload)
-            //const wsdata = {command: 'update', type: 'image', target: '#'+request.params.rid, roi_count: n}
-            //userManager.sendToUser(request.auth.credentials.user.rid, wsdata)
-            return n
+            const result = await Graph.createImageROIs(request.params.rid, request.params.set_rid, request.payload, request.auth.credentials.user.rid);
+            return result;
+        }
+    },
+    {
+        method: 'PUT',
+        path: '/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}',
+        handler: async (request) => {
+            const result = await Graph.editImageROIs(request.params.roi_rid, request.payload, request.auth.credentials.user.rid);
+            return result;
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/images/{rid}/sets/{set_rid}/rois',
+        handler: async (request) => {
+            const result = await Graph.getImageROIs(request.params.rid, request.params.set_rid, request.auth.credentials.user.rid);
+            return result;
         }
     }
 ];

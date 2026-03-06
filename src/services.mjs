@@ -133,6 +133,7 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 
 	// we first check supporter types (internal types)
 	// if not found, we check supported formats
+	console.log('get services for node: ', node)
 
 	const matches = {for_type: [], for_format: []}
 	if(!node) return matches

@@ -502,8 +502,9 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 
 	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
 		{type:Project, as:project}.out() 
-		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND @type = 'File'),  while:($depth < 30)}
+		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND (@type = 'File' OR @type = 'ROI')),  while:($depth < 30)}
                  return  DISTINCT node ORDER by label SKIP ${params.skip} LIMIT ${params.limit}`
+				 console.log('QUERY_FILES: ', query)
 	var response = await db.sql(query)
 	
 
@@ -687,25 +688,11 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 				}	
 			}
 		}
-	// ROIs also need one message per ROI
-	} else if (roi) {
-		// we can work with ROIs only if we have width and height of file
-		console.log('ROI: ', roi)
-		console.log('NODE METADATA: ', node_metadata)
-		if(node_metadata.metadata) var metadata = node_metadata.metadata
-		if(metadata && metadata.width && metadata.height) {
-			var rois = await this.getROIs(node_rid)
-			console.log('ROIS: ', rois)
-			for(var roi_item of rois) {
-				var m = media.ROIPercentagesToPixels(roi_item, structuredClone(msg))
-				messages.push(m)
-			}	
-		}
-		// otherwise create normal, single message
-	} else {
+
+	}  else {
 		messages.push(msg)
 	}
-
+console.log('Created messages: ', messages)
 	return messages
 }
 
@@ -717,12 +704,12 @@ graph.createFilter = async function(filter_id, file_rid, user_rid) {
 	if(!filter || !node) {
 		throw new Error('Filter or file not found: '+ filter_id + ' ' + file_rid )
 	}
-	const filter_node = await this.create('Filter', {filter_id: filter_id})
+	const filter_node = await this.create('Filter', {filter_id: filter_id, label: 'Draw regions'})
 	// link filter to file
 	await this.connect(file_rid, 'HAS_FILTER', filter_node['@rid'])
 
 	// we create Set and link it to Filter
-	var set_node = await this.create('Set', {label: 'Filter ' + filter_id, 'type': 'filter-set'})
+	var set_node = await this.create('Set', {label: 'My regions', 'type': 'roi-set'})
 	await this.connect(filter_node['@rid'], 'HAS_SET', set_node['@rid'])
 
 	return filter_node
@@ -1043,13 +1030,14 @@ graph.createImageROIs = async function(image_rid, set_rid, data, user_rid) {
 	// create ROI node and connect it to file node.
 	let roi = null
 	try {
-		roi = await this.create('ROI', {type: 'roi'}, null, null, true)
+		roi = await this.create('ROI', {type: 'roi.json', extension: 'json'}, null, null, true)
 		await this.connect(image_rid, 'HAS_ROI', roi['@rid'])
 		await this.connect(set_rid, 'HAS_ITEM', roi['@rid'])
 		var roi_rid = roi['@rid'].replace('#', '').replace(':', '_')
-		media.writeJSON(data, 'roi_' + roi_rid + '.json', image_path)
-		var roi_path = path.join(image_path, 'roi_' + roi_rid + '.json')
+		media.writeJSON(data, roi_rid + '.roi.json', image_path)
+		var roi_path = path.join(image_path, roi_rid + '.roi.json')
 		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'ROI')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "set", "value": set_rid}, 'ROI')
 	} catch (error) {
 		console.log('Error creating ROI node: ', error)
 		throw new Error('Error creating ROI node: '+ error.message )
@@ -1180,7 +1168,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		where:(@rid = ${user_rid})}
 	-IS_OWNER->
 		{type:Project, as:project}--> 
-		{type:File, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file`
+		{as:file, where:(@rid = ${clean_file_rid} AND (@type = 'File' OR @type = 'ROI')), while: ($depth < 30)} return file`
 
 	var file_response = await db.sql(query)
 
@@ -1196,10 +1184,11 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		-IS_OWNER->
 			{type:Project, as:project}--> 
 			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
+			console.log('QUERY_SET: ', query_set)
 		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
 			// we need to get file types of the set content
-			const {extensions, types} = await getSetFileTypes(file_rid)
+			const {extensions, types} = await getSetFileTypes(clean_file_rid)
 			//console.log('extensions', extensions)
 			set_response.result[0].file.extensions = extensions
 			set_response.result[0].file.types = types
@@ -1225,11 +1214,20 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		return null
 }
 
-graph.getFileSource = async function (file_rid) {
+graph.getFileSource = async function (file_rid, file_type) {
+	console.log('getFileSource', file_rid, file_type)
 	const clean_file_rid = this.sanitizeRID(file_rid)
-	const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
-	var response = await db.sql(sql)
-	if(response.result[0] && response.result[0].source) return response.result[0].source
+	if(file_type == 'ROI') {
+			const sql_roi = `Match {type:ROI, as:roi, where:(@rid = ${clean_file_rid} )}<-HAS_ROI-{type:File, as:file} return file`
+			console.log('SQL_ROI: ', sql_roi)
+			var response_roi = await db.sql(sql_roi)
+			if(response_roi.result[0] && response_roi.result[0].file) return response_roi.result[0].file
+	} else {
+		const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
+		var response = await db.sql(sql)
+		if(response.result[0] && response.result[0].source) return response.result[0].source
+	}
+
 
 	return null
 }
@@ -1381,7 +1379,7 @@ graph.deleteNode = async function (rid, userRID) {
 
 	const node_path = node.path
 	const is_project = node['@type'] == 'Project'
-	if(node_path)
+	if(node_path && node['@type'] != 'Filter')
 		await media.deleteNodePath(node_path)
 	// project node has no path
 	if(is_project) {
@@ -2037,7 +2035,7 @@ function isIntegerString(value) {
 
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
-	const query = `match {type: Set, as: set, where:(@rid = "#${set_rid}")}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
+	const query = `match {type: Set, as: set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
 	var response = await db.sql(query)	
 	var extensions = []
 	var types = []

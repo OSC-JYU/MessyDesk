@@ -13,12 +13,6 @@
 
 
     "tasks": {
-        "regions of interest": {
-            "name": "Regions of Interest (ROI)",
-            "description": "Create regions of interest for images",
-            "info": "Regions of Interest for images",
-            "supported_formats": ["jpg", "png", "jpeg", "webp"]
-        },
         "wordcloud": {
             "name": "Create Wordcloud",
             "description": "Create wordcloud from text",
