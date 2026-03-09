@@ -127,9 +127,30 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 // NOTE: this removes parent directory! (the basename is stripper away)
   media.deleteNodePath = async function(dir) {
 	try {
-		var p = path.dirname(dir)
-		if(p == 'data/projects' || p == 'data/projects/') throw('Protecting projects dir!')
-		await fse.remove(p)
+		if(!dir) return
+		const clean = path.normalize(dir)
+		const parsed = path.parse(clean)
+		var target = clean
+		if(parsed.ext) {
+			target = path.dirname(clean)
+		}
+
+		const protectedDirs = [
+			'data',
+			'data/projects',
+			'data/uploads',
+			'data/layouts',
+			'data/files',
+			'data/processes',
+			'data/sets'
+		]
+
+		const normalizedTarget = target.replace(/\\/g, '/').replace(/\/$/, '')
+		if(protectedDirs.includes(normalizedTarget)) {
+			throw('Protecting data root dir!')
+		}
+
+		await fse.remove(target)
 	} catch(e) {
 		console.log('error deleting node data directory. ' + e)
 		//throw('Could not delete directory!' + e.message)
@@ -142,7 +163,11 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 
 media.createDataDir = async function(data_dir) {
 	try {
-		//await fse.ensureDir(data_dir)
+		await fse.ensureDir(path.join(data_dir, 'files'))
+		await fse.ensureDir(path.join(data_dir, 'processes'))
+		await fse.ensureDir(path.join(data_dir, 'sets'))
+
+		// legacy paths (kept for migration / backward compatibility)
 		await fse.ensureDir(path.join(data_dir, 'projects'))
 		await fse.ensureDir(path.join(data_dir, 'uploads'))
 		await fse.ensureDir(path.join(data_dir, 'layouts'))
@@ -152,10 +177,13 @@ media.createDataDir = async function(data_dir) {
 }
 
 media.createProjectDir = async function(project, data_dir) {
-	const rid = this.rid2path(project['@rid'])
 	try {
-		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
-		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'processes'))
+		await this.createDataDir(data_dir)
+		const projectDir = this.getProjectDir(data_dir, project['@rid'])
+		await fse.ensureDir(path.join(projectDir, 'files'))
+		await fse.ensureDir(path.join(projectDir, 'processes'))
+		await fse.ensureDir(path.join(projectDir, 'sets'))
+		await fse.ensureDir(path.join(projectDir, 'sources'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -176,7 +204,7 @@ media.uploadFile = async function(uploadpath, filegraph) {
 
 	var filedata = null
 	try {
-		await fse.ensureDir(path.join(filepath, 'process'))
+		await fse.ensureDir(filepath)
 	
 		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.path)
@@ -313,6 +341,104 @@ media.detectType = async function(file) {
 
 media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
+}
+
+media.getProjectDir = function(data_dir, project_rid) {
+	if(!project_rid) return data_dir
+	return path.join(data_dir, 'projects', this.rid2path(project_rid))
+}
+
+media.ridShardPath = function(rid) {
+	if(!rid) throw new Error('RID is required')
+	const clean = rid.replace('#', '')
+	const [bucketStr, posStr] = clean.split(':')
+	const bucket = Number(bucketStr)
+	const pos = Number(posStr)
+
+	if(Number.isNaN(bucket) || Number.isNaN(pos)) {
+		throw new Error('Invalid RID format')
+	}
+
+	const block = Math.floor(pos / 1000)
+	return path.join(String(bucket), String(block), String(pos))
+}
+
+media.isUUID = function(value) {
+	if(!value || typeof value !== 'string') return false
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+media.uuid2path = function(uuid) {
+	return uuid.toLowerCase().replace(/-/g, '')
+}
+
+media.uuidShardPath = function(uuid) {
+	if(!this.isUUID(uuid)) throw new Error('Invalid UUID format')
+	const id = this.uuid2path(uuid)
+	// Use head bytes to group UUIDv7 by time
+	const s1 = id.slice(0, 2)
+	const s2 = id.slice(2, 4)
+	const s3 = id.slice(4, 6)
+	return path.join(s1, s2, s3, id)
+}
+
+media.shardPath = function(identifier) {
+	if(this.isUUID(identifier)) {
+		return this.uuidShardPath(identifier)
+	}
+	return this.ridShardPath(identifier)
+}
+
+media.getFileDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'files', this.shardPath(rid))
+}
+
+media.getProcessDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'processes', this.shardPath(rid))
+}
+
+media.getProcessFilesDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProcessDir(data_dir, project_rid, rid), 'files')
+}
+
+media.getSetDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'sets', this.shardPath(rid))
+}
+
+media.getSourceDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'sources', this.shardPath(rid))
+}
+
+media.getFilePath = function(data_dir, project_rid, rid, extension) {
+	if(extension === undefined) {
+		extension = rid
+		rid = project_rid
+		project_rid = null
+	}
+	const ext = (extension || '').replace('.', '').toLowerCase()
+	const baseName = this.isUUID(rid) ? this.uuid2path(rid) : this.rid2path(rid)
+	const fileName = ext ? `${baseName}.${ext}` : baseName
+	return path.join(this.getFileDir(data_dir, project_rid, rid), fileName)
 }
 
 media.getText = async function (filePath) {

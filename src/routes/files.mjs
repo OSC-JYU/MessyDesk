@@ -59,7 +59,7 @@ export default [
 
                 // Upload file to storage
                 var filepath = filegraph.path.split('/').slice(0, -1).join('/');
-                await fse.ensureDir(path.join(filepath, 'process'));
+                await fse.ensureDir(filepath);
 
                 const filesave = fse.createWriteStream(filegraph.path);
 

@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 import Graph from '../graph.mjs';
 import services from '../services.mjs';
@@ -6,7 +6,7 @@ import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import media from '../media.mjs';
 import path from 'path';
-import { API_URL } from '../env.mjs';
+import { API_URL, DATA_DIR } from '../env.mjs';
 
 
 export default [
@@ -194,7 +194,7 @@ export default [
                     } else {
                         console.log('many-to-many output');
                         var file_count = 1;
-                        const output_uuid = uuidv4()
+                        const output_uuid = randomUUID()
                         for(var file of set_files.files) {
                             var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
     
@@ -305,6 +305,7 @@ export default [
 
                 const process_attrs = { label: topic, path:'' }
                 process_attrs.service = service.name
+                process_attrs.project_rid = source_metadata.project_rid
                 if(request.payload.info) {
                     process_attrs.info = request.payload.info
                 }
@@ -313,15 +314,20 @@ export default [
                 var process_rid = processNode['@rid']
                 await Graph.connect(source_rid, 'PROCESSED_BY', process_rid)
                 // create process directory
-                var process_path = path.join(source_metadata.path, 'process', media.rid2path(process_rid), 'files')
+                var process_path = media.getProcessFilesDir(DATA_DIR, source_metadata.project_rid, processNode.uuid || process_rid)
                 await media.createProcessDir(process_path)
                 await Graph.setNodeAttribute(process_rid, {'key':'path', 'value': process_path}, request.auth.credentials.user.rid)
                 await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(process_path)));
 
                 // create output Set
-                var setNode = await Graph.create('Set', {path: process_path})
+                var setNode = await Graph.create('Set', {project_rid: source_metadata.project_rid})
+                const set_path = media.getSetDir(DATA_DIR, source_metadata.project_rid, setNode.uuid || setNode['@rid'])
+                await media.createProcessDir(set_path)
+                await Graph.setNodeAttribute(setNode['@rid'], {'key':'path', 'value': set_path}, request.auth.credentials.user.rid)
+                setNode.path = set_path
                  // and link it to SetProcess
                 await Graph.connect(process_rid, 'PRODUCED', setNode['@rid'])
+                await Graph.syncSetManifest(setNode['@rid'])
 
                 // add node to UI
                 var wsdata = {command: 'add', type: 'process', target: source_rid, node:processNode, set_node:setNode, image:API_URL + 'icons/wait.gif'};

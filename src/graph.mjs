@@ -7,6 +7,7 @@ import db from "./db.mjs";
 import media from "./media.mjs";
 import solr from "./solr.mjs";
 import filters from "./filters.mjs";
+import { randomBytes } from 'crypto';
 
 import timers from 'timers-promises';
 import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
@@ -15,6 +16,24 @@ const MAX_STR_LENGTH = 2048;
 const DEFAULT_USER = 'local.user@localhost';
 const MAX_POSITION = 10000; // max x and y for project nodes
 const graph = {};
+
+function uuidv7() {
+	const bytes = randomBytes(16)
+	const ts = Date.now()
+
+	bytes[0] = (ts / 0x10000000000) & 0xff
+	bytes[1] = (ts / 0x100000000) & 0xff
+	bytes[2] = (ts / 0x1000000) & 0xff
+	bytes[3] = (ts / 0x10000) & 0xff
+	bytes[4] = (ts / 0x100) & 0xff
+	bytes[5] = ts & 0xff
+
+	bytes[6] = (bytes[6] & 0x0f) | 0x70
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+	const hex = bytes.toString('hex')
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
 
 // allowed attributes that setNodeAttribute can set
 const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path']
@@ -112,9 +131,15 @@ graph.createSet = async function (project_rid, data, me_rid) {
 	var response = await db.sql(query)
 
 	if (response.result.length == 1) {
+		data.project_rid = project_rid
 		var set = await this.create('Set', data)
 		var set_rid = set['@rid']
 		await this.connect(project_rid, 'HAS_SET', set_rid)
+		const set_path = media.getSetDir(DATA_DIR, project_rid, set.uuid || set_rid)
+		await media.createProcessDir(set_path)
+		await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+		set.path = set_path
+		await this.syncSetManifest(set_rid)
 		return set
 	} else {
 		console.log('Project not found')
@@ -129,10 +154,10 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 	var response = await db.cypher(query)
 	if (response.result.length == 1) {
 		data.status = 'initing...'
+		data.project_rid = project_rid
 		var source = await this.create('Source', data)
 		var source_rid = source['@rid']
-		// DATA_DIR + '/projects/' + project_rid + '/sources/' + source_rid
-		const source_path = path.join(DATA_DIR, 'projects', media.rid2path(project_rid), 'sources', media.rid2path(source_rid))
+		const source_path = media.getSourceDir(DATA_DIR, project_rid, source.uuid || source_rid)
 		source.path = source_path
 		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
 		await media.createProcessDir(source.path)
@@ -336,7 +361,8 @@ graph.savePrompt = async function (prompt, userRID) {
 		return response.result
 
 	} else {
-		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
+		const prompt_uuid = uuidv7()
+		var query = `CREATE VERTEX Prompt SET uuid = "${prompt_uuid}", name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
 		
 		var response = await db.sql(query)
 		return response.result
@@ -797,11 +823,13 @@ graph.createProcessNode_queue = async function (msg) {
 	// mark if this is part of set processing = not displayed in UI by default
 	if(msg.output_set) process_attrs.set = msg.output_set
 	if(msg.set_process_rid) process_attrs.set_process = msg.set_process_rid
+	const process_project_rid = msg.file.project_rid || await this.getProjectRidForNode(file_rid)
+	if(process_project_rid) process_attrs.project_rid = process_project_rid
 
 	processNode = await this.create('Process', process_attrs)
 	process_rid = processNode['@rid']
-	var file_path = msg.file.path.split('/').slice(0, -1).join('/')
-	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	processNode.path = media.getProcessFilesDir(DATA_DIR, process_project_rid, processNode.uuid || process_rid)
+	if(process_project_rid) processNode.project_rid = process_project_rid
 	// update process path to record
 	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process')
 	
@@ -829,6 +857,7 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	var setNode = null
 	const process_attrs = { label: task.name, path:'' }
 	process_attrs.service = service.name
+	if(filegraph.project_rid) process_attrs.project_rid = filegraph.project_rid
 	if(task.info) {
 		process_attrs.info = task.info
 	}
@@ -841,9 +870,18 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	
 	// create process output Set
 	if(service.external_tasks || service.tasks[task.id].output != 'always file') {
-		setNode = await this.create('Set', {path: processNode.path})
+		setNode = await this.create('Set', {})
+		const set_project_rid = filegraph.project_rid || await this.getProjectRidForNode(file_rid)
+		if(set_project_rid) {
+			await this.setNodeAttribute_old(setNode['@rid'], {key: 'project_rid', value: set_project_rid}, 'Set')
+		}
+		const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || setNode['@rid'])
+		await media.createProcessDir(set_path)
+		await this.setNodeAttribute_old(setNode['@rid'], {key: 'path', value: set_path}, 'Set')
+		setNode.path = set_path
 		// and link it to SetProcess
 		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+		await this.syncSetManifest(setNode['@rid'])
 	}
 
 	return {process: processNode, set: setNode} //processNode
@@ -857,14 +895,14 @@ graph.createManyToOneProcessNode = async function (topic, service, data, setgrap
 
 	const process_attrs = { label: topic, path:'' }
 	process_attrs.service = service.name
+	if(setgraph.project_rid) process_attrs.project_rid = setgraph.project_rid
 	if(data.info) {
 		process_attrs.info = data.info
 	}
 	const processNode = await this.create('Process', process_attrs)
 	const process_rid = processNode['@rid']
 
-	const data_dir = DATA_DIR
-	const process_path = path.join(data_dir, 'projects', media.rid2path(setgraph.project_rid), 'processes', media.rid2path(process_rid))
+	const process_path = media.getProcessFilesDir(DATA_DIR, setgraph.project_rid, processNode.uuid || process_rid)
 	await media.createProcessDir(process_path)
 	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
 	var update_response = await db.cypher(update)
@@ -886,14 +924,21 @@ graph.createOutputSetNode = async function (label, processNode) {
 	
 	// create process node
 	const set_attrs = { label: label }
+	const set_project_rid = processNode.project_rid || await this.getProjectRidForNode(process_rid)
+	if(set_project_rid) set_attrs.project_rid = set_project_rid
 
 
 	const setNode = await this.create('Set', set_attrs)
 	const set_rid = setNode['@rid']
+	const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+	await media.createProcessDir(set_path)
+	await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+	setNode.path = set_path
 
 	
 	// finally, connect process node to file node
 	await this.connect(process_rid, 'PRODUCED', set_rid)
+	await this.syncSetManifest(set_rid)
 
 	return setNode
 
@@ -902,10 +947,19 @@ graph.createOutputSetNode = async function (label, processNode) {
 
 
 graph.createProcessSetNode = async function (process_rid, options) {
-
+	if(!options) options = {}
 	const setNode = await this.create('Set', options)
 	var set_rid = setNode['@rid']
+	const set_project_rid = options?.project_rid || await this.getProjectRidForNode(process_rid)
+		if(set_project_rid && !options?.project_rid) {
+			await this.setNodeAttribute_old(set_rid, {key: 'project_rid', value: set_project_rid}, 'Set')
+		}
+	const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+	await media.createProcessDir(set_path)
+	await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+	setNode.path = set_path
 	await this.connect(process_rid, 'PRODUCED', set_rid)
+	await this.syncSetManifest(set_rid)
 
 	return setNode
 
@@ -920,6 +974,8 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	var extension = path.extname(file.hapi.filename).replace('.', '').toLowerCase()
 
 	var vertex_params = {
+		uuid: uuidv7(),
+		project_rid: project_rid,
 		type: file_type,
 		extension: extension,
 		label: file.hapi.filename,
@@ -936,7 +992,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	var response = await db.sql(query)
 	var file_rid = response.result[0]['@rid']
 	await this.connect(project_rid, 'HAS_FILE', file_rid)
-	var file_path = path.join(data_dir, 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	var file_path = media.getFilePath(data_dir, project_rid, response.result[0].uuid || file_rid, extension)
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 	
@@ -977,6 +1033,8 @@ graph.createErrorNode = async function (error, message, data_dir) {
 	}
 
 	const vertex_params = {
+		uuid: uuidv7(),
+		project_rid: message.file.project_rid || null,
 		type: "error.json",
 		extension: "json",
 		label: `${label}.error.json`,
@@ -992,7 +1050,8 @@ graph.createErrorNode = async function (error, message, data_dir) {
 	var response = await db.sql(query)
 
 	var file_rid = response.result[0]['@rid']
-	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.json')
+	const error_project_rid = message.file.project_rid || await this.getProjectRidForNode(process_rid)
+	var file_path = media.getFilePath(DATA_DIR, error_project_rid, response.result[0].uuid || file_rid, 'json')
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 
@@ -1001,6 +1060,7 @@ graph.createErrorNode = async function (error, message, data_dir) {
 		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
 		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
 		await this.connect(process_rid, 'PRODUCED', file_rid)
@@ -1103,7 +1163,45 @@ graph.updateFileCount = async function (set_rid) {
 
 	const query = `UPDATE Set SET count = ${count} WHERE @rid = "${set_rid}" `
 	var response = await db.sql(query)
+	await this.syncSetManifest(set_rid)
 	return count
+}
+
+graph.syncSetManifest = async function(set_rid) {
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+
+	const setQuery = `SELECT @rid, uuid, label, path, count FROM Set WHERE @rid = ${set_rid}`
+	const setResponse = await db.sql(setQuery)
+	if(!setResponse.result.length) {
+		return null
+	}
+
+	const setNode = setResponse.result[0]
+	let setPath = setNode.path
+	if(!setPath) {
+		const set_project_rid = await this.getProjectRidForNode(set_rid)
+		setPath = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+		await media.createProcessDir(setPath)
+		await this.setNodeAttribute_old(set_rid, {key: 'path', value: setPath}, 'Set')
+	}
+
+	const itemQuery = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:item}
+		RETURN item.@rid AS rid, item.@type AS node, item.label AS label, item.path AS path, item.type AS type`
+	const itemsResponse = await db.sql(itemQuery)
+
+	const manifest = {
+		set: {
+			rid: setNode['@rid'],
+			label: setNode.label || '',
+			count: setNode.count || 0,
+			path: setPath
+		},
+		updated_at: new Date().toISOString(),
+		items: itemsResponse.result || []
+	}
+
+	await media.writeJSON(manifest, 'set.json', setPath)
+	return manifest
 }
 
 
@@ -1123,6 +1221,8 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	const process_path = path_response.result[0].path
 
 	var vertex_params = {
+		uuid: uuidv7(),
+		project_rid: message.file.project_rid || null,
 		type: file_type,
 		extension: extension,
 		label: label,
@@ -1140,7 +1240,8 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	console.log('file_rid', file_rid)
 	console.log('process_path', process_path)
 	console.log('extension', extension)
-	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	const process_project_rid = message.file.project_rid || await this.getProjectRidForNode(process_rid)
+	var file_path = media.getFilePath(DATA_DIR, process_project_rid, response.result[0].uuid || file_rid, extension)
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 
@@ -1149,6 +1250,7 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
 		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
 		await this.connect(process_rid, 'PRODUCED', file_rid)
@@ -1168,12 +1270,14 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		where:(@rid = ${user_rid})}
 	-IS_OWNER->
 		{type:Project, as:project}--> 
-		{as:file, where:(@rid = ${clean_file_rid} AND (@type = 'File' OR @type = 'ROI')), while: ($depth < 30)} return file`
+		{as:file, where:(@rid = ${clean_file_rid} AND (@type = 'File' OR @type = 'ROI')), while: ($depth < 30)} return file, project`
 
 	var file_response = await db.sql(query)
 
-	if(file_response.result[0] && file_response.result[0].file)
+	if(file_response.result[0] && file_response.result[0].file) {
+		file_response.result[0].file.project_rid = file_response.result[0].project['@rid']
 		return file_response.result[0].file
+	}
 
 	else {
 		// check if file is a Set
@@ -1203,10 +1307,11 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 				where:(@rid = ${user_rid})}
 			-IS_OWNER->
 				{type:Project, as:project}--> 
-				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file`
+				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file, project`
 				
 			var source_response = await db.sql(query_source)
 			if(source_response.result[0] && source_response.result[0].file) {
+				source_response.result[0].file.project_rid = source_response.result[0].project['@rid']
 				return source_response.result[0].file
 			}
 		}
@@ -1246,6 +1351,8 @@ graph.query = async function (body) {
 
 graph.create = async function (type, data, admin, tid) {
 	//console.log('create', type, data)
+	if(!data) data = {}
+	if(!data.uuid) data.uuid = uuidv7()
 	// We clean some data
    if(type == 'Process') {
 	if(data.task) {
@@ -1306,6 +1413,8 @@ graph.create = async function (type, data, admin, tid) {
 }
 
 graph.createWithSQL = async function (type, data, admin) {
+	if(!data) data = {}
+	if(!data.uuid) data.uuid = uuidv7()
 	
 	var data_str_arr = []
 	// expression data to string
@@ -1352,7 +1461,13 @@ graph.deleteNode = async function (rid, userRID) {
 	for(var t of traverse.result) {
 		targets.push({id: t['@rid']})
 		// remove of path is only necessary for setProcess nodes TODO: make smarter
-		if(t['path']) await media.deleteNodePath(t['path'])
+		if(t['path']) {
+			if(t['@type'] == 'Process' && path.basename(t['path']) == 'files') {
+				await media.deleteNodePath(path.dirname(t['path']))
+			} else {
+				await media.deleteNodePath(t['path'])
+			}
+		}
 		if(t['service'] == 'Solr') {
 			await solr.dropSetIndex(t['@rid'])
 		}
@@ -1378,12 +1493,12 @@ graph.deleteNode = async function (rid, userRID) {
 	await db.deleteMany(targets)
 
 	const node_path = node.path
-	const is_project = node['@type'] == 'Project'
-	if(node_path && node['@type'] != 'Filter')
-		await media.deleteNodePath(node_path)
-	// project node has no path
-	if(is_project) {
-		await media.deleteNodePath(path.join('data', 'projects', media.rid2path(rid), 'files')) // must add 'files' so that it does not remove the whole project directory
+	if(node_path && node['@type'] != 'Filter') {
+		if(node['@type'] == 'Process' && path.basename(node_path) == 'files') {
+			await media.deleteNodePath(path.dirname(node_path))
+		} else {
+			await media.deleteNodePath(node_path)
+		}
 	}
 	
 	if(path_result.result[0] && path_result.result[0].path) {
@@ -1723,6 +1838,16 @@ graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selecti
 		};
 	} else {
 		throw('File or metadata not found', rid)
+
+		graph.getProjectRidForNode = async function(node_rid) {
+			const clean = this.sanitizeRID(node_rid)
+			const query = `MATCH {type:Project, as:project}-->{as:node, where:(@rid = ${clean}), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1`
+			const response = await db.sql(query)
+			if(response.result[0] && response.result[0].rid) {
+				return response.result[0].rid
+			}
+			return null
+		}
 	}
 
 }
@@ -1797,7 +1922,8 @@ graph.createEntity = async function (data, userRID) {
 		data.icon = 'mdi-tag'
 		data.color = '#ff8844'
 	}
-	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
+	const entity_uuid = uuidv7()
+	var query = `CREATE Vertex Entity set uuid = "${entity_uuid}", type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
 	console.log(query)
 	return await db.sql(query)
 }
@@ -1867,7 +1993,8 @@ graph.getTags = async function (userRID) {
 
 graph.createTag = async function (label, userRID) {
 	if(!label) return
-	var query = `create Vertex Tag set label = "${label}", owner = "${userRID}"`
+	const tag_uuid = uuidv7()
+	var query = `create Vertex Tag set uuid = "${tag_uuid}", label = "${label}", owner = "${userRID}"`
 	return await db.sql(query)
 }
 
