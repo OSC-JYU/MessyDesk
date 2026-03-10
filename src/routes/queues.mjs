@@ -312,7 +312,7 @@ export default [
 
                 var processNode = await Graph.create('Process', process_attrs)
                 var process_rid = processNode['@rid']
-                await Graph.connect(source_rid, 'PROCESSED_BY', process_rid)
+                await Graph.connect(source_metadata.project_rid, 'HAS_PROCESS', process_rid)
                 // create process directory
                 var process_path = media.getProcessFilesDir(DATA_DIR, source_metadata.project_rid, processNode.uuid || process_rid)
                 await media.createProcessDir(process_path)
@@ -325,8 +325,7 @@ export default [
                 await media.createProcessDir(set_path)
                 await Graph.setNodeAttribute(setNode['@rid'], {'key':'path', 'value': set_path}, request.auth.credentials.user.rid)
                 setNode.path = set_path
-                 // and link it to SetProcess
-                await Graph.connect(process_rid, 'PRODUCED', setNode['@rid'])
+                await Graph.connectDerivedFrom(setNode['@rid'], source_rid, process_rid)
                 await Graph.syncSetManifest(setNode['@rid'])
 
                 // add node to UI

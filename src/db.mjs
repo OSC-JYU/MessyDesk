@@ -72,7 +72,6 @@ db.createDB = async function() {
 		await this.createVertexType('Set')
 		//await this.createVertexType('FilterSet')
 		await this.createVertexType('SetProcess')
-		await this.createVertexType('ROI')
 		await this.createVertexType('Entity')
 		await this.createVertexType('EntityType')
 		await this.createVertexType('Request')
@@ -84,10 +83,11 @@ db.createDB = async function() {
 		await this.createEdgeType('PROCESSED_BY')
 		await this.createEdgeType('PRODUCED')
 		await this.createEdgeType('HAS_ITEM')
-		await this.createEdgeType('HAS_FILE')
-		await this.createEdgeType('HAS_ROI')
+		await this.createEdgeType('BELONGS_TO')
 		await this.createEdgeType('HAS_ENTITY')
 		await this.createEdgeType('HAS_SET')
+		await this.createEdgeType('HAS_PROCESS')
+		await this.createEdgeType('DERIVED_FROM')
 		await this.createEdgeType('IS_OWNER')
 		await this.createEdgeType('HAS_SOURCE')
 
@@ -239,7 +239,7 @@ db.sql = async function(query, options, retries = 3) {
 
 	if(!options.serializer) {
 		return response
-	} else if(options.serializer == 'studio' && options.format == 'vueflow') {
+	} else if(options.format == 'vueflow') {
 		return convert2VueFlow(response, options)
 	} else {
 		return response
@@ -414,7 +414,7 @@ db.indexDocuments = async function(data) {
 }
 
 
-async function convert2VueFlow(data, options) {
+async function convert2VueFlow_old(data, options) {
 
 	if(!options) var options = {labels:{}}
 	var vertex_ids = []
@@ -431,13 +431,10 @@ async function convert2VueFlow(data, options) {
 						id:v.r,
 						name:v.p.label,
 						type: v.t,
-						//type_label: options.labels[v.t],
-						//active: v.p._active,
 						info: v.p.info,
 						description: v.p.description,
 						roi_count: v.p.roi_count,
 						count: v.p.count,
-						//idc: v.r.replace(':','_')
 						}
 				}
 
@@ -448,9 +445,7 @@ async function convert2VueFlow(data, options) {
 				if(v.p.service) node.data.service = v.p.service
 				if(v.p.model) node.data.model = v.p.model
 				
-				
-				// direct link to thumbnail
-				if(v.t != 'Process' && v.p.path) 
+				if(v.t != 'Process' && v.p.path)
 					node.data.image = path.join('/api/thumbnails', path.dirname(v.p.path))
 
 				nodes.push(node)
@@ -468,11 +463,9 @@ async function convert2VueFlow(data, options) {
 				ids.push(v.r)
 				if(typeof v.p._active == 'undefined') edge.data.active = true
 				else edge.data.active = v.p._active
-				// links to inactive node are also inactive
 				if(inactive_nodes.includes(edge.data.source) || inactive_nodes.includes(edge.data.target))
 					edge.data.active = false
 
-				// add relationship labels to graph from schema
 				if(options.schemas) {
 					if(options.schemas[v.t]) {
 						if(options.schemas[edge.data.label].label) {
@@ -499,6 +492,119 @@ async function convert2VueFlow(data, options) {
 
 	return {nodes:nodes, edges: edges}
 	
+}
+
+
+async function convert2VueFlow(data, options) {
+	if(!options) options = {labels:{}}
+
+	const nodes = []
+	const edges = []
+	const nodeIds = new Set()
+	const edgeIds = new Set()
+
+
+	if(data?.result?.vertices) {
+		for(const v of data.result.vertices) {
+			if(!v?.r || nodeIds.has(v.r)) continue
+			const vp = v.p || {}
+			const node = {
+				data: {
+					id: v.r,
+					name: vp.label,
+					type: v.t,
+					info: vp.info,
+					description: vp.description,
+					roi_count: vp.roi_count,
+					count: vp.count,
+				}
+			}
+
+			if(vp.type) node.data._type = vp.type
+			if(vp.node_error) node.data.error = vp.node_error
+			if(vp.error_count) node.data.error_count = vp.error_count
+			if(vp.metadata) node.data.metadata = vp.metadata
+			if(vp.service) node.data.service = vp.service
+			if(vp.model) node.data.model = vp.model
+
+			if(v.t !== 'Process' && vp.path) {
+				node.data.image = path.join('/api/thumbnails', path.dirname(vp.path))
+			}
+
+			nodes.push(node)
+			nodeIds.add(v.r)
+		}
+	}
+
+	if(data?.result?.edges) {
+		for(const e of data.result.edges) {
+			if(!e?.r || edgeIds.has(e.r)) continue
+			edgeIds.add(e.r)
+
+			const ep = e.p || {}
+			// UI direction: reverse ArcadeDB edge orientation
+			const source = e.i
+			const target = e.o
+			const edgeType = e.t
+
+			if(edgeType === 'DERIVED_FROM') {
+				const derivedNodeId = e.r
+				if(!nodeIds.has(derivedNodeId)) {
+					const derivedNode = {
+						data: {
+							id: derivedNodeId,
+							name: ep.task || edgeType,
+							type: 'Process',
+							edge_type: edgeType,
+							edge_rid: e.r,
+							process_rid: ep.process_rid,
+							process_id: ep.process_id,
+							service: ep.cruncher,
+							task: ep.task,
+						}
+					}
+					nodes.push(derivedNode)
+					nodeIds.add(derivedNodeId)
+				}
+
+				const edgeOut = {
+					data: {
+						id: `${e.r}:out`,
+						source,
+						target: derivedNodeId,
+						type: edgeType,
+						edge_rid: e.r
+					}
+				}
+
+				const edgeIn = {
+					data: {
+						id: `${e.r}:in`,
+						source: derivedNodeId,
+						target,
+						type: edgeType,
+						edge_rid: e.r
+					}
+				}
+
+				edges.push(edgeOut)
+				edges.push(edgeIn)
+				continue
+			}
+
+			const edge = {
+				data: {
+					id: e.r,
+					source,
+					target,
+					type: edgeType,
+				}
+			}
+			edges.push(edge)
+		}
+	}
+
+	return {nodes, edges}
 }
 
 

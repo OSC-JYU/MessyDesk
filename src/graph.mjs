@@ -82,11 +82,15 @@ graph.initDB = async function () {
 		}
 		console.log('Database created!')
 	}
+
+	// Ensure edge types exist also for already-initialized databases
+	await db.createEdgeType('HAS_PROCESS')
+	await db.createEdgeType('DERIVED_FROM')
 }
 
 graph.hasAccess = async function (item_rid, user_rid) {
 	if (!item_rid.match(/^#/)) item_rid = '#' + item_rid
-	const query = `TRAVERSE in() FROM ${item_rid}`
+	const query = `TRAVERSE out() FROM ${item_rid}`
 	var response = await db.sql(query)
 	var user = response.result.filter(function (x) { return x['@rid'] == user_rid })
 	if (!user.length) {
@@ -134,11 +138,14 @@ graph.createSet = async function (project_rid, data, me_rid) {
 		data.project_rid = project_rid
 		var set = await this.create('Set', data)
 		var set_rid = set['@rid']
-		await this.connect(project_rid, 'HAS_SET', set_rid)
+		await this.connect(set_rid, 'BELONGS_TO', project_rid)
 		const set_path = media.getSetDir(DATA_DIR, project_rid, set.uuid || set_rid)
+		const set_filepath = path.join(set_path, 'set.json')
 		await media.createProcessDir(set_path)
 		await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+		await this.setNodeAttribute_old(set_rid, {key: 'filepath', value: set_filepath}, 'Set')
 		set.path = set_path
+		set.filepath = set_filepath
 		await this.syncSetManifest(set_rid)
 		return set
 	} else {
@@ -159,7 +166,7 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 		var source_rid = source['@rid']
 		const source_path = media.getSourceDir(DATA_DIR, project_rid, source.uuid || source_rid)
 		source.path = source_path
-		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
+		await this.connect(source_rid, 'BELONGS_TO', project_rid)
 		await media.createProcessDir(source.path)
 		await this.setNodeAttribute(source_rid, {key: 'path', value: source.path}, me_rid)
 
@@ -401,6 +408,25 @@ graph.getProject = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
 	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
+		{type:Project, as:project,where:(@rid=${rid})}.in() 
+		{as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source")  AND $depth > 0), while:($depth < 20)} return node, node.outE() as edges`
+
+
+	const options = {
+		serializer: 'studio',
+		format: 'vueflow'
+	}
+	
+	var result = await db.sql(query, options)
+	result = await getSetThumbnails(user_rid, result, rid)
+	return result
+}
+
+
+graph.getProject_ = async function (rid, user_rid) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
 		{type:Project, as:project,where:(@rid=${rid})}.out() 
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source" OR @type="Filter") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
 
@@ -522,16 +548,26 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	// TODO: it would be more efficient if project_rid was used in the query
-	const count_query = `select count() AS file_count from File where set=${set_rid}`
-	var response_count = await db.sql(count_query)
+	const owner_query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{type:Project, as:project}-->{type:Set, as:set, where:(@rid = ${set_rid})} RETURN set.@rid AS rid`
+	const owner_response = await db.sql(owner_query)
+	if(!owner_response.result.length) {
+		throw new Error('Set not found')
+	}
 
-	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
-		{type:Project, as:project}.out() 
-		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND (@type = 'File' OR @type = 'ROI')),  while:($depth < 30)}
-                 return  DISTINCT node ORDER by label SKIP ${params.skip} LIMIT ${params.limit}`
-				 console.log('QUERY_FILES: ', query)
+	const count_query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN count(DISTINCT node) AS file_count`
+	var response_count = await db.sql(count_query)
+	if(!response_count.result.length) {
+		const count_query_fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN count(DISTINCT node) AS file_count`
+		response_count = await db.sql(count_query_fallback)
+	}
+
+	const query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
+	console.log('QUERY_FILES: ', query)
 	var response = await db.sql(query)
+	if(!response.result.length) {
+		const query_fallback = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{type:Project, as:project}-->{type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
+		response = await db.sql(query_fallback)
+	}
 	
 
 	var files = response.result.map(obj => obj.node);
@@ -830,12 +866,13 @@ graph.createProcessNode_queue = async function (msg) {
 	process_rid = processNode['@rid']
 	processNode.path = media.getProcessFilesDir(DATA_DIR, process_project_rid, processNode.uuid || process_rid)
 	if(process_project_rid) processNode.project_rid = process_project_rid
+	processNode.file_rid = file_rid
 	// update process path to record
 	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process')
+	if(process_project_rid) {
+		await this.connect(process_project_rid, 'HAS_PROCESS', process_rid)
+	}
 	
-	// finally, connect process node to file node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-
 	// create process output file node
 	//await this.createProcessFileNode(process_rid, data, '', '')
 	//console.log('***************** processNode ***************')
@@ -864,14 +901,14 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 
 	processNode = await this.create('SetProcess', process_attrs)
 	process_rid = processNode['@rid']
+	const set_project_rid = filegraph.project_rid || await this.getProjectRidForNode(file_rid)
+	if(set_project_rid) {
+		await this.connect(set_project_rid, 'HAS_PROCESS', process_rid)
+	}
 
-	// finally, connect SetProcess node to source Set node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-	
 	// create process output Set
 	if(service.external_tasks || service.tasks[task.id].output != 'always file') {
 		setNode = await this.create('Set', {})
-		const set_project_rid = filegraph.project_rid || await this.getProjectRidForNode(file_rid)
 		if(set_project_rid) {
 			await this.setNodeAttribute_old(setNode['@rid'], {key: 'project_rid', value: set_project_rid}, 'Set')
 		}
@@ -879,8 +916,7 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 		await media.createProcessDir(set_path)
 		await this.setNodeAttribute_old(setNode['@rid'], {key: 'path', value: set_path}, 'Set')
 		setNode.path = set_path
-		// and link it to SetProcess
-		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+		await this.connectDerivedFrom(setNode['@rid'], file_rid, process_rid)
 		await this.syncSetManifest(setNode['@rid'])
 	}
 
@@ -908,8 +944,9 @@ graph.createManyToOneProcessNode = async function (topic, service, data, setgrap
 	var update_response = await db.cypher(update)
 	processNode.path = process_path
 
-	// finally, connect Process node to source Set node
-	await this.connect(set_rid, 'PROCESSED_BY', process_rid)
+	if(setgraph.project_rid) {
+		await this.connect(setgraph.project_rid, 'HAS_PROCESS', process_rid)
+	}
 
 	return processNode
 	
@@ -936,8 +973,10 @@ graph.createOutputSetNode = async function (label, processNode) {
 	setNode.path = set_path
 
 	
-	// finally, connect process node to file node
-	await this.connect(process_rid, 'PRODUCED', set_rid)
+	const inputSetRid = processNode.input_set || processNode.file_rid
+	if(inputSetRid) {
+		await this.connectDerivedFrom(set_rid, inputSetRid, process_rid)
+	}
 	await this.syncSetManifest(set_rid)
 
 	return setNode
@@ -958,7 +997,9 @@ graph.createProcessSetNode = async function (process_rid, options) {
 	await media.createProcessDir(set_path)
 	await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
 	setNode.path = set_path
-	await this.connect(process_rid, 'PRODUCED', set_rid)
+	if(options?.input_set) {
+		await this.connectDerivedFrom(set_rid, options.input_set, process_rid)
+	}
 	await this.syncSetManifest(set_rid)
 
 	return setNode
@@ -991,7 +1032,7 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	
 	var response = await db.sql(query)
 	var file_rid = response.result[0]['@rid']
-	await this.connect(project_rid, 'HAS_FILE', file_rid)
+	await this.connect(file_rid, 'BELONGS_TO', project_rid)
 	var file_path = media.getFilePath(data_dir, project_rid, response.result[0].uuid || file_rid, extension)
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
@@ -999,7 +1040,6 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	// link file to set
 	if(set_rid) {
 		if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-		await this.connect(set_rid, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
 		await this.updateFileCount(set_rid)
 	}
@@ -1057,13 +1097,12 @@ graph.createErrorNode = async function (error, message, data_dir) {
 
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
-		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
 		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
 	}
 
 	return response.result[0]
@@ -1087,17 +1126,24 @@ graph.createImageROIs = async function(image_rid, set_rid, data, user_rid) {
 		console.log('Image path not found for node: ', set_node)
 		throw new Error('Image path not found for node: '+ image_rid )
 	}
-	// create ROI node and connect it to file node.
+	// create ROI as a normal File node.
 	let roi = null
 	try {
-		roi = await this.create('ROI', {type: 'roi.json', extension: 'json'}, null, null, true)
-		await this.connect(image_rid, 'HAS_ROI', roi['@rid'])
-		await this.connect(set_rid, 'HAS_ITEM', roi['@rid'])
+		const image_node = await this.getNodeAttributes(image_rid, user_rid)
+		const roi_data = {
+			type: 'roi.json',
+			extension: 'json',
+			set: set_rid,
+			project_rid: image_node?.project_rid,
+			label: `${path.basename(image_node?.label || image_rid)}.roi.json`
+		}
+		roi = await this.create('File', roi_data, null, null, true)
+		await this.connectDerivedFrom(roi['@rid'], image_rid)
 		var roi_rid = roi['@rid'].replace('#', '').replace(':', '_')
 		media.writeJSON(data, roi_rid + '.roi.json', image_path)
 		var roi_path = path.join(image_path, roi_rid + '.roi.json')
-		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'ROI')
-		await this.setNodeAttribute_old(roi['@rid'], {"key": "set", "value": set_rid}, 'ROI')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'File')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "set", "value": set_rid}, 'File')
 	} catch (error) {
 		console.log('Error creating ROI node: ', error)
 		throw new Error('Error creating ROI node: '+ error.message )
@@ -1132,8 +1178,12 @@ graph.editImageROIs = async function(roi_rid, data, user_rid) {
 graph.getImageROIs = async function(rid, set_rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid.replace('_', ':')
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid.replace('_', ':')
-	const query = `MATCH {type:File, where:(@rid = ${rid})}-HAS_ROI->{as:roi}<-HAS_ITEM-{type:Set, where:(@rid = ${set_rid})} RETURN roi`
+	const query = `MATCH {type:File, as:roi, where:(set = "${set_rid}" AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${rid})} RETURN roi`
 	var response = await db.sql(query)
+	if(!response.result[0] || !response.result[0].roi) {
+		const fallbackQuery = `MATCH {type:Set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:roi, where:(@type = 'File' AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${rid})} RETURN roi`
+		response = await db.sql(fallbackQuery)
+	}
 	if(!response.result[0] || !response.result[0].roi) {
 		console.log('ROI not found for file: ', rid)
 		throw new Error('ROI not found for file: '+ rid )
@@ -1155,9 +1205,14 @@ graph.getImageROIs = async function(rid, set_rid, user_rid) {
 graph.updateFileCount = async function (set_rid) {
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	const count_query = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
+	const count_query = `MATCH {type:File, as:file, where:(set = "${set_rid}"), optional:true}
 	RETURN count(file) as count`
 	var count_response = await db.sql(count_query)
+	if(!count_response.result.length) {
+		const count_query_fallback = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
+		RETURN count(file) as count`
+		count_response = await db.sql(count_query_fallback)
+	}
 
 	var count = count_response.result[0].count
 
@@ -1185,9 +1240,14 @@ graph.syncSetManifest = async function(set_rid) {
 		await this.setNodeAttribute_old(set_rid, {key: 'path', value: setPath}, 'Set')
 	}
 
-	const itemQuery = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:item}
+	const itemQuery = `MATCH {type:File, as:item, where:(set = "${set_rid}")}
 		RETURN item.@rid AS rid, item.@type AS node, item.label AS label, item.path AS path, item.type AS type`
-	const itemsResponse = await db.sql(itemQuery)
+	let itemsResponse = await db.sql(itemQuery)
+	if(!itemsResponse.result.length) {
+		const itemQueryFallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:item, where:(@type = 'File')}
+			RETURN item.@rid AS rid, item.@type AS node, item.label AS label, item.path AS path, item.type AS type`
+		itemsResponse = await db.sql(itemQueryFallback)
+	}
 
 	const manifest = {
 		set: {
@@ -1247,13 +1307,12 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
-		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
 		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
 	}
 
 	return response.result[0]
@@ -1269,8 +1328,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 		as:p, 
 		where:(@rid = ${user_rid})}
 	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:file, where:(@rid = ${clean_file_rid} AND (@type = 'File' OR @type = 'ROI')), while: ($depth < 30)} return file, project`
+		{type:Project, as:project}<--{as:file, where:(@rid = ${clean_file_rid} AND @type = 'File'), while: ($depth < 30)} return file, project`
 
 	var file_response = await db.sql(query)
 
@@ -1286,8 +1344,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 			as:p, 
 			where:(@rid = ${user_rid})}
 		-IS_OWNER->
-			{type:Project, as:project}--> 
-			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
+			{type:Project, as:project}<--{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
 			console.log('QUERY_SET: ', query_set)
 		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
@@ -1322,16 +1379,14 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 graph.getFileSource = async function (file_rid, file_type) {
 	console.log('getFileSource', file_rid, file_type)
 	const clean_file_rid = this.sanitizeRID(file_rid)
-	if(file_type == 'ROI') {
-			const sql_roi = `Match {type:ROI, as:roi, where:(@rid = ${clean_file_rid} )}<-HAS_ROI-{type:File, as:file} return file`
-			console.log('SQL_ROI: ', sql_roi)
-			var response_roi = await db.sql(sql_roi)
-			if(response_roi.result[0] && response_roi.result[0].file) return response_roi.result[0].file
-	} else {
-		const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
-		var response = await db.sql(sql)
-		if(response.result[0] && response.result[0].source) return response.result[0].source
-	}
+	const sql = `Match {type:File, as:target, where:(@rid = ${clean_file_rid} )}-DERIVED_FROM->{type:File, as:source} return source`
+	var response = await db.sql(sql)
+	if(response.result[0] && response.result[0].source) return response.result[0].source
+
+	// legacy fallback
+	const sql_legacy = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
+	response = await db.sql(sql_legacy)
+	if(response.result[0] && response.result[0].source) return response.result[0].source
 
 
 	return null
@@ -1339,8 +1394,18 @@ graph.getFileSource = async function (file_rid, file_type) {
 
 graph.getFileSet = async function (file_rid) {
 	const clean_file_rid = this.sanitizeRID(file_rid)
-	const sql = `Match {type:Set, as:set}-HAS_ITEM->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+	const sql = `SELECT set FROM ${clean_file_rid}`
 	var response = await db.sql(sql)
+	if(response.result[0] && response.result[0].set) {
+		const setNodeResponse = await db.sql(`SELECT FROM ${response.result[0].set}`)
+		if(setNodeResponse.result[0]) return setNodeResponse.result[0]
+	}
+	const sql_legacy = `Match {type:Set, as:set}-CONTAINS->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+	response = await db.sql(sql_legacy)
+	if(!response.result[0] || !response.result[0].set) {
+		const sql_fallback = `Match {type:Set, as:set}-HAS_ITEM->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+		response = await db.sql(sql_fallback)
+	}
 	if(response.result[0] && response.result[0].set) return response.result[0].set
 	return null
 }
@@ -1449,13 +1514,32 @@ graph.createWithSQL = async function (type, data, admin) {
 
 graph.deleteNode = async function (rid, userRID) {
 	console.log('deleting node', rid, userRID)
+	if (!rid.match(/^#/)) rid = '#' + rid
 
 	var node = await this.getNodeAttributes(rid, userRID)
 
 	if(!node) throw ('Node not found')
+
+	if(node['@type'] == 'Set') {
+		const fileBySetQuery = `MATCH {type:File, as:file, where:(set = "${rid}")} RETURN DISTINCT file.@rid AS rid`
+		let filesResponse = await db.sql(fileBySetQuery)
+
+		for(const file of filesResponse.result) {
+			await this.deleteNode(file.rid, userRID)
+		}
+
+		const query_path_set = `SELECT path FROM ${rid}`
+		const setPathResponse = await db.sql(query_path_set)
+		await db.sql(`DELETE FROM ${rid}`)
+		const setPath = setPathResponse.result[0]?.path
+		if(setPath) {
+			await media.deleteNodePath(setPath)
+		}
+		return { path: setPath || null }
+	}
 	
 	// remove node and all children (out nodes) from solr index
-	const q = `TRAVERSE out() FROM ${rid}`
+	const q = `TRAVERSE in() FROM ${rid}`
 	var traverse = await db.sql(q)
 	var targets = []
 	for(var t of traverse.result) {
@@ -1524,6 +1608,40 @@ graph.connect = async function (from, relation, to, tid) {
 	} else {
 		return await db.sql(query)
 	}
+}
+
+graph.connectDerivedFrom = async function (target, source, process_rid, tid) {
+	if (!target.match(/^#/)) target = '#' + target
+	if (!source.match(/^#/)) source = '#' + source
+	if (process_rid && !process_rid.match(/^#/)) process_rid = '#' + process_rid
+
+	await this.connect(target, 'DERIVED_FROM', source, tid)
+	if(process_rid) {
+		let process_id = process_rid
+		let cruncher = ''
+		let task = ''
+		try {
+			const processResponse = await db.sql(`SELECT uuid, service_id, service, label, task FROM ${process_rid}`)
+			if(processResponse.result[0]) {
+				const p = processResponse.result[0]
+				if(p.uuid) process_id = p.uuid
+				cruncher = p.service_id || p.service || p.label || ''
+				task = p.task || ''
+			}
+		} catch (e) {
+			// Keep fallback values if process node lookup fails
+		}
+
+		const query = `UPDATE DERIVED_FROM SET process_rid = "${process_rid}", process_id = "${process_id}", cruncher = "${String(cruncher).replace(/"/g, '\\"')}", task = "${String(task).replace(/"/g, '\\"')}" WHERE @out = ${target} AND @in = ${source}`
+		return db.sql(query)
+	}
+	return {result: 'ok'}
+}
+
+graph.connectSetContains = async function(set_rid, item_rid, tid) {
+	await this.connect(set_rid, 'CONTAINS', item_rid, tid)
+	// compatibility for existing queries
+	await this.connect(set_rid, 'HAS_ITEM', item_rid, tid)
 }
 
 graph.startTransaction = async function () {
@@ -1635,8 +1753,17 @@ graph.setNodeError = async function (rid, error, userRID) {
 
 graph.getSetProcessNode = async function (set, userRID) {
 	if(!await this.isNodeOwner(set, userRID)) throw({'message': 'You are not the owner of this set'})
-	let query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	let query = `MATCH {type:Set, as:set, where:(@rid = ${set})}-[r:DERIVED_FROM]->{type:Set, as:input}
+		RETURN r.process_rid AS process_rid LIMIT 1`
 	let response = await db.sql(query)
+	if(response.result[0] && response.result[0].process_rid) {
+		const process = await db.sql(`SELECT FROM ${response.result[0].process_rid}`)
+		if(process.result[0]) return {setprocess: process.result[0]}
+	}
+
+	// legacy fallback
+	query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	response = await db.sql(query)
 	return response.result[0]
 }
 
@@ -1731,9 +1858,8 @@ graph.getNodeAttributes = async function (rid, userRID) {
 		as:p, 
 		where:(@rid = ${userRID})}
 	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
-
+		{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
+console.log('getNodeAttributes query', query)
 	var response = await db.sql(query)
 	if(response.result.length == 0) return null
 	return response.result[0].node
@@ -2162,8 +2288,12 @@ function isIntegerString(value) {
 
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
-	const query = `match {type: Set, as: set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
+	const query = `match {type:File, as:file, where:(set = "${set_rid}")} return distinct file.extension AS extension_group, file.type AS type_group`
 	var response = await db.sql(query)	
+	if(!response.result.length) {
+		const query_fallback = `match {type: Set, as: set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
+		response = await db.sql(query_fallback)
+	}
 	var extensions = []
 	var types = []
 	for(var result of response.result) {
