@@ -172,16 +172,7 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 			}
 		}
 	}
-	//matches.for_format = matches.for_format.filter(item => item.type == 'filter')
-	// const filter_roi = {
-	// 	id: 'mdf-image-roi',
-	// 	type: 'image-roi',
-	// 	name: 'Image ROI',
-	// 	supported_types: ['image'],
-	// 	supported_formats: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp'],
-	// 	description: 'Image ROI'
-	// }
-	// matches.filters = [filter_roi]
+
 	return matches
 }
 

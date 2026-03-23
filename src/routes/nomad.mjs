@@ -80,7 +80,10 @@ export default [
                         if(setProcessNode) {
                             console.log('setProcessNode', setProcessNode)
                             targetNode = setProcessNode['setprocess']['@rid'];
+                            await Graph.incrementBatchFailed(targetNode);
                         }
+                    } else if (message.set_process) {
+                        await Graph.incrementBatchFailed(message.set_process);
                     }
                     if(targetNode) {
                         var error_count = await Graph.setNodeError(targetNode, error, message.userId);

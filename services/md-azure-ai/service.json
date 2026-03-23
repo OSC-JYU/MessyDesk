@@ -1,6 +1,6 @@
 {
 
-    "local_url": "",
+    "local_url": "https://osc-gpt.services.ai.azure.com/",
     "id": "md-azure-ai",
     "type": "text",
     "adapter": "azure-ai",

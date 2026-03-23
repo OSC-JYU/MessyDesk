@@ -157,6 +157,11 @@ export async function processFilesHandler(request, h) {
                 if (message.output_set) {
                     console.log('** updating set file count **', message.output_set)
                     const count = await Graph.updateFileCount(message.output_set);
+                    const batch = await Graph.incrementBatchProcessed(
+                        message.set_process || message.process['@rid'],
+                        message?.response?.time,
+                        message.total_files
+                    );
                     // check if current file is the last file -> we are done!
                     if(message.current_file == message.total_files) {
                         
@@ -164,6 +169,14 @@ export async function processFilesHandler(request, h) {
                             command: 'process_finished',
                             process: { '@rid': message.set_process || message.process['@rid'], status: 'finished'},
                             set: { '@rid': message.output_set, status: 'finished', count: message.current_file  },
+                            batch: batch ? {
+                                state: batch.state || 'finished',
+                                processed_files: batch.processed_files || message.current_file,
+                                failed_files: batch.failed_files || 0,
+                                total_files: batch.total_files || message.total_files,
+                                avg_sec_per_file: batch.avg_sec_per_file || 0,
+                                eta_sec: batch.eta_sec ?? 0,
+                            } : undefined,
                             //paths: set_thumbnails,
                             current_file: message.current_file}
                             console.log('wsdata', wsdata)
@@ -174,6 +187,14 @@ export async function processFilesHandler(request, h) {
                                 command: 'process_update',
                                 process: { '@rid': message.set_process || message.process['@rid'], status: 'running'},
                                 set: { '@rid': message.output_set, status: 'running', count: message.current_file },
+                                batch: batch ? {
+                                    state: batch.state || 'running',
+                                    processed_files: batch.processed_files || message.current_file,
+                                    failed_files: batch.failed_files || 0,
+                                    total_files: batch.total_files || message.total_files,
+                                    avg_sec_per_file: batch.avg_sec_per_file || 0,
+                                    eta_sec: batch.eta_sec ?? null,
+                                } : undefined,
                                 current_file: message.current_file,
                                 total_files: message.total_files
                             };

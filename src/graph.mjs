@@ -1,5 +1,6 @@
 
 import path from 'path';
+import fse from 'fs-extra';
 
 
 
@@ -86,6 +87,7 @@ graph.initDB = async function () {
 	// Ensure edge types exist also for already-initialized databases
 	await db.createEdgeType('HAS_PROCESS')
 	await db.createEdgeType('DERIVED_FROM')
+	await db.createEdgeType('HAS_OWNER')
 }
 
 graph.hasAccess = async function (item_rid, user_rid) {
@@ -103,13 +105,13 @@ graph.hasAccess = async function (item_rid, user_rid) {
 graph.createProject = async function (data, me_rid) {
 
 	var project = {}
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
 	var response = await db.cypher(query)
 	console.log(response.result[0])
 	if (response.result[0].projects == 0) {
 		project = await this.create('Project', data)
 		var project_rid = project['@rid']
-		await this.connect(me_rid, 'IS_OWNER', project_rid)
+		await this.connect(project_rid, 'HAS_OWNER', me_rid)
 	} else {
 		console.log('Project exists')
 		throw ('Project with that name exists!')
@@ -119,7 +121,7 @@ graph.createProject = async function (data, me_rid) {
 }
 
 graph.deleteProject = async function (project_rid, user_rid, nats) {
-	const query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
+	const query = `MATCH {as:project, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} return project.@rid AS rid`
 	var response = await db.sql(query)
 	if(response.result.length == 1) {
 		await this.deleteNode(response.result[0]['rid'], nats)
@@ -130,7 +132,7 @@ graph.deleteProject = async function (project_rid, user_rid, nats) {
 graph.createSet = async function (project_rid, data, me_rid) {
 
 	//const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
-	const query = `MATCH {type:User, as:p, where:(@rid = ${me_rid})}-IS_OWNER->{type:Project, as:pr, where:(@rid = ${project_rid})} RETURN pr`
+	const query = `MATCH {type:Project, as:pr, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:p, where:(@rid = ${me_rid})} RETURN pr`
 
 	var response = await db.sql(query)
 
@@ -156,7 +158,7 @@ graph.createSet = async function (project_rid, data, me_rid) {
 
 graph.createSource = async function (project_rid, data, me_rid, nats) {
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
 
 	var response = await db.cypher(query)
 	if (response.result.length == 1) {
@@ -191,8 +193,8 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 graph.dropIndex = async function (userRid) {
 
 	const query = userRid
-	? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
-	: `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+	? `MATCH {type:User, as:user, where: (id = "${userRid}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+	: `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user}, {type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 	//const query = `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return item, user.@rid AS ownerRid`
 
 }
@@ -200,9 +202,9 @@ graph.dropIndex = async function (userRid) {
 
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
-    const filesQuery = userRid
-        ? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
-        : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+	const filesQuery = userRid
+		? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+		: `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user}, {type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
     const response = await db.sql(filesQuery);
 
@@ -265,8 +267,8 @@ graph.createUser = async function (data) {
 	}
 
 	// email must be unique
-	const query = `MATCH (p:User) WHERE p.id = "${data.id}" RETURN count(p) as users`
-	var response = await db.cypher(query)
+	const query = `MATCH {type:User} WHERE id = "${data.id}" RETURN count(p) as users`
+	var response = await db.sql(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
 	//data['service_groups'] = []
@@ -385,7 +387,7 @@ graph.createEntityTypes = async function (userRID) {
 }
 
 graph.getProjectMetadata = async function (rid, me_email) {
-	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})} RETURN project`
+	const query = `MATCH {as:project, type:Project, where: (@rid = ${rid})}-HAS_OWNER->{as: person, type: User, where: (id = "${me_email}")} RETURN project`
 	var result = await db.sql(query)
 	return result
 }
@@ -394,7 +396,7 @@ graph.getProjectMetadata = async function (rid, me_email) {
 graph.getProject_old = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
+	const query = `MATCH {as:project, type:Project, where: (@rid = ${rid})}-HAS_OWNER->{as: person, type: User, where: (id = "${me_email}")}, {as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
 				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
 				RETURN file`
 	
@@ -407,9 +409,8 @@ graph.getProject_old = async function (rid, me_email) {
 graph.getProject = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
-		{type:Project, as:project,where:(@rid=${rid})}.in() 
-		{as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source")  AND $depth > 0), while:($depth < 20)} return node, node.outE() as edges`
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project,where:(@rid=${rid})}.in() 
+		{as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL  AND $depth > 0), while:($depth < 20)} return node, node.outE() as edges`
 
 
 	const options = {
@@ -426,8 +427,7 @@ graph.getProject = async function (rid, user_rid) {
 graph.getProject_ = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
-		{type:Project, as:project,where:(@rid=${rid})}.out() 
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project,where:(@rid=${rid})}.out() 
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source" OR @type="Filter") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
 
 
@@ -444,7 +444,7 @@ graph.getProject_ = async function (rid, user_rid) {
 
 
 graph.getProjects = async function (user_rid, data_dir) {
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await db.cypher(query)
 	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
@@ -486,7 +486,7 @@ graph.getSetThumbnailsForNode = async function(set_rid) {
 
 async function getProjectThumbnails(user_rid, data, data_dir) {
 
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User), (pr)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
 	var response = await db.cypher(query)
 
@@ -506,11 +506,28 @@ async function getProjectThumbnails(user_rid, data, data_dir) {
 	return data
 }
 
-
 async function getSetThumbnails(user_rid, data, project_rid) {
 
+	const query = `SELECT path FROM File WHERE set = "${project_rid}" ORDER BY uuid LIMIT 4`
+	var response = await db.sql(query)
+	console.log('SET THUMBNAILS: ', response.result)
+
+	for (var set of data.nodes) {
+		for (var thumbs of response.result) {
+			if (set.data.type === 'Set' && set.data['id'] === thumbs.set) {
+			
+				set.data.paths = []
+
+			}
+		}
+	}
+	return data
+}
+
+async function getSetThumbnails_old(user_rid, data, project_rid) {
+
 	// order image by file label so that result set would show same images as source set
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[*0..10]->(set:Set)-->(file:File) 
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User), (pr)-[*0..10]->(set:Set)-->(file:File) 
 		WHERE id(p) = "${user_rid}" AND id(pr) = "${project_rid}" AND file.type = "image"
 		WITH file, set ORDER BY file.label
 	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
@@ -536,7 +553,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 
 graph.getProjectFiles = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User), (pr)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
 	
 	var result = await db.cypher(query)
 	return result
@@ -548,13 +565,13 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	const owner_query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{type:Project, as:project}-->{type:Set, as:set, where:(@rid = ${set_rid})} RETURN set.@rid AS rid`
-	const owner_response = await db.sql(owner_query)
-	if(!owner_response.result.length) {
+
+	const has_access = await this.hasAccess(set_rid, user_rid)
+	if(!has_access) {
 		throw new Error('Set not found')
 	}
 
-	const count_query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN count(DISTINCT node) AS file_count`
+	const count_query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN count(node) AS file_count`
 	var response_count = await db.sql(count_query)
 	if(!response_count.result.length) {
 		const count_query_fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN count(DISTINCT node) AS file_count`
@@ -565,7 +582,7 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	console.log('QUERY_FILES: ', query)
 	var response = await db.sql(query)
 	if(!response.result.length) {
-		const query_fallback = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{type:Project, as:project}-->{type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
+		const query_fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')}-->{type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
 		response = await db.sql(query_fallback)
 	}
 	
@@ -598,7 +615,7 @@ graph.getSourceFiles = async function (source_rid, user_rid, params) {
 		var files = []
 		if (!source_rid.match(/^#/)) source_rid = '#' + source_rid
 	
-		const query = `MATCH {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
+		const query = `MATCH {type:Source, as: source, where:(@rid = ${source_rid})}<-HAS_SOURCE-{type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = "${user_rid}")} RETURN source.path AS path`
 		var response = await db.sql(query)
 	
 		var source_file = await media.readJSON(path.join(response.result[0].path, 'source.json'))
@@ -766,13 +783,17 @@ graph.createFilter = async function(filter_id, file_rid, user_rid) {
 	if(!filter || !node) {
 		throw new Error('Filter or file not found: '+ filter_id + ' ' + file_rid )
 	}
-	const filter_node = await this.create('Filter', {filter_id: filter_id, label: 'Draw regions'})
-	// link filter to file
-	await this.connect(file_rid, 'HAS_FILTER', filter_node['@rid'])
+	//const filter_node = await this.create('Filter', {filter_id: filter_id, label: 'Draw regions'})
 
-	// we create Set and link it to Filter
+	const project_rid = await this.getProjectRidForNode(file_rid)
+	const filter_node = await this.create('Process', {filter_id: filter_id, label: 'Draw regions'})
+	filter_node.path = media.getProcessFilesDir(DATA_DIR, project_rid, filter_node.uuid)
+	// link filter to project
+	await this.connect(project_rid, 'BELONGS_TO', filter_node['@rid'])
+
+	// we create Set and link it to source file or source Set
 	var set_node = await this.create('Set', {label: 'My regions', 'type': 'roi-set'})
-	await this.connect(filter_node['@rid'], 'HAS_SET', set_node['@rid'])
+	await this.connectDerivedFrom(set_node['@rid'], file_rid, filter_node['@rid'])
 
 	return filter_node
 }
@@ -859,6 +880,7 @@ graph.createProcessNode_queue = async function (msg) {
 	// mark if this is part of set processing = not displayed in UI by default
 	if(msg.output_set) process_attrs.set = msg.output_set
 	if(msg.set_process_rid) process_attrs.set_process = msg.set_process_rid
+	if(msg.set_process && !process_attrs.set_process) process_attrs.set_process = msg.set_process
 	const process_project_rid = msg.file.project_rid || await this.getProjectRidForNode(file_rid)
 	if(process_project_rid) process_attrs.project_rid = process_project_rid
 
@@ -870,13 +892,8 @@ graph.createProcessNode_queue = async function (msg) {
 	// update process path to record
 	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process')
 	if(process_project_rid) {
-		await this.connect(process_project_rid, 'HAS_PROCESS', process_rid)
+		await this.connect(process_rid, 'BELONGS_TO', process_project_rid)
 	}
-	
-	// create process output file node
-	//await this.createProcessFileNode(process_rid, data, '', '')
-	//console.log('***************** processNode ***************')
-	//console.log(processNode)
 
 	return processNode
 
@@ -903,7 +920,7 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	process_rid = processNode['@rid']
 	const set_project_rid = filegraph.project_rid || await this.getProjectRidForNode(file_rid)
 	if(set_project_rid) {
-		await this.connect(set_project_rid, 'HAS_PROCESS', process_rid)
+		await this.connect(process_rid, 'BELONGS_TO', set_project_rid)
 	}
 
 	// create process output Set
@@ -945,7 +962,7 @@ graph.createManyToOneProcessNode = async function (topic, service, data, setgrap
 	processNode.path = process_path
 
 	if(setgraph.project_rid) {
-		await this.connect(setgraph.project_rid, 'HAS_PROCESS', process_rid)
+		await this.connect(process_rid, 'BELONGS_TO',  setgraph.project_rid)
 	}
 
 	return processNode
@@ -1323,12 +1340,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
 	const clean_file_rid = this.sanitizeRID(file_rid)
 	// file must be somehow related to a project that is owned by user
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${user_rid})}
-	-IS_OWNER->
-		{type:Project, as:project}<--{as:file, where:(@rid = ${clean_file_rid} AND @type = 'File'), while: ($depth < 30)} return file, project`
+	var query = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}<--{as:file, where:(@rid = ${clean_file_rid} AND @type = 'File'), while: ($depth < 30)} return file, project`
 
 	var file_response = await db.sql(query)
 
@@ -1339,12 +1351,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
 	else {
 		// check if file is a Set
-		var query_set = `MATCH {
-			type: User, 
-			as:p, 
-			where:(@rid = ${user_rid})}
-		-IS_OWNER->
-			{type:Project, as:project}<--{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
+		var query_set = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}<--{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
 			console.log('QUERY_SET: ', query_set)
 		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
@@ -1358,13 +1365,7 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
 		// check if file is source (not file at all!)
 		} else {
-			var query_source = `MATCH {
-				type: User, 
-				as:p, 
-				where:(@rid = ${user_rid})}
-			-IS_OWNER->
-				{type:Project, as:project}--> 
-				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file, project`
+			var query_source = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}--> {type:Source, as:file, where:(@rid = ${clean_file_rid})} return file, project`
 				
 			var source_response = await db.sql(query_source)
 			if(source_response.result[0] && source_response.result[0].file) {
@@ -1520,6 +1521,7 @@ graph.deleteNode = async function (rid, userRID) {
 
 	if(!node) throw ('Node not found')
 
+	// Set handling
 	if(node['@type'] == 'Set') {
 		const fileBySetQuery = `MATCH {type:File, as:file, where:(set = "${rid}")} RETURN DISTINCT file.@rid AS rid`
 		let filesResponse = await db.sql(fileBySetQuery)
@@ -1538,23 +1540,18 @@ graph.deleteNode = async function (rid, userRID) {
 		return { path: setPath || null }
 	}
 	
-	// remove node and all children (out nodes) from solr index
-	const q = `TRAVERSE in() FROM ${rid}`
+	// remove all DERIVED_FROM edges and connected nodes recursively
+	const q = `TRAVERSE inE('DERIVED_FROM'), outV()  FROM (select from DERIVED_FROM where process_rid =  "${rid}")`
 	var traverse = await db.sql(q)
 	var targets = []
 	for(var t of traverse.result) {
-		targets.push({id: t['@rid']})
-		// remove of path is only necessary for setProcess nodes TODO: make smarter
-		if(t['path']) {
-			if(t['@type'] == 'Process' && path.basename(t['path']) == 'files') {
-				await media.deleteNodePath(path.dirname(t['path']))
-			} else {
-				await media.deleteNodePath(t['path'])
-			}
+		
+		if(t['@type'] == 'File') {
+			targets.push({id: t['@rid']})
+		} else if(t['@type'] == 'DERIVED_FROM' && t['process_rid']) {  // let's delete Process nodes as well
+			targets.push({id: t['process_rid']})	
 		}
-		if(t['service'] == 'Solr') {
-			await solr.dropSetIndex(t['@rid'])
-		}
+		
 	}
 
 	// if node itself is a solr indexer, then delete the index
@@ -1573,7 +1570,8 @@ graph.deleteNode = async function (rid, userRID) {
 	const query_path = `SELECT path FROM ${rid}`
 	var path_result = await db.sql(query_path)
 
-
+	if(targets.length == 0)
+		targets.push({id: rid}) // if there is no derived_from edges, we still need to delete the node itself
 	await db.deleteMany(targets)
 
 	const node_path = node.path
@@ -1686,12 +1684,7 @@ graph.setEdgeAttribute = async function (rid, data) {
 }
 
 graph.isProjectOwner = async function (rid, userRID) {
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = :userRID)}
-	-IS_OWNER->
-		{type:Project, as:project,  where:(@rid = :rid)} return project`
+	var query = `MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type: User, as:p, where:(@rid = :userRID)} return project`
 
 	var response = await db.sql_params(query, {rid: rid, userRID: userRID}, true)
 	return response.result.length > 0
@@ -1700,13 +1693,7 @@ graph.isProjectOwner = async function (rid, userRID) {
 graph.isNodeOwner = async function (rid, userRID) {
 
 	// node must be somehow related to a project that is owned by user
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${userRID})}
-	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
+	var query = `MATCH {type:User, as:p, where:(@rid = ${userRID})}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
 	
 
 	var file_response = await db.sql(query)
@@ -1801,6 +1788,59 @@ graph.setProjectAttribute = async function (rid, data, userRID) {
 	return db.sql_params(query, params)
 }	
 
+async function getDirectorySizeBytes(targetDir) {
+	if (!targetDir) return 0
+	const exists = await fse.pathExists(targetDir)
+	if (!exists) return 0
+
+	let total = 0
+	const entries = await fse.readdir(targetDir, { withFileTypes: true })
+	for (const entry of entries) {
+		const entryPath = path.join(targetDir, entry.name)
+		if (entry.isDirectory()) {
+			total += await getDirectorySizeBytes(entryPath)
+		} else if (entry.isFile()) {
+			const stats = await fse.stat(entryPath)
+			total += stats.size
+		}
+	}
+
+	return total
+}
+
+graph.updateProjectSizes = async function (userRID, dataDir = DATA_DIR) {
+	const query = `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = ${userRID})} RETURN project`
+	const response = await db.sql(query)
+	const projects = response.result || []
+	const updated = []
+
+	for (const item of projects) {
+		const project = item.project || item
+		if (!project || !project['@rid']) continue
+
+		const projectRID = project['@rid']
+		const projectPath = media.getProjectDir(dataDir, projectRID)
+		const bytes = await getDirectorySizeBytes(projectPath)
+		const sizeMb = Math.round((bytes / 1024 / 1024) * 100) / 100
+
+		await db.sql_params(`UPDATE Project SET size = :size WHERE @rid = :rid`, {
+			size: sizeMb,
+			rid: projectRID
+		})
+
+		updated.push({
+			rid: projectRID,
+			size: sizeMb,
+			bytes
+		})
+	}
+
+	return {
+		updated: updated.length,
+		projects: updated
+	}
+}
+
 
 graph.setNodeAttribute = async function (rid, data, userRID) {
 
@@ -1853,13 +1893,8 @@ graph.setNodeAttribute_old = async function (rid, data, type, tid) {
 
 graph.getNodeAttributes = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${userRID})}
-	-IS_OWNER->
-		{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
-console.log('getNodeAttributes query', query)
+	var query = `MATCH {type:User, as:p, where:(@rid = ${userRID})}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
+
 	var response = await db.sql(query)
 	if(response.result.length == 0) return null
 	return response.result[0].node
@@ -1965,17 +2000,19 @@ graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selecti
 	} else {
 		throw('File or metadata not found', rid)
 
-		graph.getProjectRidForNode = async function(node_rid) {
-			const clean = this.sanitizeRID(node_rid)
-			const query = `MATCH {type:Project, as:project}-->{as:node, where:(@rid = ${clean}), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1`
-			const response = await db.sql(query)
-			if(response.result[0] && response.result[0].rid) {
-				return response.result[0].rid
-			}
-			return null
-		}
 	}
 
+}
+
+
+graph.getProjectRidForNode = async function(node_rid) {
+	const clean = this.sanitizeRID(node_rid)
+	const query = `MATCH {type:Project, as:project}<--{as:node, where:(@rid = ${clean}), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1`
+	const response = await db.sql(query)
+	if(response.result[0] && response.result[0].rid) {
+		return response.result[0].rid
+	}
+	return null
 }
 
 graph.traverse = async function (rid, direction, userRID) {
@@ -2125,7 +2162,7 @@ graph.createTag = async function (label, userRID) {
 }
 
 graph.getNode = async function (rid, userRID) {
-	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
+	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
 	
 	var response = await db.sql(query)
 	if(response.result.length == 0) return []
@@ -2301,6 +2338,98 @@ async function getSetFileTypes(set_rid) {
 		types.push(result.type_group)
 	}
 	return {extensions, types}
+}
+
+function roundTo(value, decimals = 2) {
+	const factor = Math.pow(10, decimals)
+	return Math.round(value * factor) / factor
+}
+
+graph.getBatchProcess = async function(process_rid) {
+	const clean = this.sanitizeRID(process_rid)
+	let response = await db.sql(`SELECT FROM SetProcess WHERE @rid = ${clean} LIMIT 1`)
+	if(response.result[0]) return response.result[0]
+
+	response = await db.sql(`SELECT FROM Process WHERE @rid = ${clean} LIMIT 1`)
+	if(response.result[0]) return response.result[0]
+
+	return null
+}
+
+graph.updateBatchProcess = async function(process_rid, patch) {
+	const node = await this.getBatchProcess(process_rid)
+	if(!node) return null
+
+	const type = node['@type'] || 'SetProcess'
+	for(const key of Object.keys(patch)) {
+		await this.setNodeAttribute_old(node['@rid'], {key, value: patch[key]}, type)
+		node[key] = patch[key]
+	}
+	return node
+}
+
+graph.initBatchProcess = async function(process_rid, attrs = {}) {
+	const now = new Date().toISOString()
+	const initial = {
+		state: 'running',
+		processed_files: 0,
+		failed_files: 0,
+		total_time_sec: 0,
+		avg_sec_per_file: 0,
+		eta_sec: null,
+		started_at: now,
+		updated_at: now,
+		...attrs,
+	}
+
+	return this.updateBatchProcess(process_rid, initial)
+}
+
+graph.incrementBatchProcessed = async function(process_rid, response_time, total_files) {
+	const batch = await this.getBatchProcess(process_rid)
+	if(!batch) return null
+
+	const now = new Date().toISOString()
+	const processed = Number(batch.processed_files || 0) + 1
+	const failed = Number(batch.failed_files || 0)
+	const total = Number(total_files || batch.total_files || 0)
+	const timeDelta = Number(response_time || 0)
+	const totalTimeSec = Number(batch.total_time_sec || 0) + (Number.isFinite(timeDelta) ? timeDelta : 0)
+	const avgSecPerFile = processed > 0 ? roundTo(totalTimeSec / processed, 3) : 0
+	const remaining = total > 0 ? Math.max(total - processed, 0) : 0
+	const etaSec = total > 0 && avgSecPerFile > 0 ? Math.round(remaining * avgSecPerFile) : null
+
+	const patch = {
+		processed_files: processed,
+		failed_files: failed,
+		total_files: total || batch.total_files || 0,
+		total_time_sec: roundTo(totalTimeSec, 3),
+		avg_sec_per_file: avgSecPerFile,
+		eta_sec: etaSec,
+		updated_at: now,
+	}
+
+	if(total > 0 && processed >= total) {
+		patch.state = 'finished'
+		patch.finished_at = now
+		patch.eta_sec = 0
+	}
+
+	return this.updateBatchProcess(batch['@rid'], patch)
+}
+
+graph.incrementBatchFailed = async function(process_rid) {
+	const batch = await this.getBatchProcess(process_rid)
+	if(!batch) return null
+
+	const now = new Date().toISOString()
+	const failed = Number(batch.failed_files || 0) + 1
+	const patch = {
+		failed_files: failed,
+		updated_at: now,
+	}
+
+	return this.updateBatchProcess(batch['@rid'], patch)
 }
 
 

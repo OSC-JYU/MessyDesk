@@ -88,7 +88,7 @@ db.createDB = async function() {
 		await this.createEdgeType('HAS_SET')
 		await this.createEdgeType('HAS_PROCESS')
 		await this.createEdgeType('DERIVED_FROM')
-		await this.createEdgeType('IS_OWNER')
+		await this.createEdgeType('HAS_OWNER')
 		await this.createEdgeType('HAS_SOURCE')
 
 	
@@ -512,6 +512,7 @@ async function convert2VueFlow(data, options) {
 				data: {
 					id: v.r,
 					name: vp.label,
+					uuid: vp.uuid,
 					type: v.t,
 					info: vp.info,
 					description: vp.description,
@@ -548,7 +549,7 @@ async function convert2VueFlow(data, options) {
 			const edgeType = e.t
 
 			if(edgeType === 'DERIVED_FROM') {
-				const derivedNodeId = e.r
+				const derivedNodeId = ep.process_rid
 				if(!nodeIds.has(derivedNodeId)) {
 					const derivedNode = {
 						data: {

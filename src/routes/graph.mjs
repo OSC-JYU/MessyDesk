@@ -67,11 +67,6 @@ export default [
                 request.auth.credentials.user.rid,
                 nats
             );
-            console.log(result);
-            if (result.path) {
-                // TODO: delete path
-                console.log(result.path);
-            }
             return result;
         }
     },
