@@ -21,6 +21,12 @@
             "output_set": "Files from zip",
             "name": "Unzip",
             "description": "Unzip a zip file."
+        },
+        "zip": {
+            "params": {"task":"zip"},
+            "name": "Zip Set",
+            "description": "Create a zip archive from set files.",
+            "hidden": true
         }
     }
 }

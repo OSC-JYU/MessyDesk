@@ -19,7 +19,6 @@ const nats = {}
 
 nats.pausedBatches = new Set()
 nats.cancelledBatches = new Set()
-nats.deferredBatchMessages = new Map()
 
 
 nats.init = async function(services) {
@@ -423,29 +422,23 @@ nats.createSetProcessNodesAndPublish = async function(msg) {
   }
 }
 
+nats.cancelBatch = async function(process_rid) {
+  this.cancelledBatches.add(process_rid)
+  this.pausedBatches.delete(process_rid)
+  const deleted = await this.drainQueueByProcess(process_rid)
+  return {status: 'cancelled', process_rid, deleted}
+}
+
 nats.pauseBatch = async function(process_rid) {
   this.pausedBatches.add(process_rid)
-  return {status: 'paused', process_rid}
+  const deleted = await this.drainQueueByProcess(process_rid)
+  return {status: 'paused', process_rid, deleted}
 }
 
 nats.resumeBatch = async function(process_rid) {
   this.pausedBatches.delete(process_rid)
-  const queued = this.deferredBatchMessages.get(process_rid) || []
-  this.deferredBatchMessages.delete(process_rid)
-
-  for (const msg of queued) {
-    await this.createSetProcessNodesAndPublish(msg)
-  }
-
-  return {status: 'running', process_rid, resumed_messages: queued.length}
-}
-
-nats.cancelBatch = async function(process_rid) {
-  this.cancelledBatches.add(process_rid)
-  this.pausedBatches.delete(process_rid)
-  this.deferredBatchMessages.delete(process_rid)
-  const deleted = await this.drainQueueByProcess(process_rid)
-  return {status: 'cancelled', process_rid, deleted}
+  this.cancelledBatches.delete(process_rid)
+  return {status: 'running', process_rid}
 }
 
 nats.listenDBQueue = async function(topic) {
@@ -473,10 +466,7 @@ nats.listenDBQueue = async function(topic) {
                 const batchState = batchNode?.state || 'running'
 
                 if(batchState === 'paused' || this.pausedBatches.has(batchRid)) {
-                  if(!this.deferredBatchMessages.has(batchRid)) {
-                    this.deferredBatchMessages.set(batchRid, [])
-                  }
-                  this.deferredBatchMessages.get(batchRid).push(msg)
+                  // Drop queued create_and_publish tasks while paused; resume will rebuild pending files from graph.
                   m.ack();
                   continue;
                 }
@@ -485,6 +475,14 @@ nats.listenDBQueue = async function(topic) {
                   m.ack();
                   continue;
                 }
+
+                // Set batches use one SetProcess node; do not create per-file Process nodes.
+                if(!msg.process || !msg.process['@rid']) {
+                  msg.process = {'@rid': batchRid}
+                }
+                nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
+                m.ack();
+                continue;
               }
 
               //console.log('creating and publishing received...', msg.current_file)

@@ -9,7 +9,7 @@ import media from '../media.mjs';
 
 import path from 'path';
 
-import { processFilesHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
+import { processFilesHandler, processFilesFromTmpHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR, API_URL } from '../env.mjs';
 
@@ -171,27 +171,7 @@ export default [
                     };
                     await userManager.sendToUser(message.userId, wsdata);
                 }
-                // If target is a pdf (i.e. we are splitting pdf into pages), send cover page thumbnail message to md-poppler
-                if(message?.file?.type == 'pdf') {
-                    // PDF page count
-                    if(message?.file?.metadata?.page_count) {
-                        await Graph.setNodeAttribute_old(target, {key: 'metadata', value: message.file.metadata}, 'File');
-                    }
 
-                    message.task = {'id': 'pdf2images'};
-                    message.task.params = {
-                        page: 1,
-                        firstPageToConvert: '1',
-                        lastPageToConvert: '1',
-                        resolutionXYAxis: '80'
-                    };
-                    message.role = 'thumbnail';
-                    message.service = {'id': 'md-poppler'};
-                    console.log('Sending message to md-poppler', message);
-                   
-                    nats.publish(message.service.id, JSON.stringify(message));
-
-                }
             }
             return [];
         }
@@ -211,6 +191,18 @@ export default [
             }
         },
         handler: processFilesHandler
+    },
+    {
+        method: 'POST',
+        path: '/api/nomad/process/files/tmp',
+        options: {
+            payload: {
+                maxBytes: 10485760,
+                output: 'data',
+                parse: true
+            }
+        },
+        handler: processFilesFromTmpHandler
     },
     {
         method: 'POST',

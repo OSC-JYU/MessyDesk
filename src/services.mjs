@@ -80,20 +80,7 @@ services.loadServiceAdapters = async function (service_path = 'services', nomad_
 		}
 
 		this.service_list = await markRegisteredAdapter(servicesObject, nomad_bool)
-		// add some default consumers (not vis)
-		//this.service_list['solr'] = {consumers:[], id:'solr', supported_types: []	}
-		//this.service_list['pdf-splitter'] = {consumers:[], id:'pdf-splitter', supported_types: []	}
 
-		// We must loop over all services and fetch params_help from API
-		// for(var service in this.service_list) {
-		// 	for(var task in this.service_list[service].tasks) {
-		// 		for(var param in this.service_list[service].tasks[task].params_help) {
-		// 			if(this.service_list[service].tasks[task].params_help[param].values == '/api') {
-		// 				this.service_list[service].tasks[task].params_help[param].values = await this.getParamsHelp(service, task, param)
-		// 			}
-		// 		}
-		// 	}
-		// }
 		return this.service_list
 
 	} catch (error) {

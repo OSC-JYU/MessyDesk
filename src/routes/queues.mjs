@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import Boom from '@hapi/boom';
 
 import Graph from '../graph.mjs';
 import services from '../services.mjs';
@@ -7,6 +8,38 @@ import userManager from '../userManager.mjs';
 import media from '../media.mjs';
 import path from 'path';
 import { API_URL, DATA_DIR } from '../env.mjs';
+
+async function dispatchSetFilesForBatch({service, task, files, setProcessRid, outputSetRid, userRid, totalFiles, startIndex = 1}) {
+    let fileCount = startIndex;
+    for(const file of files) {
+        const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], userRid);
+
+        const msg = {
+            service,
+            task,
+            file: fileMetadata,
+            set_process: setProcessRid,
+            process: { '@rid': setProcessRid },
+            output_set: outputSetRid,
+            total_files: totalFiles,
+            current_file: fileCount,
+            userId: userRid,
+        };
+
+        if(service.tasks?.[task.id]?.source == 'source_file') {
+            const source = await Graph.getFileSource(file['@rid'], msg.file['@type']);
+            if(source) {
+                const sourceMetadata = await Graph.getUserFileMetadata(source['@rid'], userRid);
+                msg.file.source = sourceMetadata;
+            }
+        }
+
+        await nats.createSetProcessNodesAndPublish(msg);
+        fileCount += 1;
+    }
+
+    return fileCount - startIndex;
+}
 
 
 export default [
@@ -69,44 +102,14 @@ export default [
                 paused_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
-            await nats.pauseBatch(process_rid);
 
-            if(batch?.project_rid) {
-                userManager.sendToUser(request.auth.credentials.user.rid, {
-                    command: 'process_update',
-                    process: { '@rid': process_rid, status: 'paused' },
-                    batch: {
-                        state: 'paused',
-                        processed_files: batch.processed_files || 0,
-                        failed_files: batch.failed_files || 0,
-                        total_files: batch.total_files || 0,
-                        avg_sec_per_file: batch.avg_sec_per_file || 0,
-                        eta_sec: batch.eta_sec ?? null,
-                    }
-                });
-            }
-
-            return batch;
-        }
-    },
-
-    {
-        method: 'POST',
-        path: '/api/batches/{process_rid}/resume',
-        handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
-            await Graph.updateBatchProcess(process_rid, {
-                state: 'running',
-                updated_at: new Date().toISOString(),
-            });
-            const queueStatus = await nats.resumeBatch(process_rid);
-            const batch = await Graph.getBatchProcess(process_rid);
+            const queueStatus = await nats.pauseBatch(process_rid);
 
             userManager.sendToUser(request.auth.credentials.user.rid, {
                 command: 'process_update',
-                process: { '@rid': process_rid, status: 'running' },
+                process: { '@rid': process_rid, status: 'paused' },
                 batch: {
-                    state: 'running',
+                    state: 'paused',
                     processed_files: batch?.processed_files || 0,
                     failed_files: batch?.failed_files || 0,
                     total_files: batch?.total_files || 0,
@@ -115,7 +118,103 @@ export default [
                 }
             });
 
-            return {...queueStatus, batch};
+            return { ...queueStatus, batch };
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/batches/{process_rid}/resume',
+        handler: async (request) => {
+            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const batch = await Graph.getBatchProcess(process_rid);
+            if(!batch) {
+                throw Boom.notFound('Batch not found');
+            }
+            if(!batch.input_set || !batch.topic || !batch.task_id || !batch.output_set) {
+                throw Boom.badRequest('Batch resume is currently supported for set-to-set batches only');
+            }
+
+            await nats.resumeBatch(process_rid);
+
+            await Graph.updateBatchProcess(process_rid, {
+                state: 'resuming',
+                updated_at: new Date().toISOString(),
+            });
+
+            const service = services.getServiceAdapterByName(batch.topic);
+            if(!service) {
+                throw Boom.badRequest(`Service not found for topic ${batch.topic}`);
+            }
+
+            let taskPayload = { id: batch.task_id };
+            if(batch.task_payload_json) {
+                try {
+                    taskPayload = JSON.parse(batch.task_payload_json);
+                } catch {
+                    taskPayload = { id: batch.task_id };
+                }
+            }
+            if(!taskPayload.id) {
+                taskPayload.id = batch.task_id;
+            }
+
+            const task = JSON.parse(JSON.stringify(taskPayload));
+            if(service.external_tasks) {
+                task.name = task.name || task.id;
+            } else {
+                if(!service.tasks[task.id]) {
+                    throw Boom.badRequest('Task not found in service');
+                }
+                task.name = service.tasks[task.id].name;
+            }
+
+            if(service.external_tasks) {
+                task.params = task.system_params || task.params || {};
+                if(service.models && task.model) {
+                    const modelId = typeof task.model === 'string' ? task.model : task.model.id;
+                    if(modelId && service.models[modelId]) {
+                        task.model = structuredClone(service.models[modelId]);
+                        task.model.id = modelId;
+                    }
+                }
+            }
+
+            const setFiles = await Graph.getSetFiles(batch.input_set, request.auth.credentials.user.rid, {limit: 10000});
+            const processedRids = new Set(await Graph.getProcessedInputFileRidsForBatch(process_rid));
+            const pendingFiles = setFiles.files.filter((file) => !processedRids.has(file['@rid']));
+
+            await dispatchSetFilesForBatch({
+                service,
+                task,
+                files: pendingFiles,
+                setProcessRid: process_rid,
+                outputSetRid: batch.output_set,
+                userRid: request.auth.credentials.user.rid,
+                totalFiles: batch.total_files || setFiles.files.length,
+                startIndex: Number(batch.processed_files || 0) + 1,
+            });
+
+            const resumedBatch = await Graph.updateBatchProcess(process_rid, {
+                state: 'running',
+                updated_at: new Date().toISOString(),
+            });
+
+            userManager.sendToUser(request.auth.credentials.user.rid, {
+                command: 'process_update',
+                process: { '@rid': process_rid, status: 'running' },
+                batch: {
+                    state: 'running',
+                    processed_files: resumedBatch?.processed_files || 0,
+                    failed_files: resumedBatch?.failed_files || 0,
+                    total_files: resumedBatch?.total_files || 0,
+                    avg_sec_per_file: resumedBatch?.avg_sec_per_file || 0,
+                    eta_sec: resumedBatch?.eta_sec ?? null,
+                    pending_files: pendingFiles.length,
+                }
+            });
+
+            return {status: 'running', process_rid, resumed_messages: pendingFiles.length, batch: resumedBatch};
         }
     },
 
@@ -357,6 +456,7 @@ export default [
                         task_id: task.id,
                         input_set: set_rid,
                         output_set: nodes.set ? nodes.set['@rid'] : null,
+                        task_payload_json: JSON.stringify(request.payload),
                         total_files: set_files.files.length,
                     });
                     // add nodes (Process and Set) to UI
@@ -365,38 +465,18 @@ export default [
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                     //console.log('set_files: ', set_files);
                     
-                    var file_count = 1;
-                    for(var file of set_files.files) {
-                        var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
-                        console.log('file_metadata: ', file_metadata);
+                    const dispatched = await dispatchSetFilesForBatch({
+                        service,
+                        task,
+                        files: set_files.files,
+                        setProcessRid: nodes.process['@rid'],
+                        outputSetRid: nodes.set['@rid'],
+                        userRid: request.auth.credentials.user.rid,
+                        totalFiles: set_files.files.length,
+                        startIndex: 1,
+                    });
 
-                        var msg = {
-                            service: service,
-                            task: task,
-                            file: file_metadata,
-                            set_process: nodes.process['@rid'],
-                            process: null,   // process node will be created in the queue
-                            output_set: nodes.set['@rid'],
-                            total_files: set_files.files.length,
-                            current_file: file_count,
-                            userId: request.auth.credentials.user.rid
-                        }
-
-
-                        if(service.tasks[task.id]?.source == 'source_file') {
-                            const source = await Graph.getFileSource(file['@rid'], msg.file['@type']);
-                            console.log('source: ', source);
-                            if(source) {
-                                const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
-                                msg.file.source = source_metadata;
-                            }
-                        }
-
-                        nats.createSetProcessNodesAndPublish(msg)
-                        file_count += 1;
-                    }
-
-                    console.log('All files processed: ', file_count);
+                    console.log('All files queued for processing: ', dispatched);
                     
                 }
 

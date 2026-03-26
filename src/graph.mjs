@@ -267,17 +267,15 @@ graph.createUser = async function (data) {
 	}
 
 	// email must be unique
-	const query = `MATCH {type:User} WHERE id = "${data.id}" RETURN count(p) as users`
+	const query = `SELECT count() AS users FROM User WHERE id = "${data.id}"`
 	var response = await db.sql(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
 	//data['service_groups'] = []
 	var user = await this.create('User', data, true)
+	console.log('User created: ', user)
 	await this.initUserData(user)
 
-	// commands to make demo projects
-	//var demo1 = `http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" '${data.id}'`
-	//user.demos = demo1
 
 	return user
 }
@@ -507,20 +505,30 @@ async function getProjectThumbnails(user_rid, data, data_dir) {
 }
 
 async function getSetThumbnails(user_rid, data, project_rid) {
+	if(!data?.nodes || data.nodes.length === 0) return data
 
-	const query = `SELECT path FROM File WHERE set = "${project_rid}" ORDER BY uuid LIMIT 4`
-	var response = await db.sql(query)
-	console.log('SET THUMBNAILS: ', response.result)
+	const setNodes = data.nodes.filter((node) => node?.data?.type === 'Set' && node?.data?.id)
+	if(setNodes.length === 0) return data
 
-	for (var set of data.nodes) {
-		for (var thumbs of response.result) {
-			if (set.data.type === 'Set' && set.data['id'] === thumbs.set) {
-			
-				set.data.paths = []
+	const setIds = setNodes.map((node) => String(node.data.id))
+	const quotedSetIds = setIds.map((rid) => `"${rid.replace(/"/g, '\\"')}"`).join(',')
+	const query = `SELECT set, path, label FROM File WHERE set IN [${quotedSetIds}] ORDER BY label`
+	const response = await db.sql(query)
 
-			}
-		}
+	const thumbsBySet = new Map()
+	for (const item of response.result || []) {
+		if(!item?.set || !item?.path) continue
+		if(!thumbsBySet.has(item.set)) thumbsBySet.set(item.set, [])
+		const list = thumbsBySet.get(item.set)
+		if(list.length >= 4) continue
+		const dirPath = item.path.split('/').slice(0, -1).join('/')
+		list.push(API_URL + 'api/thumbnails/' + dirPath + '/thumbnail.jpg')
 	}
+
+	for (const setNode of setNodes) {
+		setNode.data.paths = thumbsBySet.get(setNode.data.id) || []
+	}
+
 	return data
 }
 
@@ -739,38 +747,8 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 		msg.set_node = setNode
 	}
 
-
-	// pdfs are splitted so we give each page its own message
-	if(node_metadata.type == 'pdf') {
-		console.log('PDF: ', node_metadata)
-		msg.pdf = true
-		const first = parseInt(task.params.firstPageToConvert)
-		var last = parseInt(task.params.lastPageToConvert)
-		if(isNaN(first)) first = 0
-		console.log('TASK: ', task)
-		console.log('TASK PARAMS: ', task.params)
-		console.log('FIRST: ', first)
-		console.log('LAST: ', last)
-		
-		if(node_metadata?.metadata?.page_count) {
-			if(isNaN(last)) last = node_metadata.metadata.page_count
-			if(last > node_metadata.metadata.page_count) last = node_metadata.metadata.page_count
-			if(first < last) {
-				var c = 1
-				for(var i = first; i <= last; i++) {
-					var m = structuredClone(msg)
-					m.task.params.page = i
-					m.total_files = last - first + 1
-					m.current_file = c
-					c += 1
-					messages.push(m)
-				}	
-			}
-		}
-
-	}  else {
-		messages.push(msg)
-	}
+	messages.push(msg)
+	
 console.log('Created messages: ', messages)
 	return messages
 }
@@ -2430,6 +2408,30 @@ graph.incrementBatchFailed = async function(process_rid) {
 	}
 
 	return this.updateBatchProcess(batch['@rid'], patch)
+}
+
+graph.getProcessedInputFileRidsForBatch = async function(process_rid) {
+	const clean = this.sanitizeRID(process_rid)
+	const processResponse = await db.sql(`SELECT @rid FROM Process WHERE set_process = "${clean}"`)
+	if(!processResponse.result.length) {
+		return []
+	}
+
+	const processRids = processResponse.result
+		.map((item) => item['@rid'])
+		.filter(Boolean)
+
+	if(!processRids.length) {
+		return []
+	}
+
+	const where = processRids
+		.map((rid) => `process_rid = "${String(rid).replace(/"/g, '\\"')}"`)
+		.join(' OR ')
+
+	const query = `SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE ${where}`
+	const edgeResponse = await db.sql(query)
+	return edgeResponse.result.map((item) => item.rid).filter(Boolean)
 }
 
 

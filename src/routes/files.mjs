@@ -3,10 +3,102 @@ import media from '../media.mjs';
 //import fs from 'fs';
 import fse from 'fs-extra';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
+
+const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
+
+function getTmpDir() {
+    return path.resolve(DATA_DIR, 'tmp');
+}
+
+function createSetZipJobRecord(setRid, userRid) {
+    const requestId = randomUUID();
+    const shortId = requestId.slice(0, 8);
+    const setId = String(setRid).replace('#', '').replace(':', '_');
+    const zipOutputName = `files_${setId}_${shortId}.zip`;
+    const tmpDir = getTmpDir();
+    return {
+        id: requestId,
+        set_rid: setRid,
+        user_rid: userRid,
+        status: 'queued',
+        requested_at: Date.now(),
+        zip_output_name: zipOutputName,
+        zip_path: path.resolve(tmpDir, zipOutputName),
+    };
+}
+
+function getSetZipJobPath(jobId) {
+    return path.resolve(getTmpDir(), `set_zip_job_${jobId}.json`);
+}
+
+async function saveSetZipJob(job) {
+    await fse.outputJson(getSetZipJobPath(job.id), job);
+}
+
+async function loadSetZipJob(setRid, userRid, jobId) {
+    if (!/^[a-f0-9-]{36}$/i.test(jobId)) {
+        return null;
+    }
+    const jobPath = getSetZipJobPath(jobId);
+    if (!(await fse.pathExists(jobPath))) {
+        return null;
+    }
+    const job = await fse.readJson(jobPath);
+    if (job.set_rid !== setRid || job.user_rid !== userRid) {
+        return null;
+    }
+    return job;
+}
+
+async function cleanupSetZipJob(job) {
+    await Promise.allSettled([
+        fse.unlink(job.zip_path),
+        fse.unlink(getSetZipJobPath(job.id)),
+    ]);
+}
+
+async function queueSetZipJob(request, setRid) {
+    request.query.limit = '10000';
+    const filesResponse = await Graph.getSetFiles(setRid, request.auth.credentials.user.rid, request.query);
+
+    if (!filesResponse || !filesResponse.files || filesResponse.files.length === 0) {
+        throw Boom.notFound('No files found in set');
+    }
+
+    const fileList = filesResponse.files.filter((file) => file.path);
+    if (fileList.length === 0) {
+        throw Boom.notFound('No valid file paths found');
+    }
+
+    const job = createSetZipJobRecord(setRid, request.auth.credentials.user.rid);
+    await saveSetZipJob(job);
+
+    const dbName = path.basename(DATA_DIR);
+    const payload = {
+        service: { id: 'md-zip_fs' },
+        task: { id: 'zip', params: { compression: 0 }, name: 'Zip Set' },
+        file: { '@rid': setRid, '@type': 'Set', type: 'set', label: `Set ${setRid}` },
+        set_rid: setRid,
+        db_name: dbName,
+        zip_output_name: job.zip_output_name,
+        set_files: fileList.map((file) => ({
+            '@rid': file['@rid'],
+            path: file.path,
+            label: file.label,
+            original_filename: file.original_filename,
+        })),
+        userId: request.auth.credentials.user.rid,
+    };
+
+    await nats.publish('md-zip_fs', JSON.stringify(payload));
+
+    return job;
+}
 
 export default [
     {
@@ -141,33 +233,6 @@ console.log('filetype', file_type);
                             } catch (error) {
                                 console.log('Error getting text description:', error);
                             }
-                        }
-
-
-                        // PDF
-                        if (file_type === 'pdf') {
-                            const data = {
-                                topic: {id: 'md-pdf-splitter_fs'},
-                                service: {id: 'md-pdf-splitter_fs'},
-                                task: {id: 'split', params: {}},
-                                file: filegraph,
-                                userId: request.auth.credentials.user.rid,
-                                role: 'pdf-splitter'
-                            };
-                            nats.publish(data.topic.id, JSON.stringify(data));
-                        }
-
-                        // PDF
-                        if (file_type === 'zip') {
-                                // we save metadata for zip
-                                try {
-                                    await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                        key: 'metadata',
-                                        value: filegraph.metadata
-                                    }, 'File');
-                                } catch (error) {
-                                    console.log('Error setting node attribute:', error);
-                                }
                         }
 
                         // Add file to UI
@@ -377,45 +442,7 @@ console.log('filetype', file_type);
             }
         }
     },
-    {
-        method: 'GET',
-        path: '/api/files/{file_rid}/pages/{page_number}',
-        handler: async (request, h) => {
-            try {
-                const file_metadata = await Graph.getUserFileMetadata(
-                    request.params.file_rid,
-                    request.auth.credentials.user.rid
-                );
 
-                const pageFilename = path.join(
-                    path.dirname(file_metadata.path),
-                    'pages',
-                    `page_${request.params.page_number}.pdf`
-                );
-                // Verify file exists before creating read stream
-                try {
-                    await fse.access(pageFilename);
-                } catch (err) {
-                    return h.response().code(404);
-                }
-
-                const src = fse.createReadStream(pageFilename);
-                const response = h.response(src);
-
-                // Only set PDF headers if original file was PDF
-                if (file_metadata.type === 'pdf') {
-                    const pageLabel = `page_${request.params.page_number}_${file_metadata.label}`;
-                    response.header('Content-Disposition', `inline; filename=${pageLabel}`);
-                    response.type('application/pdf');
-                }
-
-                return response;
-            } catch (e) {
-                console.error('Error accessing file:', e);
-                return h.response().code(403);
-            }
-        }
-    },
     {
         method: 'GET',
         path: '/api/sets/{rid}/files',
@@ -429,35 +456,122 @@ console.log('filetype', file_type);
         }
     },
     {
+        method: 'POST',
+        path: '/api/sets/{rid}/files/zip/jobs',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const job = await queueSetZipJob(request, setRid);
+                return h.response({
+                    job_id: job.id,
+                    status: 'queued',
+                    status_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}`,
+                    download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                }).code(202);
+            } catch (err) {
+                if (Boom.isBoom(err)) {
+                    throw err;
+                }
+                console.error('Error creating set zip job:', err);
+                throw Boom.internal('Error creating zip job');
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files/zip/jobs/{job_id}',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const job = await loadSetZipJob(setRid, userRid, request.params.job_id);
+
+                if (!job) {
+                    return h.response({ message: 'Zip job not found' }).code(404);
+                }
+
+                if (await fse.pathExists(job.zip_path)) {
+                    return h.response({
+                        job_id: job.id,
+                        status: 'ready',
+                        download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                    });
+                }
+
+                if (Date.now() - job.requested_at > SET_ZIP_JOB_TTL_MS) {
+                    await cleanupSetZipJob(job);
+                    return h.response({
+                        job_id: job.id,
+                        status: 'failed',
+                        message: 'Zip generation timed out',
+                    }).code(504);
+                }
+
+                return h.response({
+                    job_id: job.id,
+                    status: 'processing',
+                });
+            } catch (err) {
+                console.error('Error checking set zip job:', err);
+                return h.response({ message: 'Error checking zip job status' }).code(500);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files/zip/jobs/{job_id}/download',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const job = await loadSetZipJob(setRid, userRid, request.params.job_id);
+
+                if (!job) {
+                    return h.response('Zip job not found').code(404);
+                }
+
+                if (!(await fse.pathExists(job.zip_path))) {
+                    return h.response('Zip not ready').code(409);
+                }
+
+                const setId = String(setRid).replace('#', '').replace(':', '_');
+                const filename = `files_${setId}.zip`;
+                const response = h.file(job.zip_path, {
+                    filename,
+                    mode: 'attachment',
+                    confine: false,
+                });
+
+                response.events.on('finish', async () => {
+                    await cleanupSetZipJob(job);
+                });
+
+                return response;
+            } catch (err) {
+                console.error('Error downloading set zip job output:', err);
+                return h.response('Error downloading zip file').code(500);
+            }
+        }
+    },
+    {
         method: 'GET',
         path: '/api/sets/{rid}/files/zip',
         handler: async (request, h) => {
             try {
-                // usually we want all files so set params to high number
-                request.query.limit = '1000';
-                // Get the set files with proper authentication
-                const set_rid = Graph.sanitizeRID(request.params.rid);
-                const n = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, request.query);
-
-                if (!n || !n.files || n.files.length === 0) {
-                    return h.response('No files found in set').code(404);
-                }
-
-                const fileList = [];
-                n.files.forEach(file => {
-                    if (file.path) {
-                        fileList.push(file);
-                    }
-                });
-
-                if (fileList.length === 0) {
-                    return h.response('No valid file paths found').code(404);
-                }
-
-                // Create and stream the zip file
-                return await media.createZipAndStream(fileList, request, h, set_rid);
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const job = await queueSetZipJob(request, setRid);
+                return h.response({
+                    job_id: job.id,
+                    status: 'queued',
+                    message: 'Zip generation started. Poll status_url until ready.',
+                    status_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}`,
+                    download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                }).code(202);
 
             } catch (err) {
+                if (Boom.isBoom(err)) {
+                    throw err;
+                }
                 console.error('Error creating zip:', err);
                 return h.response('Error creating zip file').code(500);
             }

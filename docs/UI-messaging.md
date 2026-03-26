@@ -1,69 +1,115 @@
 
+# UI messaging (SSE)
 
+MessyDesk UI receives backend updates through `GET /events` as Server-Sent Events.
 
-When setProcess is created, it has status "running".
-- service must call /api/nomad/services/done in order to change state to "done"
+Current commands handled in UI:
 
-## SINGLE FILE PROCESSING:
+- `add`
+- `update`
+- `process_update`
+- `process_finished`
 
-When Process is added to single file:
+## Single file processing
 
-    {
-        command: "add",
-        input: [RID],    // RID of file node
-        node: {status: "running", [... rest of node data]}
+When process is created:
+
+```json
+{
+    "command": "add",
+    "type": "process",
+    "input": "#rid_of_input_file",
+    "node": { "@rid": "#rid_of_process", "status": "running" }
+}
+```
+
+When output file node is added:
+
+```json
+{
+    "command": "add",
+    "type": "file",
+    "input": "#rid_of_process",
+    "node": { "@rid": "#rid_of_output_file" },
+    "process": { "@rid": "#rid_of_process", "status": "finished" }
+}
+```
+
+When file metadata/image is updated:
+
+```json
+{
+    "command": "update",
+    "target": "#rid_of_file",
+    "node": { "metadata": {}, "image": "..." }
+}
+```
+
+## Set processing
+
+When set process starts:
+
+```json
+{
+    "command": "add",
+    "type": "process",
+    "input": "#rid_of_input_set",
+    "node": { "@rid": "#rid_of_set_process", "status": "running" },
+    "output": { "@rid": "#rid_of_output_set", "status": "running" }
+}
+```
+
+Progress updates (throttled in backend, currently every 10 files):
+
+```json
+{
+    "command": "process_update",
+    "process": { "@rid": "#rid_of_set_process", "status": "running" },
+    "set": { "@rid": "#rid_of_output_set", "status": "running", "count": 120 },
+    "current_file": 120,
+    "total_files": 1000
+}
+```
+
+Completion:
+
+```json
+{
+    "command": "process_finished",
+    "process": { "@rid": "#rid_of_set_process", "status": "finished" },
+    "set": { "@rid": "#rid_of_output_set", "status": "finished", "count": 1000 },
+    "current_file": 1000
+}
+```
+
+## Planned message extensions for batch UX
+
+To support pause/resume and ETA without flooding UI, extend `process_update` payload with:
+
+```json
+{
+    "batch": {
+        "state": "running",
+        "processed_files": 120,
+        "failed_files": 3,
+        "total_files": 1000,
+        "avg_sec_per_file": 1.84,
+        "eta_sec": 1619
     }
+}
+```
 
-When process outputs file to single file:
+Suggested states:
 
-    {
-        command: "add",
-        input: [RID],  	// RID of process node
-        node: {}
-    }
+- `queued`
+- `running`
+- `paused`
+- `cancelling`
+- `cancelled`
+- `finished`
+- `failed`
 
-When updating single file (like adding thumnbnail):
+## Notes
 
-    {
-        command: "update",
-        target: [RID],  	// RID of File node
-        node: {[UPDATED PARAMS]}
-    }
-
-When processing is done:
-
-    {
-        command: "process_finished",
-        target: [RID],  	// RID of process node
-        node: {status: "done"}
-    }	
-
-
-## SET PROCESSING:
-
-WHen Process is added to Set:
-
-    {
-        command: "add",
-        input: [RID],    // RID of set node
-        node: {status: "running", [... rest of Process node data]}
-        output: {status_"running", [... rest of Set node data]}
-    }
-
-When process outputs file to set:
-
-    {
-        command: "process_update",
-        target: [RID],    // RID of set node
-        total_count: [TOTAL COUNT OF SET FILES],
-        current_count: [NUMBER OF FILES PROCESSED]
-
-    }
-
-When processing ins finished:
-
-    {
-        command: "process_finished",
-        target: [RID],  	// RID of process node
-        node: {status: "done"}
-    }
+- Explicit done endpoint is `POST /api/nomad/process/files/done`.
+- Keep SSE updates aggregate and bounded (time- or count-based) to avoid UI event storms.
