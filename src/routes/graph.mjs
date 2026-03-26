@@ -1,6 +1,7 @@
 import Graph from '../graph.mjs';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
+import Boom from '@hapi/boom';
 export default [
     {
         method: 'GET',
@@ -62,12 +63,30 @@ export default [
         method: 'DELETE',
         path: '/api/graph/vertices/{rid}',
         handler: async (request) => {
-            const result = await Graph.deleteNode(
-                Graph.sanitizeRID(request.params.rid),
-                request.auth.credentials.user.rid,
-                nats
-            );
-            return result;
+            try {
+                const result = await Graph.deleteNode(
+                    Graph.sanitizeRID(request.params.rid),
+                    request.auth.credentials.user.rid,
+                    nats
+                );
+                return result;
+            } catch (error) {
+                const message = String(error?.message || error || 'Delete failed');
+
+                if (error?.isBoom) {
+                    throw error;
+                }
+
+                if (/node not found|response code 404|not found/i.test(message)) {
+                    throw Boom.notFound('Node not found');
+                }
+
+                if (/forbidden|owner|access/i.test(message)) {
+                    throw Boom.forbidden('Not allowed to delete this node');
+                }
+
+                throw Boom.badImplementation(message);
+            }
         }
     },
 

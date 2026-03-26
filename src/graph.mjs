@@ -1493,78 +1493,122 @@ graph.createWithSQL = async function (type, data, admin) {
 
 graph.deleteNode = async function (rid, userRID) {
 	console.log('deleting node', rid, userRID)
-	if (!rid.match(/^#/)) rid = '#' + rid
+	rid = this.sanitizeRID(rid)
 
-	var node = await this.getNodeAttributes(rid, userRID)
+	const rootNode = await this.getNodeAttributes(rid, userRID)
+	if(!rootNode) throw new Error('Node not found')
 
-	if(!node) throw ('Node not found')
+	const queue = [rid]
+	const visited = new Set()
+	const toDelete = new Set()
+	const solrTargets = new Set()
+	const pathTargets = new Set()
 
-	// Set handling
-	if(node['@type'] == 'Set') {
-		const fileBySetQuery = `MATCH {type:File, as:file, where:(set = "${rid}")} RETURN DISTINCT file.@rid AS rid`
-		let filesResponse = await db.sql(fileBySetQuery)
-
-		for(const file of filesResponse.result) {
-			await this.deleteNode(file.rid, userRID)
-		}
-
-		const query_path_set = `SELECT path FROM ${rid}`
-		const setPathResponse = await db.sql(query_path_set)
-		await db.sql(`DELETE FROM ${rid}`)
-		const setPath = setPathResponse.result[0]?.path
-		if(setPath) {
-			await media.deleteNodePath(setPath)
-		}
-		return { path: setPath || null }
-	}
-	
-	// remove all DERIVED_FROM edges and connected nodes recursively
-	const q = `TRAVERSE inE('DERIVED_FROM'), outV()  FROM (select from DERIVED_FROM where process_rid =  "${rid}")`
-	var traverse = await db.sql(q)
-	var targets = []
-	for(var t of traverse.result) {
-		
-		if(t['@type'] == 'File') {
-			targets.push({id: t['@rid']})
-		} else if(t['@type'] == 'DERIVED_FROM' && t['process_rid']) {  // let's delete Process nodes as well
-			targets.push({id: t['process_rid']})	
-		}
-		
-	}
-
-	// if node itself is a solr indexer, then delete the index
-	if(node['service'] == 'Solr') {
-		console.log('deleting solr index', rid)
-		await solr.dropSetIndex(rid)
-	}
-
-	// if this is setProcess, then delete all Process nodes that has property set_process = rid
-	if(node['@type'] == 'SetProcess') {
-		const query_delete_process = `DELETE FROM Process WHERE set_process = "${rid}"`
-		await db.sql(query_delete_process)
-	}
-
-	// get path for directory deletion
-	const query_path = `SELECT path FROM ${rid}`
-	var path_result = await db.sql(query_path)
-
-	if(targets.length == 0)
-		targets.push({id: rid}) // if there is no derived_from edges, we still need to delete the node itself
-	await db.deleteMany(targets)
-
-	const node_path = node.path
-	if(node_path && node['@type'] != 'Filter') {
-		if(node['@type'] == 'Process' && path.basename(node_path) == 'files') {
-			await media.deleteNodePath(path.dirname(node_path))
-		} else {
-			await media.deleteNodePath(node_path)
+	const enqueueRid = (value) => {
+		if(!value) return
+		try {
+			const clean = this.sanitizeRID(String(value))
+			if(!visited.has(clean)) queue.push(clean)
+		} catch {
+			// ignore invalid/non-RID values in edge attributes
 		}
 	}
-	
-	if(path_result.result[0] && path_result.result[0].path) {
-		return { path: path_result.result[0].path}	
-	} else {
-		return {path: null}
+
+	const isNotFoundError = (error) => {
+		const message = String(error?.message || '')
+		return /response code 404|not found/i.test(message)
+	}
+
+	while(queue.length > 0) {
+		const current = queue.pop()
+		if(visited.has(current)) continue
+		visited.add(current)
+
+		let node = null
+		try {
+			const nodeResponse = await db.sql(`SELECT @rid, @type, path, service FROM ${current}`)
+			node = nodeResponse.result[0]
+		} catch (error) {
+			if(isNotFoundError(error)) {
+				// Stale process_rid references in edge attributes are allowed; just skip missing nodes.
+				continue
+			}
+			throw error
+		}
+		if(!node || !node['@rid']) continue
+
+		toDelete.add(node['@rid'])
+
+		if(node.service === 'Solr') {
+			solrTargets.add(node['@rid'])
+		}
+
+		if(node.path && node['@type'] !== 'Filter') {
+			if(node['@type'] === 'Process' && path.basename(node.path) === 'files') {
+				pathTargets.add(path.dirname(node.path))
+			} else {
+				pathTargets.add(node.path)
+			}
+		}
+
+		// Descendants in lineage graph: child -DERIVED_FROM-> current
+		const descendantsResponse = await db.sql(`SELECT @out AS rid, process_rid FROM DERIVED_FROM WHERE @in = ${current}`)
+		for(const rel of descendantsResponse.result || []) {
+			enqueueRid(rel.rid)
+			enqueueRid(rel.process_rid)
+		}
+
+		// Process nodes are referenced in edge attributes, not as graph endpoints.
+		// Deleting a process must delete output nodes linked via process_rid.
+		const processLinkedResponse = await db.sql(`SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = "${current}"`)
+		for(const rel of processLinkedResponse.result || []) {
+			enqueueRid(rel.rid)
+		}
+
+		// Also remove processes referenced only in file-link edge attributes.
+		const linkedEdgesResponse = await db.sql(`SELECT process_rid FROM DERIVED_FROM WHERE @in = ${current} OR @out = ${current}`)
+		for(const edge of linkedEdgesResponse.result || []) {
+			enqueueRid(edge.process_rid)
+		}
+
+		// Set members may not have DERIVED_FROM to Set, include both current and legacy schema.
+		if(node['@type'] === 'Set') {
+			let filesResponse = await db.sql(`SELECT @rid AS rid FROM File WHERE set = "${current}"`)
+			if(!filesResponse.result.length) {
+				filesResponse = await db.sql(`MATCH {type:Set, as:set, where:(@rid = ${current})}-HAS_ITEM->{as:file, where:(@type = 'File')} RETURN DISTINCT file.@rid AS rid`)
+			}
+			for(const file of filesResponse.result || []) {
+				enqueueRid(file.rid)
+			}
+		}
+
+		// SetProcess may own Process nodes via set_process attribute.
+		if(node['@type'] === 'SetProcess') {
+			const processResponse = await db.sql(`SELECT @rid AS rid FROM Process WHERE set_process = "${current}"`)
+			for(const processNode of processResponse.result || []) {
+				enqueueRid(processNode.rid)
+			}
+		}
+	}
+
+	for(const solrRid of solrTargets) {
+		console.log('deleting solr index', solrRid)
+		await solr.dropSetIndex(solrRid)
+	}
+
+	const targets = Array.from(toDelete).map((id) => ({id}))
+	if(targets.length > 0) {
+		await db.deleteMany(targets)
+	}
+
+	const uniquePaths = Array.from(pathTargets).sort((a, b) => b.length - a.length)
+	for(const p of uniquePaths) {
+		await media.deleteNodePath(p)
+	}
+
+	return {
+		path: uniquePaths[0] || null,
+		deleted: targets.length,
 	}
 
 }
