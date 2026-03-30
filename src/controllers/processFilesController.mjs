@@ -257,13 +257,14 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             if (message.output_set) {
                 console.log('** updating set file count **', message.output_set)
                 const count = await Graph.updateFileCount(message.output_set);
+                const effectiveBatchTotal = message.batch_total_files || message.total_files;
                 const batch = await Graph.incrementBatchProcessed(
                     message.set_process || message.process['@rid'],
                     message?.response?.time,
-                    message.total_files
+                    effectiveBatchTotal
                 );
                 const batchProcessed = batch?.processed_files ?? message.current_file;
-                const batchTotal = batch?.total_files ?? message.total_files;
+                const batchTotal = batch?.total_files ?? effectiveBatchTotal;
                 const isBatchFinished = batch?.state === 'finished' || (batchTotal && batchProcessed >= batchTotal);
                 // check if current file is the last file -> we are done!
                 if(isBatchFinished) {

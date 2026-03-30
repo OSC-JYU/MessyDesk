@@ -41,6 +41,22 @@ async function dispatchSetFilesForBatch({service, task, files, setProcessRid, ou
     return fileCount - startIndex;
 }
 
+function getFileSortName(file) {
+    if (!file) return '';
+    if (file.original_filename) return String(file.original_filename).toLowerCase();
+    if (file.label) return String(file.label).toLowerCase();
+    if (file.path) return path.basename(String(file.path)).toLowerCase();
+    return '';
+}
+
+function sortFilesByFilename(files) {
+    return [...(files || [])].sort((a, b) => {
+        const aName = getFileSortName(a);
+        const bName = getFileSortName(b);
+        return aName.localeCompare(bName);
+    });
+}
+
 
 export default [
     // pipeline
@@ -385,14 +401,20 @@ export default [
                 // in many-to-one outputs we do not create process nodes for each file 
                 if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
                     var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
+                    const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
+                        input_set: set_rid,
+                        label: `${task.name || task.id} output`,
+                        project_rid: set_metadata.project_rid,
+                    })
                     await Graph.initBatchProcess(processNode['@rid'], {
                         topic: topic,
                         task_id: task.id,
                         input_set: set_rid,
+                        output_set: outputSetNode['@rid'],
                         total_files: set_files.files.length,
                     });
                     // add node to UI
-                    var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode};
+                    var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode, output: outputSetNode};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
                     var set_type = ''
@@ -406,6 +428,7 @@ export default [
                         msg.file = file_metadata;
                         msg.process = processNode;
                         msg.input_set = set_rid;  // processing endpoint should ask all files at once as a zip file
+                        msg.output_set = outputSetNode['@rid'];
              
                         msg.output = service.tasks[task.id].output;
                         msg.set_process = processNode['@rid'];
@@ -415,10 +438,18 @@ export default [
                         nats.publish(topic + '_batch', JSON.stringify(msg));
 
                     } else {
-                        console.log('many-to-many output');
-                        var file_count = 1;
-                        const output_uuid = randomUUID()
-                        for(var file of set_files.files) {
+                        console.log('many-to-one grouped output');
+                        const groupedFiles = await Graph.groupFilesByRootSource(set_files.files, {
+                            boundary: 'pdf',
+                            excludeRootTypes: ['zip'],
+                        });
+
+                        let batchFileCount = 1;
+                        for(const group of groupedFiles) {
+                            const output_uuid = randomUUID()
+                            let groupFileCount = 1
+                            const orderedGroupFiles = sortFilesByFilename(group.files)
+                            for(const file of orderedGroupFiles) {
                             var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
     
                             // do we need info about "parent" file? (when processing osd.json for example)
@@ -436,14 +467,27 @@ export default [
                             msg.process = processNode;
                             msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
                             msg.output = service.tasks[task.id].output
-                            msg.file = file;
+                            msg.file = file_metadata;
+                            msg.output_set = outputSetNode['@rid'];
+                            msg.root_source = {
+                                '@rid': group.source_rid,
+                                label: group.label,
+                                type: group.type,
+                                path: group.path,
+                            }
                             msg.set_process = processNode['@rid'];
-                            msg.total_files = set_files.files.length;
-                            msg.current_file = file_count;
+                            // per-group counters for many-to-one combine behavior
+                            msg.total_files = group.files.length;
+                            msg.current_file = groupFileCount;
+                            // aggregated counters for backend progress tracking
+                            msg.batch_total_files = set_files.files.length;
+                            msg.batch_current_file = batchFileCount;
                             msg.userId = request.auth.credentials.user.rid;
                             nats.publish(topic + '_batch', JSON.stringify(msg));
     
-                            file_count += 1;
+                            groupFileCount += 1;
+                            batchFileCount += 1;
+                            }
                         }
                     }
 

@@ -1571,14 +1571,16 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 
+	const lineageSourceRid = message?.root_source?.['@rid'] || message?.file?.['@rid']
+
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
-		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
+		await this.connectDerivedFrom(file_rid, lineageSourceRid, process_rid)
 		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
-		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
+		await this.connectDerivedFrom(file_rid, lineageSourceRid, process_rid)
 	}
 
 	return response.result[0]
@@ -2772,6 +2774,127 @@ graph.getProcessedInputFileRidsForBatch = async function(process_rid) {
 	const query = `SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE ${where}`
 	const edgeResponse = await db.sql(query)
 	return edgeResponse.result.map((item) => item.rid).filter(Boolean)
+}
+
+graph.groupFilesByRootSource = async function(files, options = {}) {
+	const boundary = String(options.boundary || 'pdf').toLowerCase()
+	const excludedRootTypes = new Set((options.excludeRootTypes || ['zip']).map((type) => String(type).toLowerCase()))
+	if(!Array.isArray(files) || files.length === 0) return []
+
+	const fileByRid = new Map()
+	for(const file of files) {
+		if(!file || !file['@rid']) continue
+		fileByRid.set(this.sanitizeRID(file['@rid']), file)
+	}
+
+	const parentByTarget = new Map()
+	const nodeMetaByRid = new Map()
+	for(const [rid, file] of fileByRid.entries()) {
+		nodeMetaByRid.set(rid, {
+			'@rid': rid,
+			label: file.label,
+			type: file.type,
+			path: file.path,
+			original_filename: file.original_filename,
+		})
+	}
+
+	const ensureNodeMetadata = async (rids) => {
+		const missing = rids.filter((rid) => !nodeMetaByRid.has(rid))
+		if(!missing.length) return
+		const query = `SELECT @rid AS rid, label, type, path, original_filename FROM File WHERE @rid IN [${missing.join(',')}]`
+		const response = await db.sql(query)
+		for(const row of response.result || []) {
+			nodeMetaByRid.set(row.rid, {
+				'@rid': row.rid,
+				label: row.label,
+				type: row.type,
+				path: row.path,
+				original_filename: row.original_filename,
+			})
+		}
+	}
+
+	const traverseAncestorsBatched = async (seedRids, maxDepth = 40) => {
+		let frontier = Array.from(new Set(seedRids))
+		const visited = new Set()
+		let depth = 0
+
+		while(frontier.length > 0 && depth < maxDepth) {
+			const currentBatch = frontier.filter((rid) => !visited.has(rid))
+			if(!currentBatch.length) break
+			frontier = []
+			for(const rid of currentBatch) visited.add(rid)
+
+			const edgeQuery = `SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN [${currentBatch.join(',')}]`
+			const edgeResponse = await db.sql(edgeQuery)
+			const sourceRids = []
+			for(const edge of edgeResponse.result || []) {
+				if(!edge.target_rid || !edge.source_rid) continue
+				if(!parentByTarget.has(edge.target_rid)) {
+					parentByTarget.set(edge.target_rid, edge.source_rid)
+				}
+				sourceRids.push(edge.source_rid)
+				if(!visited.has(edge.source_rid)) {
+					frontier.push(edge.source_rid)
+				}
+			}
+
+			if(sourceRids.length) {
+				await ensureNodeMetadata(Array.from(new Set(sourceRids.map((rid) => this.sanitizeRID(rid)))))
+			}
+			depth += 1
+		}
+	}
+
+	const seedRids = Array.from(fileByRid.keys())
+	await traverseAncestorsBatched(seedRids)
+
+	const groupsByRid = new Map()
+	for(const [fileRid, file] of fileByRid.entries()) {
+		let cursor = fileRid
+		let boundaryCandidate = null
+		let highestNonExcluded = fileRid
+		let guard = 0
+
+		while(cursor && guard < 40) {
+			const meta = nodeMetaByRid.get(cursor) || {}
+			const nodeType = String(meta.type || '').toLowerCase()
+			if(!excludedRootTypes.has(nodeType)) {
+				highestNonExcluded = cursor
+				if(boundary === 'pdf' && nodeType === 'pdf') {
+					boundaryCandidate = cursor
+				}
+			}
+
+			const parent = parentByTarget.get(cursor)
+			if(!parent) break
+			cursor = parent
+			guard += 1
+		}
+
+		const rootRid = boundaryCandidate || highestNonExcluded || fileRid
+		if(!groupsByRid.has(rootRid)) {
+			const rootMeta = nodeMetaByRid.get(rootRid) || {}
+			groupsByRid.set(rootRid, {
+				source_rid: rootRid,
+				label: rootMeta.label || rootMeta.original_filename || file.label,
+				type: rootMeta.type || file.type,
+				path: rootMeta.path || null,
+				files: [],
+			})
+		}
+
+		groupsByRid.get(rootRid).files.push(file)
+	}
+
+	const groups = Array.from(groupsByRid.values())
+	groups.sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+	for(const group of groups) {
+		group.files.sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+	}
+
+	return groups
 }
 
 
