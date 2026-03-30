@@ -10,6 +10,7 @@ import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
 
 const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
+const MAX_VERSION_TEXT_BYTES = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
 
 function getTmpDir() {
     return path.resolve(DATA_DIR, 'tmp');
@@ -98,6 +99,101 @@ async function queueSetZipJob(request, setRid) {
     await nats.publish('md-zip_fs', JSON.stringify(payload));
 
     return job;
+}
+
+function getBackupPath(filePath) {
+    return `${filePath}.original`;
+}
+
+function resolveManagedFilePath(filePath) {
+    const absoluteDataDir = path.resolve(DATA_DIR);
+    const absoluteFilePath = path.resolve(filePath);
+    if (!absoluteFilePath.startsWith(absoluteDataDir + path.sep) && absoluteFilePath !== absoluteDataDir) {
+        throw Boom.forbidden('File path is outside managed data directory');
+    }
+    return absoluteFilePath;
+}
+
+async function saveUploadStreamToPath(fileStream, targetPath) {
+    await fse.ensureDir(path.dirname(targetPath));
+    await new Promise((resolve, reject) => {
+        const writeStream = fse.createWriteStream(targetPath);
+        writeStream.on('error', reject);
+        fileStream.on('error', reject);
+        writeStream.on('finish', resolve);
+        fileStream.pipe(writeStream);
+    });
+}
+
+function queueThumbnailRefresh(file, userId) {
+    if (!file || !file.type) return;
+
+    if (file.type === 'image') {
+        const data = {
+            file,
+            userId,
+            role: 'internal_versioning',
+            process: {kind: 'internal_versioning'},
+            target: file['@rid'],
+            task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
+            id: 'md-thumbnailer'
+        };
+        nats.publish(data.id, JSON.stringify(data));
+    } else if (file.type === 'pdf') {
+        const data = {
+            file,
+            userId,
+            process: {kind: 'internal_versioning'},
+            target: file['@rid'],
+            task: {
+                id: 'thumbnail',
+                params: {
+                    page: 1,
+                    previewResolution: 150,
+                    thumbnailResolution: 80
+                }
+            },
+            role: 'thumbnail',
+            id: 'md-poppler'
+        };
+        nats.publish(data.id, JSON.stringify(data));
+    }
+}
+
+async function updateFileMetadata(file, userRid) {
+    const stats = await fse.stat(file.path);
+    const metadata = {
+        ...(file.metadata || {}),
+        size: Number((stats.size / (1024 * 1024)).toFixed(1)),
+    };
+
+    if (file.type === 'image') {
+        const imageMetadata = await media.getImageSize(file.path);
+        Object.assign(metadata, imageMetadata || {});
+    }
+
+    await Graph.setNodeAttribute(file['@rid'], {
+        key: 'metadata',
+        value: metadata,
+    }, userRid);
+
+    if (['text', 'html', 'json', 'csv'].includes(file.type)) {
+        const info = await media.getTextDescription(file.path, file.type);
+        await Graph.setNodeAttribute(file['@rid'], {
+            key: 'info',
+            value: info,
+        }, userRid);
+    }
+}
+
+function sendFileUpdate(userRid, fileRid, edited) {
+    userManager.sendToUser(userRid, {
+        command: 'update',
+        target: fileRid,
+        node: {
+            edited,
+        },
+    });
 }
 
 export default [
@@ -191,7 +287,8 @@ console.log('filetype', file_type);
                                     task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
                                     file: filegraph,
                                     userId: request.auth.credentials.user.rid,
-                                    role: 'exif_rotate'
+                                    role: 'internal_versioning',
+                                    process: {kind: 'internal_versioning'}
                             
                                 }
                                 nats.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
@@ -288,6 +385,10 @@ console.log('filetype', file_type);
             const src = await media.getThumbnail(request.params.param);
             const response = h.response(src);
             response.type('image/jpeg');
+            response.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            response.header('Pragma', 'no-cache');
+            response.header('Expires', '0');
+            response.header('Surrogate-Control', 'no-store');
             return response;
         }
     },
@@ -305,10 +406,9 @@ console.log('filetype', file_type);
                 if (file.type === 'image') {
                     const data = {
                         file: file,
-                        userId: request.auth.credentials.user.id,
+                        userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
-                        task: 'thumbnail',
-                        params: { width: 800, type: 'jpeg' },
+                        task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
                         id: 'md-thumbnailer'
                     };
                     nats.publish(data.id, JSON.stringify(data));
@@ -317,14 +417,15 @@ console.log('filetype', file_type);
                 } else if (file.type === 'pdf') {
                     const data = {
                         file: file,
-                        userId: request.auth.credentials.user.id,
+                        userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
-                        task: 'thumbnail',
-                        params: {
-                            page: 1,
-                            previewResolution: 150,
-                            thumbnailResolution: 80,
-                            task: 'thumbnail'
+                        task: {
+                            id: 'thumbnail',
+                            params: {
+                                page: 1,
+                                previewResolution: 150,
+                                thumbnailResolution: 80
+                            }
                         },
                         role: 'thumbnail',
                         id: 'md-poppler'
@@ -335,6 +436,118 @@ console.log('filetype', file_type);
             } catch (e) {
                 return h.response().code(403);
             }
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/files/{file_rid}/version',
+        options: {
+            payload: {
+                maxBytes: 1000 * 1024 * 1024,
+                output: 'stream',
+                parse: true,
+                multipart: true,
+                allow: ['application/json', 'multipart/form-data']
+            }
+        },
+        handler: async (request, h) => {
+            const fileRid = Graph.sanitizeRID(request.params.file_rid);
+            const userRid = request.auth.credentials.user.rid;
+            const userId = request.auth.credentials.user.rid;
+
+            const file = await Graph.getUserFileMetadata(fileRid, userRid);
+            if (!file) {
+                throw Boom.notFound('File not found');
+            }
+
+            const managedPath = resolveManagedFilePath(file.path);
+            if (!(await fse.pathExists(managedPath))) {
+                throw Boom.notFound('File path not found');
+            }
+
+            const backupPath = getBackupPath(managedPath);
+            const payload = request.payload || {};
+            const upload = payload.file;
+            const hasUpload = upload && typeof upload.pipe === 'function';
+            const hasTextContent = typeof payload.content === 'string';
+
+            if (!hasUpload && !hasTextContent) {
+                throw Boom.badRequest('Missing edited file upload or content payload');
+            }
+
+            if (hasTextContent && Buffer.byteLength(payload.content, 'utf8') > MAX_VERSION_TEXT_BYTES) {
+                throw Boom.badRequest('Text payload exceeds size limit');
+            }
+
+            if (await fse.pathExists(backupPath)) {
+                await fse.remove(backupPath);
+            }
+            await fse.move(managedPath, backupPath, { overwrite: true });
+
+            try {
+                if (hasUpload) {
+                    await saveUploadStreamToPath(upload, managedPath);
+                } else {
+                    if (!['text', 'html', 'json', 'csv'].includes(file.type)) {
+                        throw Boom.badRequest('Content payload is only supported for text-like files');
+                    }
+                    await fse.writeFile(managedPath, payload.content, 'utf8');
+                }
+            } catch (error) {
+                if (!(await fse.pathExists(managedPath)) && (await fse.pathExists(backupPath))) {
+                    await fse.move(backupPath, managedPath, { overwrite: true });
+                }
+                throw error;
+            }
+
+            const edited = {
+                task: hasUpload ? (payload.operation || 'upload-edit') : 'text-edit',
+                time: new Date().toISOString(),
+                user: userId,
+            };
+
+            await Graph.setNodeAttribute(fileRid, { key: 'edited', value: edited }, userRid);
+            await updateFileMetadata(file, userRid);
+            queueThumbnailRefresh(file, userId);
+            sendFileUpdate(userRid, fileRid, edited);
+
+            const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
+            updatedFile.edited = edited;
+            return h.response(updatedFile).code(200);
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/files/{file_rid}/revert',
+        handler: async (request, h) => {
+            const fileRid = Graph.sanitizeRID(request.params.file_rid);
+            const userRid = request.auth.credentials.user.rid;
+            const userId = request.auth.credentials.user.rid;
+
+            const file = await Graph.getUserFileMetadata(fileRid, userRid);
+            if (!file) {
+                throw Boom.notFound('File not found');
+            }
+
+            const managedPath = resolveManagedFilePath(file.path);
+            const backupPath = getBackupPath(managedPath);
+
+            if (!(await fse.pathExists(backupPath))) {
+                throw Boom.conflict('No original version exists to revert');
+            }
+
+            if (await fse.pathExists(managedPath)) {
+                await fse.remove(managedPath);
+            }
+            await fse.move(backupPath, managedPath, { overwrite: true });
+
+            await Graph.setNodeAttribute(fileRid, { key: 'edited', value: null }, userRid);
+            await updateFileMetadata(file, userRid);
+            queueThumbnailRefresh(file, userId);
+            sendFileUpdate(userRid, fileRid, null);
+
+            const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
+            return h.response(updatedFile).code(200);
         }
     },
     {

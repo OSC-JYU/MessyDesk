@@ -38,7 +38,7 @@ function uuidv7() {
 }
 
 // allowed attributes that setNodeAttribute can set
-const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path']
+const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path', 'edited']
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
@@ -2144,8 +2144,12 @@ graph.setNodeAttribute = async function (rid, data, userRID) {
 	let query = ''
 	let params = {rid: rid}
 	if(NODE_ATTRIBUTES.includes(data.key)) {
-		query = `UPDATE :rid SET ${data.key} = :${data.key}`
-		params[data.key] = data.value
+		if(data.value === null) {
+			query = `UPDATE :rid REMOVE ${data.key}`
+		} else {
+			query = `UPDATE :rid SET ${data.key} = :${data.key}`
+			params[data.key] = data.value
+		}
 	} else {
 		throw({'message': 'Invalid data'})
 	}

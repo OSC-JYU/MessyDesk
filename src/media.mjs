@@ -249,7 +249,7 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 		await fse.ensureDir(path.join(basepath))
 		const filepath = path.join(basepath, filename)
 
-		await fse.move(uploadpath, filepath);
+		await fse.move(uploadpath, filepath, { overwrite: true });
 
 		return filedata
 

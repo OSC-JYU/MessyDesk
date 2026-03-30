@@ -69,11 +69,27 @@ export default [
                         || message?.task?.id === 'thumbnail'
                         || message?.topic?.id === 'md-thumbnailer'
                         || message?.service?.id === 'md-thumbnailer';
+                    const processMarker = String(message?.process?.kind || message?.process || '').toLowerCase();
+                    const isInternalVersioning = role === 'internal_versioning'
+                        || role === 'exif_rotate'
+                        || processMarker === 'internal_versioning';
 
                     if (isThumbnailFailure) {
                         logger.warn('Thumbnail processing failed (non-fatal), skipping error node creation', {
                             error,
                             process: message?.process?.['@rid'],
+                            file: message?.file?.['@rid'],
+                            service: message?.service?.id,
+                            task: message?.task?.id,
+                            role: message?.role,
+                        });
+                        return [];
+                    }
+
+                    if (isInternalVersioning) {
+                        logger.warn('Internal versioning rotation failed (non-fatal), skipping error node creation', {
+                            error,
+                            process: message?.process,
                             file: message?.file?.['@rid'],
                             service: message?.service?.id,
                             task: message?.task?.id,

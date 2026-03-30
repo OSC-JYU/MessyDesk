@@ -100,9 +100,48 @@ function isThumbnailRole(message) {
     return role === 'thumbnail' || role === 'thumbnails';
 }
 
+function isThumbnailMessage(message) {
+    if (isThumbnailRole(message)) return true;
+
+    const topicId = String(message?.topic?.id || '').toLowerCase();
+    const serviceId = String(message?.service?.id || '').toLowerCase();
+    const queueId = String(message?.id || '').toLowerCase();
+    const taskId = String(message?.task?.id || '').toLowerCase();
+
+    if (topicId === 'md-thumbnailer') return true;
+    if (serviceId === 'md-thumbnailer') return true;
+    if (queueId === 'md-thumbnailer') return true;
+    if (taskId === 'thumbnail') return true;
+
+    return false;
+}
+
+function shouldNotifyThumbnailUpdate(message, filename) {
+    const normalizedFilename = String(filename || '').toLowerCase();
+    const isMainThumbnail = normalizedFilename === 'thumbnail.jpg';
+    const isInternal = String(message?.role || '').toLowerCase() === 'internal_versioning'
+        || String(message?.process?.kind || '').toLowerCase() === 'internal_versioning';
+    const isBatch = Boolean(message?.output_set);
+    const isLastBatchFile = isBatch && Number(message?.current_file) === Number(message?.total_files);
+
+    // Always allow internal edit flow updates for immediate UI feedback.
+    if (isInternal) return true;
+    // For normal single-file flow, notify only on final thumbnail artifact.
+    if (!isBatch && isMainThumbnail) return true;
+    // For batch flow, notify only once at the end (set update event).
+    if (isLastBatchFile) return true;
+
+    return false;
+}
+
 async function processFilesCore(request, infoFilepath, contentFilepath, message) {
-    // EXIF-ROTATE
-    if(message?.role === 'exif_rotate') {
+    const isRotateTask = String(message?.task?.id || '').toLowerCase() === 'rotate';
+    const isInternalRotate = message?.role === 'exif_rotate'
+        || message?.role === 'internal_versioning'
+        || message?.process?.kind === 'internal_versioning';
+
+    // EXIF/internal rotate should only run for rotate task payloads.
+    if(isRotateTask && isInternalRotate) {
         console.log('rotate message detected');
         //console.log(message);
         // exif_rotate replaces the original file with the rotated file
@@ -118,7 +157,9 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             service: {id: 'md-thumbnailer'},
             task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
             file: message.file,
-            userId: message.userId
+            userId: message.userId,
+            role: 'internal_versioning',
+            process: {kind: 'internal_versioning'}
         };
         
         nats.publish(data.topic.id, JSON.stringify(data));
@@ -132,30 +173,43 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 
     // THUMBNAIL
     // role' is for PDF thumbnail via Poppler)
-    } else if (message?.topic?.id === 'md-thumbnailer' || isThumbnailRole(message)) {
+    } else if (isThumbnailMessage(message)) {
         const filepath = message.file.path;
         const base_path = path.dirname(filepath);
         const filename = message.thumb_name || 'preview.jpg';
+        const cacheBuster = Date.now();
         //console.log('THUMBNAIL MESSAGE: ', message);
 
         try {
             //console.log('saving thumbnail to', base_path, filename);
             let wsdata = {};
             await media.saveThumbnail(contentFilepath, base_path, filename);
-            if (filename == 'thumbnail.jpg' || isThumbnailRole(message)) {
+            if (shouldNotifyThumbnailUpdate(message, filename)) {
                 console.log('sending thumbnail WS', filename);
                 wsdata = {
                     command: 'update',
                     target: message.file['@rid'],
-                    node: {image: API_URL + 'api/thumbnails/' + base_path}
+                    node: {
+                        image: API_URL + 'api/thumbnails/' + base_path,
+                        thumb: API_URL + 'api/thumbnails/' + base_path,
+                        thumbnail_version: cacheBuster,
+                    }
                 };
                 // if we are batch processing and this is the last file, send the updated Set thumbnails to the user
-                if(message.output_set && message.current_file == message.total_files) {
+                if(message.output_set && Number(message.current_file) === Number(message.total_files)) {
                     const set_thumbnails = await Graph.getSetThumbnailsForNode(message.output_set);
+                    const setThumbnailsWithVersion = set_thumbnails.map((entry) => {
+                        if(typeof entry !== 'string') return entry;
+                        return entry.includes('?') ? `${entry}&v=${cacheBuster}` : `${entry}?v=${cacheBuster}`;
+                    });
                     wsdata = {
                         command: 'update',
                         target: message.output_set,
-                        node: { paths: set_thumbnails, count: message.current_file }
+                        node: {
+                            paths: setThumbnailsWithVersion,
+                            count: message.current_file,
+                            thumbnail_version: cacheBuster,
+                        }
                     }
                     userManager.sendToUser(message.userId, wsdata);
                 // if we batch processing, don't send WS to user since this would create lot of traffic
