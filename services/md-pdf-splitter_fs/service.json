@@ -9,6 +9,50 @@
     
     "supported_types": [],
     "supported_formats": ["pdf"],
-    "description": "internal PDF Splitter",
-    "tasks": {}
+    "description": "PDF Page Split",
+    "tasks": {
+        "split": {
+            "params": {"task":"split"},
+            "output": "set",
+            "output_set": "Pages from PDF",
+            "name": "Split PDF",
+            "description": "Split a PDF file into separate pages."
+        },
+        "extract_text": {
+            "params": {"task":"extract_text"},
+            "output": "set",
+            "output_set": "Texts from PDF pages",
+            "name": "Extract Text",
+            "description": "Extract text from each PDF page into separate text files."
+        },
+        "extract_images": {
+            "params": {
+                "task":"extract_images",
+                "min_width": 200,
+                "min_height": 200,
+                "max_aspect_ratio": 8.0
+            },
+            "params_help": {
+                "min_width": {
+                    "name": "min_width",
+                    "description": "Minimum image width in pixels",
+                    "display": "textinput"
+                },
+                "min_height": {
+                    "name": "min_height",
+                    "description": "Minimum image height in pixels",
+                    "display": "textinput"
+                },
+                "max_aspect_ratio": {
+                    "name": "max_aspect_ratio",
+                    "description": "Maximum allowed aspect ratio (max(width/height, height/width))",
+                    "display": "textinput"
+                }
+            },
+            "output": "set",
+            "output_set": "Images from PDF pages",
+            "name": "Extract Images",
+            "description": "Extract embedded images from each PDF page into image files."
+        }
+    }
 }

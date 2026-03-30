@@ -3,13 +3,13 @@
     "id": "md-poppler",
     "type": "pdf",
     "api_type": "elg",
-    "adapter": "poppler",
+    "adapter": "elg_fs",
     "api": "/process",
     "name" :"Poppler",
     
     "supported_types": ["pdf"],
     "supported_formats": ["pdf"],
-    "set_disabled": 1,
+    "set_disabled": 0,
 
     "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
 
@@ -89,6 +89,19 @@
                 }
             },
             "info": "Pages as images from page {{firstPageToConvert}} to {{lastPageToConvert}} "            
+        },
+        "thumbnail": {
+            "params": {
+                "page": 1,
+                "previewResolution": 150,
+                "thumbnailResolution": 80,
+                "task": "thumbnail"
+            },
+            "output": "store",
+            "hidden": true,
+            "name": "Create PDF thumbnails",
+            "description": "Create preview.jpg and thumbnail.jpg for a PDF file.",
+            "info": "Creates preview and thumbnail images for first page"
         }
     }
 }

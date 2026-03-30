@@ -98,38 +98,34 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
     }
   }
 
-  media.createZip = function(files, ctx) {
-	const archive = archiver('zip', { zlib: { level: 9 } });
-	const zipName = 'files.zip';
-  
-	// Set the response headers
-	ctx.attachment(zipName);
-	ctx.set("Content-Type", "application/zip");
-  
-	// Pipe the archive data to the response
-	archive.pipe(ctx.res);
-  
-	// Add files to the archive
-	files.forEach((file) => {
-	  const filePath = path.resolve(file);
-	  const fileName = path.basename(file);
-  
-	  if (fse.existsSync(filePath)) {
-		archive.file(filePath, { name: fileName });
-	  } else {
-		console.error(`File not found: ${filePath}`);
-	  }
-	});
-  
-	// Finalize the archive
-	archive.finalize();
-  }
+
 // NOTE: this removes parent directory! (the basename is stripper away)
   media.deleteNodePath = async function(dir) {
 	try {
-		var p = path.dirname(dir)
-		if(p == 'data/projects' || p == 'data/projects/') throw('Protecting projects dir!')
-		await fse.remove(p)
+		if(!dir) return
+		const clean = path.normalize(dir)
+		const parsed = path.parse(clean)
+		var target = clean
+		if(parsed.ext) {
+			target = path.dirname(clean)
+		}
+
+		const protectedDirs = [
+			'data',
+			'data/projects',
+			'data/uploads',
+			'data/layouts',
+			'data/files',
+			'data/processes',
+			'data/sets'
+		]
+
+		const normalizedTarget = target.replace(/\\/g, '/').replace(/\/$/, '')
+		if(protectedDirs.includes(normalizedTarget)) {
+			throw('Protecting data root dir!')
+		}
+
+		await fse.remove(target)
 	} catch(e) {
 		console.log('error deleting node data directory. ' + e)
 		//throw('Could not delete directory!' + e.message)
@@ -142,7 +138,11 @@ media.zipFilesAndStream2 = async function(fileList, ctx) {
 
 media.createDataDir = async function(data_dir) {
 	try {
-		//await fse.ensureDir(data_dir)
+		await fse.ensureDir(path.join(data_dir, 'files'))
+		await fse.ensureDir(path.join(data_dir, 'processes'))
+		await fse.ensureDir(path.join(data_dir, 'sets'))
+
+		// legacy paths (kept for migration / backward compatibility)
 		await fse.ensureDir(path.join(data_dir, 'projects'))
 		await fse.ensureDir(path.join(data_dir, 'uploads'))
 		await fse.ensureDir(path.join(data_dir, 'layouts'))
@@ -152,10 +152,13 @@ media.createDataDir = async function(data_dir) {
 }
 
 media.createProjectDir = async function(project, data_dir) {
-	const rid = this.rid2path(project['@rid'])
 	try {
-		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'files'))
-		await fse.ensureDir(path.join(data_dir, 'projects', rid, 'processes'))
+		await this.createDataDir(data_dir)
+		const projectDir = this.getProjectDir(data_dir, project['@rid'])
+		await fse.ensureDir(path.join(projectDir, 'files'))
+		await fse.ensureDir(path.join(projectDir, 'processes'))
+		await fse.ensureDir(path.join(projectDir, 'sets'))
+		await fse.ensureDir(path.join(projectDir, 'sources'))
 	} catch(e) {
 		throw('Could not create project directory!' + e.message)
 	}
@@ -176,7 +179,7 @@ media.uploadFile = async function(uploadpath, filegraph) {
 
 	var filedata = null
 	try {
-		await fse.ensureDir(path.join(filepath, 'process'))
+		await fse.ensureDir(filepath)
 	
 		//filedata.filepath = path.join(data_dir, filepath, this.rid2path(file_rid) + '.' + filedata.extension)
 		var exists = await checkFileExists(filegraph.path)
@@ -246,7 +249,7 @@ media.saveThumbnail = async function(uploadpath, basepath, filename) {
 		await fse.ensureDir(path.join(basepath))
 		const filepath = path.join(basepath, filename)
 
-		await fse.move(uploadpath, filepath);
+		await fse.move(uploadpath, filepath, { overwrite: true });
 
 		return filedata
 
@@ -313,6 +316,104 @@ media.detectType = async function(file) {
 
 media.rid2path = function (rid) {
 	return rid.replace('#', '').replace(':', '_')
+}
+
+media.getProjectDir = function(data_dir, project_rid) {
+	if(!project_rid) return data_dir
+	return path.join(data_dir, 'projects', this.rid2path(project_rid))
+}
+
+media.ridShardPath = function(rid) {
+	if(!rid) throw new Error('RID is required')
+	const clean = rid.replace('#', '')
+	const [bucketStr, posStr] = clean.split(':')
+	const bucket = Number(bucketStr)
+	const pos = Number(posStr)
+
+	if(Number.isNaN(bucket) || Number.isNaN(pos)) {
+		throw new Error('Invalid RID format')
+	}
+
+	const block = Math.floor(pos / 1000)
+	return path.join(String(bucket), String(block), String(pos))
+}
+
+media.isUUID = function(value) {
+	if(!value || typeof value !== 'string') return false
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+media.uuid2path = function(uuid) {
+	return uuid.toLowerCase().replace(/-/g, '')
+}
+
+media.uuidShardPath = function(uuid) {
+	if(!this.isUUID(uuid)) throw new Error('Invalid UUID format')
+	const id = this.uuid2path(uuid)
+	// Use head bytes to group UUIDv7 by time
+	const s1 = id.slice(0, 2)
+	const s2 = id.slice(2, 4)
+	const s3 = id.slice(4, 6)
+	return path.join(s1, s2, s3, id)
+}
+
+media.shardPath = function(identifier) {
+	if(this.isUUID(identifier)) {
+		return this.uuidShardPath(identifier)
+	}
+	return this.ridShardPath(identifier)
+}
+
+media.getFileDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'files', this.shardPath(rid))
+}
+
+media.getProcessDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'processes', this.shardPath(rid))
+}
+
+media.getProcessFilesDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProcessDir(data_dir, project_rid, rid), 'files')
+}
+
+media.getSetDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'sets', this.shardPath(rid))
+}
+
+media.getSourceDir = function(data_dir, project_rid, rid) {
+	if(!rid) {
+		rid = project_rid
+		project_rid = null
+	}
+	return path.join(this.getProjectDir(data_dir, project_rid), 'sources', this.shardPath(rid))
+}
+
+media.getFilePath = function(data_dir, project_rid, rid, extension) {
+	if(extension === undefined) {
+		extension = rid
+		rid = project_rid
+		project_rid = null
+	}
+	const ext = (extension || '').replace('.', '').toLowerCase()
+	const baseName = this.isUUID(rid) ? this.uuid2path(rid) : this.rid2path(rid)
+	const fileName = ext ? `${baseName}.${ext}` : baseName
+	return path.join(this.getFileDir(data_dir, project_rid, rid), fileName)
 }
 
 media.getText = async function (filePath) {
@@ -532,186 +633,5 @@ async function checkFileExists(filePath) {
 }
 
 
-media.createZipAndStream = async function(fileList, request, h, set_rid) {
-    try {
-        if (!fileList || fileList.length === 0) {
-            logger.warn('No files provided for zip creation', { set_rid });
-            return h.response('No files found to zip').code(404);
-        }
-
-        const filename = `files_${set_rid.replace('#', '')}.zip`;
-        // Create a temporary file path for the zip
-        const tempZipPath = path.join(os.tmpdir(), filename);
-        
-        // Create a write stream to the temporary file
-        const output = fs.createWriteStream(tempZipPath);
-        
-        // Create a new archive with compression
-        const archive = archiver('zip', {
-            zlib: { level: 0 } // do not compress
-        });
-        
-        logger.info('Creating zip archive', { 
-            set_rid, 
-            fileCount: fileList.length,
-            tempPath: tempZipPath 
-        });
-        
-        // Set up event handlers for the archive
-        archive.on('error', (err) => {
-            logger.error('Archive creation error', { 
-                error: err.message,
-                set_rid,
-                tempPath: tempZipPath
-            });
-            throw err;
-        });
-
-        archive.on('warning', (err) => {
-            if (err.code === 'ENOENT') {
-                logger.warn('Archive warning', { 
-                    warning: err.message,
-                    set_rid
-                });
-            } else {
-                throw err;
-            }
-        });
-        
-        // Pipe the archive to the output file
-        archive.pipe(output);
-        
-        // Add README.txt with creation date
-        const creationDate = new Date().toISOString();
-        const readmeContent = `MessyDesk set output
-Zip Archive Creation Details:
-Created on: ${creationDate}
-Number of files: ${fileList.length}
-Set ID: ${set_rid}
-
-file list: 
-${fileList.map(file => file.original_filename || file.label || file.path).join('\n')}
-`;
-        
-        archive.append(readmeContent, { name: 'README.txt' });
-        
-        // Add files to the archive
-        let filesAdded = false;
-        for (const file of fileList) {
-            const fullPath = path.resolve(file.path);
-            if (await fse.pathExists(fullPath)) {
-                archive.file(fullPath, { name: file.original_filename || file.label || path.basename(file.path) });
-                filesAdded = true;
-            } else {
-                logger.warn('File not found for zip', { 
-                    filePath: fullPath,
-                    set_rid 
-                });
-            }
-        }
-
-        if (!filesAdded) {
-            logger.warn('No valid files found for zip', { set_rid });
-            return h.response('No valid files found to zip').code(404);
-        }
-
-        // Finalize the archive
-        await new Promise((resolve, reject) => {
-            output.on('close', () => {
-                logger.info('Archive finalized', { 
-                    set_rid,
-                    size: archive.pointer()
-                });
-                resolve();
-            });
-            output.on('error', (err) => {
-                logger.error('Output stream error', { 
-                    error: err.message,
-                    set_rid
-                });
-                reject(err);
-            });
-            archive.finalize();
-        });
-
-        // Create response with file stream
-        const response = h.file(tempZipPath, {
-            filename: filename,
-            mode: 'attachment',
-            confine: false // Allow serving files outside of the server's root directory
-        });
-
-        // Clean up the temporary file after sending
-        response.events.on('finish', async () => {
-            logger.info('Zip download completed', { set_rid });
-            try {
-                await fse.unlink(tempZipPath);
-                logger.info('Temporary zip file cleaned up', { set_rid });
-            } catch (err) {
-                logger.error('Error deleting temporary zip file', { 
-                    error: err.message,
-                    set_rid,
-                    tempPath: tempZipPath
-                });
-            }
-        });
-
-        return response;
-
-    } catch (err) {
-        logger.error('Error in createZipAndStream', { 
-            error: err.message,
-            set_rid,
-            stack: err.stack
-        });
-        return h.response('Error creating zip file').code(500);
-    }
-}
-
-// media.extractZip = async function(zipPath, destinationPath) {
-//     try {
-//         // Ensure the destination directory exists
-//         await fse.ensureDir(destinationPath);
-
-//         logger.info('Starting zip extraction', { 
-//             zipPath,
-//             destinationPath
-//         });
-
-//         // Create a read stream for the zip file
-//         const zipStream = fs.createReadStream(zipPath);
-        
-//         // Use unzipper for extraction
-//         await new Promise((resolve, reject) => {
-//             zipStream
-//                 .pipe(unzipper.Extract({ path: destinationPath }))
-//                 .on('close', () => {
-//                     logger.info('Zip extraction completed', { 
-//                         zipPath,
-//                         destinationPath
-//                     });
-//                     resolve();
-//                 })
-//                 .on('error', (err) => {
-//                     logger.error('Extraction error', { 
-//                         error: err.message,
-//                         zipPath,
-//                         destinationPath
-//                     });
-//                     reject(err);
-//                 });
-//         });
-
-//         return true;
-//     } catch (err) {
-//         logger.error('Error in extractZip', { 
-//             error: err.message,
-//             zipPath,
-//             destinationPath,
-//             stack: err.stack
-//         });
-//         throw err;
-//     }
-// }
 
 export default media

@@ -1,7 +1,7 @@
 {
     "local_url": "http://localhost:9008",
     "id": "md-base",
-    "adapter": "elg",
+    "adapter": "elg_fs",
     "api": "/api",
     "name" :"Base Service",
     "source_url": "https://github.com/MD-python",

@@ -28,7 +28,6 @@
     "susie": "^3.0.0",
     "timers-promises": "^1.0.1",
     "unzipper": "^0.12.3",
-    "uuidv4": "^6.2.13",
     "winston": "^3.5.0",
     "winston-daily-rotate-file": "^4.6.0"
   },

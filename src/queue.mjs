@@ -17,6 +17,9 @@ const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 
 const nats = {}
 
+nats.pausedBatches = new Set()
+nats.cancelledBatches = new Set()
+
 
 nats.init = async function(services) {
   console.log('NATS: connecting...', NATS_URL)
@@ -306,6 +309,43 @@ nats.drainQueue = async function (topic, process_rid) {
 };
 
 
+nats.drainQueueByProcess = async function(process_rid) {
+  console.log('draining by process_rid: ', process_rid)
+  let count = 0;
+  try {
+    const info = await this.jsm.streams.info('PROCESS');
+    const { first_seq, last_seq } = info.state;
+
+    for (let seq = last_seq; seq >= first_seq; seq--) {
+      let msg;
+      try {
+        msg = await this.jsm.streams.getMessage('PROCESS', { seq });
+      } catch {
+        continue;
+      }
+
+      let message;
+      try {
+        message = msg.json();
+      } catch {
+        continue;
+      }
+
+      if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
+        await this.jsm.streams.deleteMessage('PROCESS', seq);
+        count++;
+      }
+    }
+
+    console.log('deleted messages by process: ', count)
+    return count;
+  } catch (err) {
+    console.error('drainQueueByProcess error:', err);
+    return 0;
+  }
+}
+
+
 // Queue draining
 nats.drainQueue_old = async function(topic, process_rid) {
 
@@ -382,6 +422,25 @@ nats.createSetProcessNodesAndPublish = async function(msg) {
   }
 }
 
+nats.cancelBatch = async function(process_rid) {
+  this.cancelledBatches.add(process_rid)
+  this.pausedBatches.delete(process_rid)
+  const deleted = await this.drainQueueByProcess(process_rid)
+  return {status: 'cancelled', process_rid, deleted}
+}
+
+nats.pauseBatch = async function(process_rid) {
+  this.pausedBatches.add(process_rid)
+  const deleted = await this.drainQueueByProcess(process_rid)
+  return {status: 'paused', process_rid, deleted}
+}
+
+nats.resumeBatch = async function(process_rid) {
+  this.pausedBatches.delete(process_rid)
+  this.cancelledBatches.delete(process_rid)
+  return {status: 'running', process_rid}
+}
+
 nats.listenDBQueue = async function(topic) {
   console.log('connecting to DB queue...')
   const nc = await connect({servers: NATS_URL});
@@ -401,6 +460,31 @@ nats.listenDBQueue = async function(topic) {
 
             // CREATE AND PUBLISH
             if(msg_data.topic == 'create_and_publish') {
+              const batchRid = msg?.set_process || msg?.set_process_rid
+              if(batchRid) {
+                const batchNode = await Graph.getBatchProcess(batchRid)
+                const batchState = batchNode?.state || 'running'
+
+                if(batchState === 'paused' || this.pausedBatches.has(batchRid)) {
+                  // Drop queued create_and_publish tasks while paused; resume will rebuild pending files from graph.
+                  m.ack();
+                  continue;
+                }
+
+                if(batchState === 'cancelling' || batchState === 'cancelled' || this.cancelledBatches.has(batchRid)) {
+                  m.ack();
+                  continue;
+                }
+
+                // Set batches use one SetProcess node; do not create per-file Process nodes.
+                if(!msg.process || !msg.process['@rid']) {
+                  msg.process = {'@rid': batchRid}
+                }
+                nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
+                m.ack();
+                continue;
+              }
+
               //console.log('creating and publishing received...', msg.current_file)
               // Add 500ms delay
              // await new Promise(resolve => setTimeout(resolve, 500));

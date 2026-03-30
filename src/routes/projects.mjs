@@ -26,6 +26,20 @@ export default [
         }
     },
     {
+        method: 'POST',
+        path: '/api/projects/update-size',
+        handler: async (request) => {
+            try {
+                return await Graph.updateProjectSizes(
+                    request.auth.credentials.user.rid,
+                    DATA_DIR
+                );
+            } catch (error) {
+                throw Boom.badRequest(error.message);
+            }
+        }
+    },
+    {
         method: 'GET',
         path: '/api/projects/{rid}',
         handler: async (request) => {

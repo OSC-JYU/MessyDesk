@@ -9,7 +9,7 @@ import media from '../media.mjs';
 
 import path from 'path';
 
-import { processFilesHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
+import { processFilesHandler, processFilesFromTmpHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR, API_URL } from '../env.mjs';
 
@@ -63,6 +63,40 @@ export default [
                 if (request.payload.message) {
                     const message = request.payload.message;
                     let target = message.target;
+                    const role = String(message?.role || '').toLowerCase();
+                    const isThumbnailFailure = role === 'thumbnail'
+                        || role === 'thumbnails'
+                        || message?.task?.id === 'thumbnail'
+                        || message?.topic?.id === 'md-thumbnailer'
+                        || message?.service?.id === 'md-thumbnailer';
+                    const processMarker = String(message?.process?.kind || message?.process || '').toLowerCase();
+                    const isInternalVersioning = role === 'internal_versioning'
+                        || role === 'exif_rotate'
+                        || processMarker === 'internal_versioning';
+
+                    if (isThumbnailFailure) {
+                        logger.warn('Thumbnail processing failed (non-fatal), skipping error node creation', {
+                            error,
+                            process: message?.process?.['@rid'],
+                            file: message?.file?.['@rid'],
+                            service: message?.service?.id,
+                            task: message?.task?.id,
+                            role: message?.role,
+                        });
+                        return [];
+                    }
+
+                    if (isInternalVersioning) {
+                        logger.warn('Internal versioning rotation failed (non-fatal), skipping error node creation', {
+                            error,
+                            process: message?.process,
+                            file: message?.file?.['@rid'],
+                            service: message?.service?.id,
+                            task: message?.task?.id,
+                            role: message?.role,
+                        });
+                        return [];
+                    }
                     //logger.error('Error processing files', { error: error, message: message });
                     logger.error('Error processing files', { error: error, message: message });
                     console.log(message)
@@ -80,7 +114,10 @@ export default [
                         if(setProcessNode) {
                             console.log('setProcessNode', setProcessNode)
                             targetNode = setProcessNode['setprocess']['@rid'];
+                            await Graph.incrementBatchFailed(targetNode);
                         }
+                    } else if (message.set_process) {
+                        await Graph.incrementBatchFailed(message.set_process);
                     }
                     if(targetNode) {
                         var error_count = await Graph.setNodeError(targetNode, error, message.userId);
@@ -168,27 +205,7 @@ export default [
                     };
                     await userManager.sendToUser(message.userId, wsdata);
                 }
-                // If target is a pdf (i.e. we are splitting pdf into pages), send cover page thumbnail message to md-poppler
-                if(message?.file?.type == 'pdf') {
-                    // PDF page count
-                    if(message?.file?.metadata?.page_count) {
-                        await Graph.setNodeAttribute_old(target, {key: 'metadata', value: message.file.metadata}, 'File');
-                    }
 
-                    message.task = {'id': 'pdf2images'};
-                    message.task.params = {
-                        page: 1,
-                        firstPageToConvert: '1',
-                        lastPageToConvert: '1',
-                        resolutionXYAxis: '80'
-                    };
-                    message.role = 'thumbnail';
-                    message.service = {'id': 'md-poppler'};
-                    console.log('Sending message to md-poppler', message);
-                   
-                    nats.publish(message.service.id, JSON.stringify(message));
-
-                }
             }
             return [];
         }
@@ -208,6 +225,18 @@ export default [
             }
         },
         handler: processFilesHandler
+    },
+    {
+        method: 'POST',
+        path: '/api/nomad/process/files/tmp',
+        options: {
+            payload: {
+                maxBytes: 10485760,
+                output: 'data',
+                parse: true
+            }
+        },
+        handler: processFilesFromTmpHandler
     },
     {
         method: 'POST',

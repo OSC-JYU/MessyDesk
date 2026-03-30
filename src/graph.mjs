@@ -1,5 +1,6 @@
 
 import path from 'path';
+import fse from 'fs-extra';
 
 
 
@@ -7,6 +8,7 @@ import db from "./db.mjs";
 import media from "./media.mjs";
 import solr from "./solr.mjs";
 import filters from "./filters.mjs";
+import { randomBytes } from 'crypto';
 
 import timers from 'timers-promises';
 import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
@@ -14,10 +16,29 @@ import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
 const MAX_STR_LENGTH = 2048;
 const DEFAULT_USER = 'local.user@localhost';
 const MAX_POSITION = 10000; // max x and y for project nodes
+const PDF_ICON_SENTINEL = '__pdf_icon__';
 const graph = {};
 
+function uuidv7() {
+	const bytes = randomBytes(16)
+	const ts = Date.now()
+
+	bytes[0] = (ts / 0x10000000000) & 0xff
+	bytes[1] = (ts / 0x100000000) & 0xff
+	bytes[2] = (ts / 0x1000000) & 0xff
+	bytes[3] = (ts / 0x10000) & 0xff
+	bytes[4] = (ts / 0x100) & 0xff
+	bytes[5] = ts & 0xff
+
+	bytes[6] = (bytes[6] & 0x0f) | 0x70
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+	const hex = bytes.toString('hex')
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 // allowed attributes that setNodeAttribute can set
-const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path']
+const NODE_ATTRIBUTES = ['description', 'label', 'info', 'expand', 'metadata', 'response', 'node_error', 'path', 'edited']
 
 const entityTypes = [
 	{type:'Tag', icon:'tag', color:'blue', label:'Tag'},
@@ -63,11 +84,16 @@ graph.initDB = async function () {
 		}
 		console.log('Database created!')
 	}
+
+	// Ensure edge types exist also for already-initialized databases
+	await db.createEdgeType('HAS_PROCESS')
+	await db.createEdgeType('DERIVED_FROM')
+	await db.createEdgeType('HAS_OWNER')
 }
 
 graph.hasAccess = async function (item_rid, user_rid) {
 	if (!item_rid.match(/^#/)) item_rid = '#' + item_rid
-	const query = `TRAVERSE in() FROM ${item_rid}`
+	const query = `TRAVERSE out() FROM ${item_rid}`
 	var response = await db.sql(query)
 	var user = response.result.filter(function (x) { return x['@rid'] == user_rid })
 	if (!user.length) {
@@ -80,13 +106,13 @@ graph.hasAccess = async function (item_rid, user_rid) {
 graph.createProject = async function (data, me_rid) {
 
 	var project = {}
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User) WHERE id(p) = "${me_rid}" AND pr.label = "${data.label}" RETURN count(pr) as projects`
 	var response = await db.cypher(query)
 	console.log(response.result[0])
 	if (response.result[0].projects == 0) {
 		project = await this.create('Project', data)
 		var project_rid = project['@rid']
-		await this.connect(me_rid, 'IS_OWNER', project_rid)
+		await this.connect(project_rid, 'HAS_OWNER', me_rid)
 	} else {
 		console.log('Project exists')
 		throw ('Project with that name exists!')
@@ -96,7 +122,7 @@ graph.createProject = async function (data, me_rid) {
 }
 
 graph.deleteProject = async function (project_rid, user_rid, nats) {
-	const query = `MATCH {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->{as:project, where:(@rid = ${project_rid})} return project.@rid AS rid`
+	const query = `MATCH {as:project, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} return project.@rid AS rid`
 	var response = await db.sql(query)
 	if(response.result.length == 1) {
 		await this.deleteNode(response.result[0]['rid'], nats)
@@ -107,14 +133,23 @@ graph.deleteProject = async function (project_rid, user_rid, nats) {
 graph.createSet = async function (project_rid, data, me_rid) {
 
 	//const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
-	const query = `MATCH {type:User, as:p, where:(@rid = ${me_rid})}-IS_OWNER->{type:Project, as:pr, where:(@rid = ${project_rid})} RETURN pr`
+	const query = `MATCH {type:Project, as:pr, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:p, where:(@rid = ${me_rid})} RETURN pr`
 
 	var response = await db.sql(query)
 
 	if (response.result.length == 1) {
+		data.project_rid = project_rid
 		var set = await this.create('Set', data)
 		var set_rid = set['@rid']
-		await this.connect(project_rid, 'HAS_SET', set_rid)
+		await this.connect(set_rid, 'BELONGS_TO', project_rid)
+		const set_path = media.getSetDir(DATA_DIR, project_rid, set.uuid || set_rid)
+		const set_filepath = path.join(set_path, 'set.json')
+		await media.createProcessDir(set_path)
+		await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+		await this.setNodeAttribute_old(set_rid, {key: 'filepath', value: set_filepath}, 'Set')
+		set.path = set_path
+		set.filepath = set_filepath
+		await this.syncSetManifest(set_rid)
 		return set
 	} else {
 		console.log('Project not found')
@@ -124,17 +159,17 @@ graph.createSet = async function (project_rid, data, me_rid) {
 
 graph.createSource = async function (project_rid, data, me_rid, nats) {
 
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
 
 	var response = await db.cypher(query)
 	if (response.result.length == 1) {
 		data.status = 'initing...'
+		data.project_rid = project_rid
 		var source = await this.create('Source', data)
 		var source_rid = source['@rid']
-		// DATA_DIR + '/projects/' + project_rid + '/sources/' + source_rid
-		const source_path = path.join(DATA_DIR, 'projects', media.rid2path(project_rid), 'sources', media.rid2path(source_rid))
+		const source_path = media.getSourceDir(DATA_DIR, project_rid, source.uuid || source_rid)
 		source.path = source_path
-		await this.connect(project_rid, 'HAS_SOURCE', source_rid)
+		await this.connect(source_rid, 'BELONGS_TO', project_rid)
 		await media.createProcessDir(source.path)
 		await this.setNodeAttribute(source_rid, {key: 'path', value: source.path}, me_rid)
 
@@ -159,8 +194,8 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 graph.dropIndex = async function (userRid) {
 
 	const query = userRid
-	? `MATCH {type:User, as:user, where: (id = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
-	: `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+	? `MATCH {type:User, as:user, where: (id = "${userRid}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+	: `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user}, {type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 	//const query = `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return item, user.@rid AS ownerRid`
 
 }
@@ -168,9 +203,9 @@ graph.dropIndex = async function (userRid) {
 
 graph.index = async function (userRid) {
     // Construct the query to index user's data or all data
-    const filesQuery = userRid
-        ? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
-        : `MATCH {type:User, as:user}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
+	const filesQuery = userRid
+		? `MATCH {type:User, as:user, where: (@rid = "${userRid}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`
+		: `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user}, {type:Project, as:project}-->{as:file, while: ($depth < 40)} return file, user.@rid AS ownerRid`;
 
     const response = await db.sql(filesQuery);
 
@@ -233,17 +268,15 @@ graph.createUser = async function (data) {
 	}
 
 	// email must be unique
-	const query = `MATCH (p:User) WHERE p.id = "${data.id}" RETURN count(p) as users`
-	var response = await db.cypher(query)
+	const query = `SELECT count() AS users FROM User WHERE id = "${data.id}"`
+	var response = await db.sql(query)
 	if (response.result[0].users > 0) throw ('User with that email already exists!')
 		
 	//data['service_groups'] = []
 	var user = await this.create('User', data, true)
+	console.log('User created: ', user)
 	await this.initUserData(user)
 
-	// commands to make demo projects
-	//var demo1 = `http POST :8200/api/projects label="DEMO 1" description="Käännellään kuvia" '${data.id}'`
-	//user.demos = demo1
 
 	return user
 }
@@ -336,7 +369,8 @@ graph.savePrompt = async function (prompt, userRID) {
 		return response.result
 
 	} else {
-		var query = `CREATE VERTEX Prompt SET name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
+		const prompt_uuid = uuidv7()
+		var query = `CREATE VERTEX Prompt SET uuid = "${prompt_uuid}", name = "${prompt.name}", content = "${prompt.content}", description = "${prompt.description}", json_schema = "${prompt.json_schema}", output_type = "${prompt.output_type}", type = "${prompt.type}", owner = "${userRID}"`
 		
 		var response = await db.sql(query)
 		return response.result
@@ -352,7 +386,7 @@ graph.createEntityTypes = async function (userRID) {
 }
 
 graph.getProjectMetadata = async function (rid, me_email) {
-	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})} RETURN project`
+	const query = `MATCH {as:project, type:Project, where: (@rid = ${rid})}-HAS_OWNER->{as: person, type: User, where: (id = "${me_email}")} RETURN project`
 	var result = await db.sql(query)
 	return result
 }
@@ -361,7 +395,7 @@ graph.getProjectMetadata = async function (rid, me_email) {
 graph.getProject_old = async function (rid, me_email) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `MATCH {as: person, type: User, where: (id = "${me_email}")}-IS_OWNER->{as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
+	const query = `MATCH {as:project, type:Project, where: (@rid = ${rid})}-HAS_OWNER->{as: person, type: User, where: (id = "${me_email}")}, {as:project, type:Project, where: (@rid = ${rid})}-->{as:file, 
 				where:((@type = 'Set' OR @type = 'SetProcess' OR @type = 'Process') OR ( @type = 'File'  AND (set is NULL OR expand = true) )), while: (true)}
 				RETURN file`
 	
@@ -374,8 +408,25 @@ graph.getProject_old = async function (rid, me_email) {
 graph.getProject = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
 
-	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
-		{type:Project, as:project,where:(@rid=${rid})}.out() 
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project,where:(@rid=${rid})}.in() 
+		{as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL  AND $depth > 0), while:($depth < 20)} return node, node.outE() as edges`
+
+
+	const options = {
+		serializer: 'studio',
+		format: 'vueflow'
+	}
+	
+	var result = await db.sql(query, options)
+	result = await getSetThumbnails(user_rid, result, rid)
+	return result
+}
+
+
+graph.getProject_ = async function (rid, user_rid) {
+	if (!rid.match(/^#/)) rid = '#' + rid
+
+	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project,where:(@rid=${rid})}.out() 
 		{as:node, where:((@type="Set" OR @type="File" OR @type="Process" OR @type="SetProcess" OR @type="Source" OR @type="Filter") AND (set is NULL OR expand = true) AND $depth > 0), while:($depth < 20)} return node`
 
 
@@ -392,7 +443,7 @@ graph.getProject = async function (rid, user_rid) {
 
 
 graph.getProjects = async function (user_rid, data_dir) {
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User) WHERE id(p) = "${user_rid}" OPTIONAL MATCH (pr)-[:HAS_FILE]-(f:File) RETURN pr, count(f) AS file_count`
 	var response = await db.cypher(query)
 	var data = response.result.map(item => {
 		const { pr, ...rest } = item;
@@ -423,18 +474,27 @@ graph.getProjects = async function (user_rid, data_dir) {
 
 graph.getSetThumbnailsForNode = async function(set_rid) {
 	if(!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 4`
+	const query = `select @rid AS rid, path, type, metadata from File where set =  ${set_rid} ORDER by label LIMIT 20`
 	var response = await db.sql(query)
-	return response.result.map(item => {
+	const thumbs = []
+	for (const item of response.result || []) {
+		if(item?.type === 'pdf' && !(await shouldUsePdfThumbnail(item))) {
+			if(thumbs.length < 4) thumbs.push(PDF_ICON_SENTINEL)
+			continue
+		}
+		if(!item?.path) continue
+		if(thumbs.length >= 4) break
 		const dirPath = item.path.split('/').slice(0, -1).join('/')
-		return dirPath.replace('data/', 'api/thumbnails/data/')
-	})
+		thumbs.push(dirPath.replace('data/', 'api/thumbnails/data/'))
+	}
+
+	return thumbs
 
 }
 
 async function getProjectThumbnails(user_rid, data, data_dir) {
 
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User), (pr)-[:HAS_FILE]->(f:File) WHERE id(p) = "${user_rid}" 
 	RETURN  distinct (id(pr)) as project, collect(f.path)  as paths`
 	var response = await db.cypher(query)
 
@@ -454,11 +514,42 @@ async function getProjectThumbnails(user_rid, data, data_dir) {
 	return data
 }
 
-
 async function getSetThumbnails(user_rid, data, project_rid) {
+	if(!data?.nodes || data.nodes.length === 0) return data
+
+	const setNodes = data.nodes.filter((node) => node?.data?.type === 'Set' && node?.data?.id)
+	if(setNodes.length === 0) return data
+
+	const setIds = setNodes.map((node) => String(node.data.id))
+	const quotedSetIds = setIds.map((rid) => `"${rid.replace(/"/g, '\\"')}"`).join(',')
+	const query = `SELECT @rid AS rid, set, path, label, type, metadata FROM File WHERE set IN [${quotedSetIds}] ORDER BY label`
+	const response = await db.sql(query)
+
+	const thumbsBySet = new Map()
+	for (const item of response.result || []) {
+		if(!item?.set || !item?.path) continue
+		if(!thumbsBySet.has(item.set)) thumbsBySet.set(item.set, [])
+		const list = thumbsBySet.get(item.set)
+		if(list.length >= 2) continue
+		if(item?.type === 'pdf' && !(await shouldUsePdfThumbnail(item))) {
+			list.push(PDF_ICON_SENTINEL)
+			continue
+		}
+		const dirPath = item.path.split('/').slice(0, -1).join('/')
+		list.push(API_URL + 'api/thumbnails/' + dirPath + '/thumbnail.jpg')
+	}
+
+	for (const setNode of setNodes) {
+		setNode.data.paths = thumbsBySet.get(setNode.data.id) || []
+	}
+
+	return data
+}
+
+async function getSetThumbnails_old(user_rid, data, project_rid) {
 
 	// order image by file label so that result set would show same images as source set
-	const query = `MATCH (p:User)-[r:IS_OWNER]->(pr:Project)-[*0..10]->(set:Set)-->(file:File) 
+	const query = `MATCH (pr:Project)-[r:HAS_OWNER]->(p:User), (pr)-[*0..10]->(set:Set)-->(file:File) 
 		WHERE id(p) = "${user_rid}" AND id(pr) = "${project_rid}" AND file.type = "image"
 		WITH file, set ORDER BY file.label
 	RETURN  distinct (id(set)) as set, collect(file.path)  as paths `
@@ -484,28 +575,293 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 
 graph.getProjectFiles = async function (rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	const query = `MATCH (p:User)-[:IS_OWNER]->(pr:Project)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
+	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User), (pr)-[:HAS_FILE]->(file:File) WHERE id(pr) = "${rid}" AND id(p) = "${user_rid}" RETURN file`
 	
 	var result = await db.cypher(query)
 	return result
 }
 
 graph.getSetFiles = async function (set_rid, user_rid, params) {
-	if(!params || !isIntegerString(params.skip) && !Number.isInteger(params.skip)) params.skip = 0
-	if(!params || !isIntegerString(params.limit) && !Number.isInteger(params.limit)) params.limit = 10
+	params = params || {}
+	if(!isIntegerString(params.skip) && !Number.isInteger(params.skip)) params.skip = 0
+	if(!isIntegerString(params.limit) && !Number.isInteger(params.limit)) params.limit = 10
+	params.skip = Number(params.skip)
+	params.limit = Number(params.limit)
+	const groupByOrigin = String(params.group_by_origin || '').toLowerCase() === 'true' || params.group_by_origin === true || params.group_by_origin === '1'
+	const groupBoundary = String(params.group_boundary || '').toLowerCase()
 	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	// TODO: it would be more efficient if project_rid was used in the query
-	const count_query = `select count() AS file_count from File where set=${set_rid}`
-	var response_count = await db.sql(count_query)
 
-	const query = `match {type:User, as:user, where:(@rid = ${user_rid})}-IS_OWNER->
-		{type:Project, as:project}.out() 
-		{as:node, where:( (set = ${set_rid}) AND $depth > 0 AND (@type = 'File' OR @type = 'ROI')),  while:($depth < 30)}
-                 return  DISTINCT node ORDER by label SKIP ${params.skip} LIMIT ${params.limit}`
-				 console.log('QUERY_FILES: ', query)
+	const has_access = await this.hasAccess(set_rid, user_rid)
+	if(!has_access) {
+		throw new Error('Set not found')
+	}
+
+	if(groupByOrigin) {
+		const fileQuery = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN DISTINCT node ORDER by node.label`
+		let fileResponse = await db.sql(fileQuery)
+		if(!fileResponse.result.length) {
+			const fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN DISTINCT node ORDER by node.label`
+			fileResponse = await db.sql(fallback)
+		}
+
+		const files = (fileResponse.result || []).map((row) => row.node).filter(Boolean)
+		const fileRidSet = new Set(files.map((file) => file['@rid']))
+		const fileByRid = new Map(files.map((file) => [file['@rid'], file]))
+
+		const edgeQuery = `MATCH {type:File, as:target, where:(set = "${set_rid}")}-DERIVED_FROM->{type:File, as:source} RETURN target.@rid AS target_rid, source.@rid AS source_rid, source.label AS source_label, source.type AS source_type, source.path AS source_path, source.original_filename AS source_original_filename`
+		let edgeResponse = await db.sql(edgeQuery)
+		if(!edgeResponse.result.length) {
+			const edgeFallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{type:File, as:target}-DERIVED_FROM->{type:File, as:source} RETURN target.@rid AS target_rid, source.@rid AS source_rid, source.label AS source_label, source.type AS source_type, source.path AS source_path, source.original_filename AS source_original_filename`
+			edgeResponse = await db.sql(edgeFallback)
+		}
+
+		const parentByTarget = new Map()
+		const sourceMetaByRid = new Map()
+		for(const row of edgeResponse.result || []) {
+			if(!row.target_rid || !row.source_rid) continue
+			if(!parentByTarget.has(row.target_rid)) {
+				parentByTarget.set(row.target_rid, row.source_rid)
+			}
+			if(!sourceMetaByRid.has(row.source_rid)) {
+				sourceMetaByRid.set(row.source_rid, {
+					'@rid': row.source_rid,
+					label: row.source_label,
+					type: row.source_type,
+					path: row.source_path,
+					original_filename: row.source_original_filename,
+				})
+			}
+		}
+
+		const ensureSourceMetadata = async (sourceRids) => {
+			if(!sourceRids.length) return
+			const cleaned = sourceRids.map((rid) => this.sanitizeRID(rid))
+			const query = `SELECT @rid AS rid, label, type, path, original_filename FROM File WHERE @rid IN [${cleaned.join(',')}]`
+			const response = await db.sql(query)
+			for(const row of response.result || []) {
+				sourceMetaByRid.set(row.rid, {
+					'@rid': row.rid,
+					label: row.label,
+					type: row.type,
+					path: row.path,
+					original_filename: row.original_filename,
+				})
+			}
+		}
+
+		const traverseAncestorsBatched = async (seedRids, maxDepth = 40) => {
+			let frontier = Array.from(new Set(seedRids.map((rid) => this.sanitizeRID(rid))))
+			const visited = new Set()
+			let depth = 0
+
+			while(frontier.length > 0 && depth < maxDepth) {
+				const currentBatch = frontier.filter((rid) => !visited.has(rid))
+				if(!currentBatch.length) break
+				frontier = []
+
+				for(const rid of currentBatch) {
+					visited.add(rid)
+				}
+
+				const linkQuery = `SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN [${currentBatch.join(',')}]`
+				const linkResponse = await db.sql(linkQuery)
+
+				const sourceRidsToLoad = []
+				for(const row of linkResponse.result || []) {
+					if(!row.target_rid || !row.source_rid) continue
+					if(!parentByTarget.has(row.target_rid)) {
+						parentByTarget.set(row.target_rid, row.source_rid)
+					}
+					if(!sourceMetaByRid.has(row.source_rid)) {
+						sourceMetaByRid.set(row.source_rid, {'@rid': row.source_rid})
+						sourceRidsToLoad.push(row.source_rid)
+					}
+					if(!visited.has(row.source_rid)) {
+						frontier.push(row.source_rid)
+					}
+				}
+
+				await ensureSourceMetadata(Array.from(new Set(sourceRidsToLoad)))
+				depth++
+			}
+		}
+
+		if(groupBoundary === 'pdf') {
+			await traverseAncestorsBatched(files.map((file) => file['@rid']))
+		}
+
+		const resolveOriginRid = (fileRid) => {
+			let cursor = fileRid
+			let parent = parentByTarget.get(cursor)
+			if(!parent) return fileRid
+
+			let guard = 0
+			while(parent && fileRidSet.has(parent) && guard < 20) {
+				cursor = parent
+				parent = parentByTarget.get(cursor)
+				guard++
+			}
+
+			return parent || cursor
+		}
+
+		const resolveBoundaryOriginRid = async (file) => {
+			const fileRid = file['@rid']
+			if(groupBoundary !== 'pdf') return resolveOriginRid(fileRid)
+
+			let cursor = fileRid
+			let lastPdfRid = null
+			const localType = String(file?.type || '').toLowerCase()
+			if(localType === 'pdf') lastPdfRid = fileRid
+
+			let guard = 0
+			while(cursor && guard < 40) {
+				const sourceRid = parentByTarget.get(cursor)
+				if(!sourceRid) break
+				cursor = sourceRid
+				const sourceMeta = sourceMetaByRid.get(sourceRid) || {}
+				if(String(sourceMeta.type || '').toLowerCase() === 'pdf') {
+					lastPdfRid = sourceRid
+				}
+				guard++
+			}
+
+			if(lastPdfRid) return lastPdfRid
+			return resolveOriginRid(fileRid)
+		}
+
+		const guessOrder = (file) => {
+			const md = file?.metadata || {}
+			const candidates = [md.page, md.page_number, md.pageIndex, md.index]
+			for(const c of candidates) {
+				const n = Number(c)
+				if(Number.isFinite(n)) return n
+			}
+			const label = String(file?.label || '')
+			const m = label.match(/(\d+)(?!.*\d)/)
+			if(m) {
+				const n = Number(m[1])
+				if(Number.isFinite(n)) return n
+			}
+			return Number.MAX_SAFE_INTEGER
+		}
+
+		const groupsMap = new Map()
+		for(const file of files) {
+			const originRid = await resolveBoundaryOriginRid(file)
+			if(!groupsMap.has(originRid)) {
+				const sourceMeta = sourceMetaByRid.get(originRid) || fileByRid.get(originRid) || {}
+				groupsMap.set(originRid, {
+					is_group: true,
+					source_rid: originRid,
+					'@rid': originRid,
+					label: sourceMeta.label || sourceMeta.original_filename || file.label,
+					type: sourceMeta.type || file.type,
+					path: sourceMeta.path || null,
+					file_count: 0,
+					children: [],
+				})
+			}
+			const group = groupsMap.get(originRid)
+			group.children.push(file)
+			group.file_count = group.children.length
+		}
+
+		for(const group of groupsMap.values()) {
+			group.children.sort((a, b) => {
+				const aOrder = guessOrder(a)
+				const bOrder = guessOrder(b)
+				if(aOrder !== bOrder) return aOrder - bOrder
+				return String(a.label || '').localeCompare(String(b.label || ''))
+			})
+
+			const cover = group.children.find((child) => child.path)
+			if(cover?.path) {
+				group.thumb = API_URL + 'api/thumbnails/' + cover.path.split('/').slice(0, -1).join('/')
+			}
+		}
+
+		const groups = Array.from(groupsMap.values()).sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+
+		const decorateFiles = async (list) => {
+			if(!params.thumbnails) return
+			for (const file of list) {
+				if(file.path && (file.type !== 'pdf' || await shouldUsePdfThumbnail(file))) {
+					file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/')
+				}
+				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
+				const entity_response = await db.cypher(entity_query)
+				file.entities = entity_response.result
+			}
+		}
+
+		const allSingleFileGroups = groups.length === files.length && groups.every((group) => group.file_count === 1)
+		if(!params.source_rid && allSingleFileGroups) {
+			const pagedFiles = files.slice(params.skip, params.skip + params.limit)
+			await decorateFiles(pagedFiles)
+			return {
+				grouped: false,
+				mode: 'flat',
+				group_boundary: groupBoundary || null,
+				file_count: files.length,
+				limit: params.limit,
+				skip: params.skip,
+				groups: [],
+				files: pagedFiles,
+			}
+		}
+
+		if(params.source_rid) {
+			const sourceRid = this.sanitizeRID(params.source_rid)
+			const selectedGroup = groupsMap.get(sourceRid)
+			const children = selectedGroup ? selectedGroup.children : []
+			const pagedChildren = children.slice(params.skip, params.skip + params.limit)
+			await decorateFiles(pagedChildren)
+
+			return {
+				grouped: true,
+				mode: 'children',
+				group_boundary: groupBoundary || null,
+				source_rid: sourceRid,
+				file_count: children.length,
+				group_count: groups.length,
+				limit: params.limit,
+				skip: params.skip,
+				groups: [],
+				files: pagedChildren,
+			}
+		}
+
+		const pagedGroups = groups.slice(params.skip, params.skip + params.limit)
+		return {
+			grouped: true,
+			mode: 'groups',
+			group_boundary: groupBoundary || null,
+			file_count: files.length,
+			group_count: groups.length,
+			limit: params.limit,
+			skip: params.skip,
+			groups: pagedGroups,
+			files: [],
+		}
+	}
+
+	const count_query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN count(node) AS file_count`
+	var response_count = await db.sql(count_query)
+	if(!response_count.result.length) {
+		const count_query_fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN count(DISTINCT node) AS file_count`
+		response_count = await db.sql(count_query_fallback)
+	}
+
+	const query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
+	console.log('QUERY_FILES: ', query)
 	var response = await db.sql(query)
+	if(!response.result.length) {
+		const query_fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')}-->{type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} RETURN DISTINCT node ORDER by node.label SKIP ${params.skip} LIMIT ${params.limit}`
+		response = await db.sql(query_fallback)
+	}
 	
 
 	var files = response.result.map(obj => obj.node);
@@ -514,7 +870,9 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	// thumbnails and entities
 	if(params.thumbnails) {
 		for (var file of files) {
-			file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+			if(file.path && (file.type !== 'pdf' || await shouldUsePdfThumbnail(file))) {
+				file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+			}
 				// TODO: do this in one query!
 				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
 				var entity_response = await db.cypher(entity_query)
@@ -536,7 +894,7 @@ graph.getSourceFiles = async function (source_rid, user_rid, params) {
 		var files = []
 		if (!source_rid.match(/^#/)) source_rid = '#' + source_rid
 	
-		const query = `MATCH {type:User, as:user, where:(@rid = "${user_rid}")}-IS_OWNER->{type:Project, as:project}-HAS_SOURCE->{type: Source, as: source, where:(@rid = ${source_rid})}  RETURN source.path AS path`
+		const query = `MATCH {type:Source, as: source, where:(@rid = ${source_rid})}<-HAS_SOURCE-{type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = "${user_rid}")} RETURN source.path AS path`
 		var response = await db.sql(query)
 	
 		var source_file = await media.readJSON(path.join(response.result[0].path, 'source.json'))
@@ -660,38 +1018,8 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 		msg.set_node = setNode
 	}
 
-
-	// pdfs are splitted so we give each page its own message
-	if(node_metadata.type == 'pdf') {
-		console.log('PDF: ', node_metadata)
-		msg.pdf = true
-		const first = parseInt(task.params.firstPageToConvert)
-		var last = parseInt(task.params.lastPageToConvert)
-		if(isNaN(first)) first = 0
-		console.log('TASK: ', task)
-		console.log('TASK PARAMS: ', task.params)
-		console.log('FIRST: ', first)
-		console.log('LAST: ', last)
-		
-		if(node_metadata?.metadata?.page_count) {
-			if(isNaN(last)) last = node_metadata.metadata.page_count
-			if(last > node_metadata.metadata.page_count) last = node_metadata.metadata.page_count
-			if(first < last) {
-				var c = 1
-				for(var i = first; i <= last; i++) {
-					var m = structuredClone(msg)
-					m.task.params.page = i
-					m.total_files = last - first + 1
-					m.current_file = c
-					c += 1
-					messages.push(m)
-				}	
-			}
-		}
-
-	}  else {
-		messages.push(msg)
-	}
+	messages.push(msg)
+	
 console.log('Created messages: ', messages)
 	return messages
 }
@@ -704,13 +1032,17 @@ graph.createFilter = async function(filter_id, file_rid, user_rid) {
 	if(!filter || !node) {
 		throw new Error('Filter or file not found: '+ filter_id + ' ' + file_rid )
 	}
-	const filter_node = await this.create('Filter', {filter_id: filter_id, label: 'Draw regions'})
-	// link filter to file
-	await this.connect(file_rid, 'HAS_FILTER', filter_node['@rid'])
+	//const filter_node = await this.create('Filter', {filter_id: filter_id, label: 'Draw regions'})
 
-	// we create Set and link it to Filter
+	const project_rid = await this.getProjectRidForNode(file_rid)
+	const filter_node = await this.create('Process', {filter_id: filter_id, label: 'Draw regions'})
+	filter_node.path = media.getProcessFilesDir(DATA_DIR, project_rid, filter_node.uuid)
+	// link filter to project
+	await this.connect(project_rid, 'BELONGS_TO', filter_node['@rid'])
+
+	// we create Set and link it to source file or source Set
 	var set_node = await this.create('Set', {label: 'My regions', 'type': 'roi-set'})
-	await this.connect(filter_node['@rid'], 'HAS_SET', set_node['@rid'])
+	await this.connectDerivedFrom(set_node['@rid'], file_rid, filter_node['@rid'])
 
 	return filter_node
 }
@@ -797,21 +1129,20 @@ graph.createProcessNode_queue = async function (msg) {
 	// mark if this is part of set processing = not displayed in UI by default
 	if(msg.output_set) process_attrs.set = msg.output_set
 	if(msg.set_process_rid) process_attrs.set_process = msg.set_process_rid
+	if(msg.set_process && !process_attrs.set_process) process_attrs.set_process = msg.set_process
+	const process_project_rid = msg.file.project_rid || await this.getProjectRidForNode(file_rid)
+	if(process_project_rid) process_attrs.project_rid = process_project_rid
 
 	processNode = await this.create('Process', process_attrs)
 	process_rid = processNode['@rid']
-	var file_path = msg.file.path.split('/').slice(0, -1).join('/')
-	processNode.path = path.join(file_path, 'process', media.rid2path(process_rid), 'files')
+	processNode.path = media.getProcessFilesDir(DATA_DIR, process_project_rid, processNode.uuid || process_rid)
+	if(process_project_rid) processNode.project_rid = process_project_rid
+	processNode.file_rid = file_rid
 	// update process path to record
 	await this.setNodeAttribute_old(process_rid, {"key": "path", "value": processNode.path}, 'Process')
-	
-	// finally, connect process node to file node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-
-	// create process output file node
-	//await this.createProcessFileNode(process_rid, data, '', '')
-	//console.log('***************** processNode ***************')
-	//console.log(processNode)
+	if(process_project_rid) {
+		await this.connect(process_rid, 'BELONGS_TO', process_project_rid)
+	}
 
 	return processNode
 
@@ -829,21 +1160,30 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	var setNode = null
 	const process_attrs = { label: task.name, path:'' }
 	process_attrs.service = service.name
+	if(filegraph.project_rid) process_attrs.project_rid = filegraph.project_rid
 	if(task.info) {
 		process_attrs.info = task.info
 	}
 
 	processNode = await this.create('SetProcess', process_attrs)
 	process_rid = processNode['@rid']
+	const set_project_rid = filegraph.project_rid || await this.getProjectRidForNode(file_rid)
+	if(set_project_rid) {
+		await this.connect(process_rid, 'BELONGS_TO', set_project_rid)
+	}
 
-	// finally, connect SetProcess node to source Set node
-	await this.connect(file_rid, 'PROCESSED_BY', process_rid)
-	
 	// create process output Set
 	if(service.external_tasks || service.tasks[task.id].output != 'always file') {
-		setNode = await this.create('Set', {path: processNode.path})
-		// and link it to SetProcess
-		await this.connect(process_rid, 'PRODUCED', setNode['@rid'])
+		setNode = await this.create('Set', {})
+		if(set_project_rid) {
+			await this.setNodeAttribute_old(setNode['@rid'], {key: 'project_rid', value: set_project_rid}, 'Set')
+		}
+		const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || setNode['@rid'])
+		await media.createProcessDir(set_path)
+		await this.setNodeAttribute_old(setNode['@rid'], {key: 'path', value: set_path}, 'Set')
+		setNode.path = set_path
+		await this.connectDerivedFrom(setNode['@rid'], file_rid, process_rid)
+		await this.syncSetManifest(setNode['@rid'])
 	}
 
 	return {process: processNode, set: setNode} //processNode
@@ -857,21 +1197,22 @@ graph.createManyToOneProcessNode = async function (topic, service, data, setgrap
 
 	const process_attrs = { label: topic, path:'' }
 	process_attrs.service = service.name
+	if(setgraph.project_rid) process_attrs.project_rid = setgraph.project_rid
 	if(data.info) {
 		process_attrs.info = data.info
 	}
 	const processNode = await this.create('Process', process_attrs)
 	const process_rid = processNode['@rid']
 
-	const data_dir = DATA_DIR
-	const process_path = path.join(data_dir, 'projects', media.rid2path(setgraph.project_rid), 'processes', media.rid2path(process_rid))
+	const process_path = media.getProcessFilesDir(DATA_DIR, setgraph.project_rid, processNode.uuid || process_rid)
 	await media.createProcessDir(process_path)
 	const update = `MATCH (p:Process) WHERE id(p) = "${process_rid}" SET p.path = "${process_path}" RETURN p`
 	var update_response = await db.cypher(update)
 	processNode.path = process_path
 
-	// finally, connect Process node to source Set node
-	await this.connect(set_rid, 'PROCESSED_BY', process_rid)
+	if(setgraph.project_rid) {
+		await this.connect(process_rid, 'BELONGS_TO',  setgraph.project_rid)
+	}
 
 	return processNode
 	
@@ -886,14 +1227,23 @@ graph.createOutputSetNode = async function (label, processNode) {
 	
 	// create process node
 	const set_attrs = { label: label }
+	const set_project_rid = processNode.project_rid || await this.getProjectRidForNode(process_rid)
+	if(set_project_rid) set_attrs.project_rid = set_project_rid
 
 
 	const setNode = await this.create('Set', set_attrs)
 	const set_rid = setNode['@rid']
+	const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+	await media.createProcessDir(set_path)
+	await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+	setNode.path = set_path
 
 	
-	// finally, connect process node to file node
-	await this.connect(process_rid, 'PRODUCED', set_rid)
+	const inputSetRid = processNode.input_set || processNode.file_rid
+	if(inputSetRid) {
+		await this.connectDerivedFrom(set_rid, inputSetRid, process_rid)
+	}
+	await this.syncSetManifest(set_rid)
 
 	return setNode
 
@@ -902,10 +1252,21 @@ graph.createOutputSetNode = async function (label, processNode) {
 
 
 graph.createProcessSetNode = async function (process_rid, options) {
-
+	if(!options) options = {}
 	const setNode = await this.create('Set', options)
 	var set_rid = setNode['@rid']
-	await this.connect(process_rid, 'PRODUCED', set_rid)
+	const set_project_rid = options?.project_rid || await this.getProjectRidForNode(process_rid)
+		if(set_project_rid && !options?.project_rid) {
+			await this.setNodeAttribute_old(set_rid, {key: 'project_rid', value: set_project_rid}, 'Set')
+		}
+	const set_path = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+	await media.createProcessDir(set_path)
+	await this.setNodeAttribute_old(set_rid, {key: 'path', value: set_path}, 'Set')
+	setNode.path = set_path
+	if(options?.input_set) {
+		await this.connectDerivedFrom(set_rid, options.input_set, process_rid)
+	}
+	await this.syncSetManifest(set_rid)
 
 	return setNode
 
@@ -920,6 +1281,8 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	var extension = path.extname(file.hapi.filename).replace('.', '').toLowerCase()
 
 	var vertex_params = {
+		uuid: uuidv7(),
+		project_rid: project_rid,
 		type: file_type,
 		extension: extension,
 		label: file.hapi.filename,
@@ -935,15 +1298,14 @@ graph.createOriginalFileNode = async function (project_rid, file, file_type, set
 	
 	var response = await db.sql(query)
 	var file_rid = response.result[0]['@rid']
-	await this.connect(project_rid, 'HAS_FILE', file_rid)
-	var file_path = path.join(data_dir, 'projects', media.rid2path(project_rid), 'files', media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	await this.connect(file_rid, 'BELONGS_TO', project_rid)
+	var file_path = media.getFilePath(data_dir, project_rid, response.result[0].uuid || file_rid, extension)
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 	
 	// link file to set
 	if(set_rid) {
 		if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-		await this.connect(set_rid, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: set_rid}, 'File' ) // this attribute is used in project query
 		await this.updateFileCount(set_rid)
 	}
@@ -977,6 +1339,8 @@ graph.createErrorNode = async function (error, message, data_dir) {
 	}
 
 	const vertex_params = {
+		uuid: uuidv7(),
+		project_rid: message.file.project_rid || null,
 		type: "error.json",
 		extension: "json",
 		label: `${label}.error.json`,
@@ -992,18 +1356,19 @@ graph.createErrorNode = async function (error, message, data_dir) {
 	var response = await db.sql(query)
 
 	var file_rid = response.result[0]['@rid']
-	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.json')
+	const error_project_rid = message.file.project_rid || await this.getProjectRidForNode(process_rid)
+	var file_path = media.getFilePath(DATA_DIR, error_project_rid, response.result[0].uuid || file_rid, 'json')
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
-		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
+		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, message.file['@rid'], process_rid)
 	}
 
 	return response.result[0]
@@ -1027,17 +1392,24 @@ graph.createImageROIs = async function(image_rid, set_rid, data, user_rid) {
 		console.log('Image path not found for node: ', set_node)
 		throw new Error('Image path not found for node: '+ image_rid )
 	}
-	// create ROI node and connect it to file node.
+	// create ROI as a normal File node.
 	let roi = null
 	try {
-		roi = await this.create('ROI', {type: 'roi.json', extension: 'json'}, null, null, true)
-		await this.connect(image_rid, 'HAS_ROI', roi['@rid'])
-		await this.connect(set_rid, 'HAS_ITEM', roi['@rid'])
+		const image_node = await this.getNodeAttributes(image_rid, user_rid)
+		const roi_data = {
+			type: 'roi.json',
+			extension: 'json',
+			set: set_rid,
+			project_rid: image_node?.project_rid,
+			label: `${path.basename(image_node?.label || image_rid)}.roi.json`
+		}
+		roi = await this.create('File', roi_data, null, null, true)
+		await this.connectDerivedFrom(roi['@rid'], image_rid)
 		var roi_rid = roi['@rid'].replace('#', '').replace(':', '_')
 		media.writeJSON(data, roi_rid + '.roi.json', image_path)
 		var roi_path = path.join(image_path, roi_rid + '.roi.json')
-		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'ROI')
-		await this.setNodeAttribute_old(roi['@rid'], {"key": "set", "value": set_rid}, 'ROI')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "path", "value": roi_path}, 'File')
+		await this.setNodeAttribute_old(roi['@rid'], {"key": "set", "value": set_rid}, 'File')
 	} catch (error) {
 		console.log('Error creating ROI node: ', error)
 		throw new Error('Error creating ROI node: '+ error.message )
@@ -1072,8 +1444,12 @@ graph.editImageROIs = async function(roi_rid, data, user_rid) {
 graph.getImageROIs = async function(rid, set_rid, user_rid) {
 	if (!rid.match(/^#/)) rid = '#' + rid.replace('_', ':')
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid.replace('_', ':')
-	const query = `MATCH {type:File, where:(@rid = ${rid})}-HAS_ROI->{as:roi}<-HAS_ITEM-{type:Set, where:(@rid = ${set_rid})} RETURN roi`
+	const query = `MATCH {type:File, as:roi, where:(set = "${set_rid}" AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${rid})} RETURN roi`
 	var response = await db.sql(query)
+	if(!response.result[0] || !response.result[0].roi) {
+		const fallbackQuery = `MATCH {type:Set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:roi, where:(@type = 'File' AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${rid})} RETURN roi`
+		response = await db.sql(fallbackQuery)
+	}
 	if(!response.result[0] || !response.result[0].roi) {
 		console.log('ROI not found for file: ', rid)
 		throw new Error('ROI not found for file: '+ rid )
@@ -1095,15 +1471,63 @@ graph.getImageROIs = async function(rid, set_rid, user_rid) {
 graph.updateFileCount = async function (set_rid) {
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
-	const count_query = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
+	const count_query = `MATCH {type:File, as:file, where:(set = "${set_rid}"), optional:true}
 	RETURN count(file) as count`
 	var count_response = await db.sql(count_query)
+	if(!count_response.result.length) {
+		const count_query_fallback = `MATCH {type:Set, as:set, where: ( @rid = "${set_rid}")}-HAS_ITEM->{type:File, as: file, optional:true}
+		RETURN count(file) as count`
+		count_response = await db.sql(count_query_fallback)
+	}
 
 	var count = count_response.result[0].count
 
 	const query = `UPDATE Set SET count = ${count} WHERE @rid = "${set_rid}" `
 	var response = await db.sql(query)
+	await this.syncSetManifest(set_rid)
 	return count
+}
+
+graph.syncSetManifest = async function(set_rid) {
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+
+	const setQuery = `SELECT @rid, uuid, label, path, count FROM Set WHERE @rid = ${set_rid}`
+	const setResponse = await db.sql(setQuery)
+	if(!setResponse.result.length) {
+		return null
+	}
+
+	const setNode = setResponse.result[0]
+	let setPath = setNode.path
+	if(!setPath) {
+		const set_project_rid = await this.getProjectRidForNode(set_rid)
+		setPath = media.getSetDir(DATA_DIR, set_project_rid, setNode.uuid || set_rid)
+		await media.createProcessDir(setPath)
+		await this.setNodeAttribute_old(set_rid, {key: 'path', value: setPath}, 'Set')
+	}
+
+	const itemQuery = `MATCH {type:File, as:item, where:(set = "${set_rid}")}
+		RETURN item.@rid AS rid, item.@type AS node, item.label AS label, item.path AS path, item.type AS type`
+	let itemsResponse = await db.sql(itemQuery)
+	if(!itemsResponse.result.length) {
+		const itemQueryFallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:item, where:(@type = 'File')}
+			RETURN item.@rid AS rid, item.@type AS node, item.label AS label, item.path AS path, item.type AS type`
+		itemsResponse = await db.sql(itemQueryFallback)
+	}
+
+	const manifest = {
+		set: {
+			rid: setNode['@rid'],
+			label: setNode.label || '',
+			count: setNode.count || 0,
+			path: setPath
+		},
+		updated_at: new Date().toISOString(),
+		items: itemsResponse.result || []
+	}
+
+	await media.writeJSON(manifest, 'set.json', setPath)
+	return manifest
 }
 
 
@@ -1123,6 +1547,8 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	const process_path = path_response.result[0].path
 
 	var vertex_params = {
+		uuid: uuidv7(),
+		project_rid: message.file.project_rid || null,
 		type: file_type,
 		extension: extension,
 		label: label,
@@ -1140,18 +1566,21 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	console.log('file_rid', file_rid)
 	console.log('process_path', process_path)
 	console.log('extension', extension)
-	var file_path = path.join(process_path, media.rid2path(file_rid), media.rid2path(file_rid) + '.' + extension)
+	const process_project_rid = message.file.project_rid || await this.getProjectRidForNode(process_rid)
+	var file_path = media.getFilePath(DATA_DIR, process_project_rid, response.result[0].uuid || file_rid, extension)
 	await this.setNodeAttribute_old(file_rid, {"key": "path", "value": file_path}, 'File')
 	response.result[0]['path'] = file_path
 
+	const lineageSourceRid = message?.root_source?.['@rid'] || message?.file?.['@rid']
+
 	// if output of process is a set, then connect file to set ALSO and add attribute "set"
 	if(message.output_set) {
-		await this.connect(message.output_set, 'HAS_ITEM', file_rid)
 		await this.setNodeAttribute_old(file_rid, {key:"set", value: message.output_set}, 'File' ) // this attribute is used in project query
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, lineageSourceRid, process_rid)
+		await this.syncSetManifest(message.output_set)
 	// otherwise connect file to process
 	} else {
-		await this.connect(process_rid, 'PRODUCED', file_rid)
+		await this.connectDerivedFrom(file_rid, lineageSourceRid, process_rid)
 	}
 
 	return response.result[0]
@@ -1162,28 +1591,18 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
 	const clean_file_rid = this.sanitizeRID(file_rid)
 	// file must be somehow related to a project that is owned by user
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${user_rid})}
-	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:file, where:(@rid = ${clean_file_rid} AND (@type = 'File' OR @type = 'ROI')), while: ($depth < 30)} return file`
+	var query = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}<--{as:file, where:(@rid = ${clean_file_rid} AND @type = 'File'), while: ($depth < 30)} return file, project`
 
 	var file_response = await db.sql(query)
 
-	if(file_response.result[0] && file_response.result[0].file)
+	if(file_response.result[0] && file_response.result[0].file) {
+		file_response.result[0].file.project_rid = file_response.result[0].project['@rid']
 		return file_response.result[0].file
+	}
 
 	else {
 		// check if file is a Set
-		var query_set = `MATCH {
-			type: User, 
-			as:p, 
-			where:(@rid = ${user_rid})}
-		-IS_OWNER->
-			{type:Project, as:project}--> 
-			{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
+		var query_set = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}<--{type:Set, as:file, where:(@rid = ${clean_file_rid}), while: ($depth < 30)} return file, project`
 			console.log('QUERY_SET: ', query_set)
 		var set_response = await db.sql(query_set)
 		if(set_response.result[0] && set_response.result[0].file) {
@@ -1197,16 +1616,11 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 
 		// check if file is source (not file at all!)
 		} else {
-			var query_source = `MATCH {
-				type: User, 
-				as:p, 
-				where:(@rid = ${user_rid})}
-			-IS_OWNER->
-				{type:Project, as:project}--> 
-				{type:Source, as:file, where:(@rid = ${clean_file_rid})} return file`
+			var query_source = `MATCH {type:User, as:p, where:(@rid = ${user_rid})}<-HAS_OWNER-{type:Project, as:project}--> {type:Source, as:file, where:(@rid = ${clean_file_rid})} return file, project`
 				
 			var source_response = await db.sql(query_source)
 			if(source_response.result[0] && source_response.result[0].file) {
+				source_response.result[0].file.project_rid = source_response.result[0].project['@rid']
 				return source_response.result[0].file
 			}
 		}
@@ -1217,16 +1631,14 @@ graph.getUserFileMetadata = async function (file_rid, user_rid) {
 graph.getFileSource = async function (file_rid, file_type) {
 	console.log('getFileSource', file_rid, file_type)
 	const clean_file_rid = this.sanitizeRID(file_rid)
-	if(file_type == 'ROI') {
-			const sql_roi = `Match {type:ROI, as:roi, where:(@rid = ${clean_file_rid} )}<-HAS_ROI-{type:File, as:file} return file`
-			console.log('SQL_ROI: ', sql_roi)
-			var response_roi = await db.sql(sql_roi)
-			if(response_roi.result[0] && response_roi.result[0].file) return response_roi.result[0].file
-	} else {
-		const sql = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
-		var response = await db.sql(sql)
-		if(response.result[0] && response.result[0].source) return response.result[0].source
-	}
+	const sql = `Match {type:File, as:target, where:(@rid = ${clean_file_rid} )}-DERIVED_FROM->{type:File, as:source} return source`
+	var response = await db.sql(sql)
+	if(response.result[0] && response.result[0].source) return response.result[0].source
+
+	// legacy fallback
+	const sql_legacy = `Match {type:File, as:source}-PROCESSED_BY->{type:Process, as:process}-PRODUCED->{type: File, as:target, where:(@rid = ${clean_file_rid} )} return source`
+	response = await db.sql(sql_legacy)
+	if(response.result[0] && response.result[0].source) return response.result[0].source
 
 
 	return null
@@ -1234,8 +1646,18 @@ graph.getFileSource = async function (file_rid, file_type) {
 
 graph.getFileSet = async function (file_rid) {
 	const clean_file_rid = this.sanitizeRID(file_rid)
-	const sql = `Match {type:Set, as:set}-HAS_ITEM->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+	const sql = `SELECT set FROM ${clean_file_rid}`
 	var response = await db.sql(sql)
+	if(response.result[0] && response.result[0].set) {
+		const setNodeResponse = await db.sql(`SELECT FROM ${response.result[0].set}`)
+		if(setNodeResponse.result[0]) return setNodeResponse.result[0]
+	}
+	const sql_legacy = `Match {type:Set, as:set}-CONTAINS->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+	response = await db.sql(sql_legacy)
+	if(!response.result[0] || !response.result[0].set) {
+		const sql_fallback = `Match {type:Set, as:set}-HAS_ITEM->{type:File, as:file, where:(@rid = ${clean_file_rid} )} return set, file`
+		response = await db.sql(sql_fallback)
+	}
 	if(response.result[0] && response.result[0].set) return response.result[0].set
 	return null
 }
@@ -1246,6 +1668,8 @@ graph.query = async function (body) {
 
 graph.create = async function (type, data, admin, tid) {
 	//console.log('create', type, data)
+	if(!data) data = {}
+	if(!data.uuid) data.uuid = uuidv7()
 	// We clean some data
    if(type == 'Process') {
 	if(data.task) {
@@ -1306,6 +1730,8 @@ graph.create = async function (type, data, admin, tid) {
 }
 
 graph.createWithSQL = async function (type, data, admin) {
+	if(!data) data = {}
+	if(!data.uuid) data.uuid = uuidv7()
 	
 	var data_str_arr = []
 	// expression data to string
@@ -1340,56 +1766,122 @@ graph.createWithSQL = async function (type, data, admin) {
 
 graph.deleteNode = async function (rid, userRID) {
 	console.log('deleting node', rid, userRID)
+	rid = this.sanitizeRID(rid)
 
-	var node = await this.getNodeAttributes(rid, userRID)
+	const rootNode = await this.getNodeAttributes(rid, userRID)
+	if(!rootNode) throw new Error('Node not found')
 
-	if(!node) throw ('Node not found')
-	
-	// remove node and all children (out nodes) from solr index
-	const q = `TRAVERSE out() FROM ${rid}`
-	var traverse = await db.sql(q)
-	var targets = []
-	for(var t of traverse.result) {
-		targets.push({id: t['@rid']})
-		// remove of path is only necessary for setProcess nodes TODO: make smarter
-		if(t['path']) await media.deleteNodePath(t['path'])
-		if(t['service'] == 'Solr') {
-			await solr.dropSetIndex(t['@rid'])
+	const queue = [rid]
+	const visited = new Set()
+	const toDelete = new Set()
+	const solrTargets = new Set()
+	const pathTargets = new Set()
+
+	const enqueueRid = (value) => {
+		if(!value) return
+		try {
+			const clean = this.sanitizeRID(String(value))
+			if(!visited.has(clean)) queue.push(clean)
+		} catch {
+			// ignore invalid/non-RID values in edge attributes
 		}
 	}
 
-	// if node itself is a solr indexer, then delete the index
-	if(node['service'] == 'Solr') {
-		console.log('deleting solr index', rid)
-		await solr.dropSetIndex(rid)
+	const isNotFoundError = (error) => {
+		const message = String(error?.message || '')
+		return /response code 404|not found/i.test(message)
 	}
 
-	// if this is setProcess, then delete all Process nodes that has property set_process = rid
-	if(node['@type'] == 'SetProcess') {
-		const query_delete_process = `DELETE FROM Process WHERE set_process = "${rid}"`
-		await db.sql(query_delete_process)
+	while(queue.length > 0) {
+		const current = queue.pop()
+		if(visited.has(current)) continue
+		visited.add(current)
+
+		let node = null
+		try {
+			const nodeResponse = await db.sql(`SELECT @rid, @type, path, service FROM ${current}`)
+			node = nodeResponse.result[0]
+		} catch (error) {
+			if(isNotFoundError(error)) {
+				// Stale process_rid references in edge attributes are allowed; just skip missing nodes.
+				continue
+			}
+			throw error
+		}
+		if(!node || !node['@rid']) continue
+
+		toDelete.add(node['@rid'])
+
+		if(node.service === 'Solr') {
+			solrTargets.add(node['@rid'])
+		}
+
+		if(node.path && node['@type'] !== 'Filter') {
+			if(node['@type'] === 'Process' && path.basename(node.path) === 'files') {
+				pathTargets.add(path.dirname(node.path))
+			} else {
+				pathTargets.add(node.path)
+			}
+		}
+
+		// Descendants in lineage graph: child -DERIVED_FROM-> current
+		const descendantsResponse = await db.sql(`SELECT @out AS rid, process_rid FROM DERIVED_FROM WHERE @in = ${current}`)
+		for(const rel of descendantsResponse.result || []) {
+			enqueueRid(rel.rid)
+			enqueueRid(rel.process_rid)
+		}
+
+		// Process nodes are referenced in edge attributes, not as graph endpoints.
+		// Deleting a process must delete output nodes linked via process_rid.
+		const processLinkedResponse = await db.sql(`SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = "${current}"`)
+		for(const rel of processLinkedResponse.result || []) {
+			enqueueRid(rel.rid)
+		}
+
+		// Also remove processes referenced only in file-link edge attributes.
+		const linkedEdgesResponse = await db.sql(`SELECT process_rid FROM DERIVED_FROM WHERE @in = ${current} OR @out = ${current}`)
+		for(const edge of linkedEdgesResponse.result || []) {
+			enqueueRid(edge.process_rid)
+		}
+
+		// Set members may not have DERIVED_FROM to Set, include both current and legacy schema.
+		if(node['@type'] === 'Set') {
+			let filesResponse = await db.sql(`SELECT @rid AS rid FROM File WHERE set = "${current}"`)
+			if(!filesResponse.result.length) {
+				filesResponse = await db.sql(`MATCH {type:Set, as:set, where:(@rid = ${current})}-HAS_ITEM->{as:file, where:(@type = 'File')} RETURN DISTINCT file.@rid AS rid`)
+			}
+			for(const file of filesResponse.result || []) {
+				enqueueRid(file.rid)
+			}
+		}
+
+		// SetProcess may own Process nodes via set_process attribute.
+		if(node['@type'] === 'SetProcess') {
+			const processResponse = await db.sql(`SELECT @rid AS rid FROM Process WHERE set_process = "${current}"`)
+			for(const processNode of processResponse.result || []) {
+				enqueueRid(processNode.rid)
+			}
+		}
 	}
 
-	// get path for directory deletion
-	const query_path = `SELECT path FROM ${rid}`
-	var path_result = await db.sql(query_path)
-
-
-	await db.deleteMany(targets)
-
-	const node_path = node.path
-	const is_project = node['@type'] == 'Project'
-	if(node_path && node['@type'] != 'Filter')
-		await media.deleteNodePath(node_path)
-	// project node has no path
-	if(is_project) {
-		await media.deleteNodePath(path.join('data', 'projects', media.rid2path(rid), 'files')) // must add 'files' so that it does not remove the whole project directory
+	for(const solrRid of solrTargets) {
+		console.log('deleting solr index', solrRid)
+		await solr.dropSetIndex(solrRid)
 	}
-	
-	if(path_result.result[0] && path_result.result[0].path) {
-		return { path: path_result.result[0].path}	
-	} else {
-		return {path: null}
+
+	const targets = Array.from(toDelete).map((id) => ({id}))
+	if(targets.length > 0) {
+		await db.deleteMany(targets)
+	}
+
+	const uniquePaths = Array.from(pathTargets).sort((a, b) => b.length - a.length)
+	for(const p of uniquePaths) {
+		await media.deleteNodePath(p)
+	}
+
+	return {
+		path: uniquePaths[0] || null,
+		deleted: targets.length,
 	}
 
 }
@@ -1409,6 +1901,40 @@ graph.connect = async function (from, relation, to, tid) {
 	} else {
 		return await db.sql(query)
 	}
+}
+
+graph.connectDerivedFrom = async function (target, source, process_rid, tid) {
+	if (!target.match(/^#/)) target = '#' + target
+	if (!source.match(/^#/)) source = '#' + source
+	if (process_rid && !process_rid.match(/^#/)) process_rid = '#' + process_rid
+
+	await this.connect(target, 'DERIVED_FROM', source, tid)
+	if(process_rid) {
+		let process_id = process_rid
+		let cruncher = ''
+		let task = ''
+		try {
+			const processResponse = await db.sql(`SELECT uuid, service_id, service, label, task FROM ${process_rid}`)
+			if(processResponse.result[0]) {
+				const p = processResponse.result[0]
+				if(p.uuid) process_id = p.uuid
+				cruncher = p.service_id || p.service || p.label || ''
+				task = p.task || ''
+			}
+		} catch (e) {
+			// Keep fallback values if process node lookup fails
+		}
+
+		const query = `UPDATE DERIVED_FROM SET process_rid = "${process_rid}", process_id = "${process_id}", cruncher = "${String(cruncher).replace(/"/g, '\\"')}", task = "${String(task).replace(/"/g, '\\"')}" WHERE @out = ${target} AND @in = ${source}`
+		return db.sql(query)
+	}
+	return {result: 'ok'}
+}
+
+graph.connectSetContains = async function(set_rid, item_rid, tid) {
+	await this.connect(set_rid, 'CONTAINS', item_rid, tid)
+	// compatibility for existing queries
+	await this.connect(set_rid, 'HAS_ITEM', item_rid, tid)
 }
 
 graph.startTransaction = async function () {
@@ -1453,12 +1979,7 @@ graph.setEdgeAttribute = async function (rid, data) {
 }
 
 graph.isProjectOwner = async function (rid, userRID) {
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = :userRID)}
-	-IS_OWNER->
-		{type:Project, as:project,  where:(@rid = :rid)} return project`
+	var query = `MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type: User, as:p, where:(@rid = :userRID)} return project`
 
 	var response = await db.sql_params(query, {rid: rid, userRID: userRID}, true)
 	return response.result.length > 0
@@ -1467,13 +1988,7 @@ graph.isProjectOwner = async function (rid, userRID) {
 graph.isNodeOwner = async function (rid, userRID) {
 
 	// node must be somehow related to a project that is owned by user
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${userRID})}
-	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
+	var query = `MATCH {type:User, as:p, where:(@rid = ${userRID})}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 100)} return node`
 	
 
 	var file_response = await db.sql(query)
@@ -1519,9 +2034,18 @@ graph.setNodeError = async function (rid, error, userRID) {
 
 
 graph.getSetProcessNode = async function (set, userRID) {
-	if(!await this.isNodeOwner(set, userRID)) throw({'message': 'You are not the owner of this set'})
-	let query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	const cleanSetRid = this.sanitizeRID(set)
+	if(!await this.isNodeOwner(cleanSetRid, userRID)) throw({'message': 'You are not the owner of this set'})
+	let query = `SELECT process_rid FROM DERIVED_FROM WHERE @out = ${cleanSetRid} AND process_rid IS NOT NULL LIMIT 1`
 	let response = await db.sql(query)
+	if(response.result[0] && response.result[0].process_rid) {
+		const process = await db.sql(`SELECT FROM ${response.result[0].process_rid}`)
+		if(process.result[0]) return {setprocess: process.result[0]}
+	}
+
+	// legacy fallback
+	query = `MATCH {type: Set, where: (@rid = ${cleanSetRid})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	response = await db.sql(query)
 	return response.result[0]
 }
 
@@ -1559,6 +2083,59 @@ graph.setProjectAttribute = async function (rid, data, userRID) {
 	return db.sql_params(query, params)
 }	
 
+async function getDirectorySizeBytes(targetDir) {
+	if (!targetDir) return 0
+	const exists = await fse.pathExists(targetDir)
+	if (!exists) return 0
+
+	let total = 0
+	const entries = await fse.readdir(targetDir, { withFileTypes: true })
+	for (const entry of entries) {
+		const entryPath = path.join(targetDir, entry.name)
+		if (entry.isDirectory()) {
+			total += await getDirectorySizeBytes(entryPath)
+		} else if (entry.isFile()) {
+			const stats = await fse.stat(entryPath)
+			total += stats.size
+		}
+	}
+
+	return total
+}
+
+graph.updateProjectSizes = async function (userRID, dataDir = DATA_DIR) {
+	const query = `MATCH {type:Project, as:project}-HAS_OWNER->{type:User, as:user, where:(@rid = ${userRID})} RETURN project`
+	const response = await db.sql(query)
+	const projects = response.result || []
+	const updated = []
+
+	for (const item of projects) {
+		const project = item.project || item
+		if (!project || !project['@rid']) continue
+
+		const projectRID = project['@rid']
+		const projectPath = media.getProjectDir(dataDir, projectRID)
+		const bytes = await getDirectorySizeBytes(projectPath)
+		const sizeMb = Math.round((bytes / 1024 / 1024) * 100) / 100
+
+		await db.sql_params(`UPDATE Project SET size = :size WHERE @rid = :rid`, {
+			size: sizeMb,
+			rid: projectRID
+		})
+
+		updated.push({
+			rid: projectRID,
+			size: sizeMb,
+			bytes
+		})
+	}
+
+	return {
+		updated: updated.length,
+		projects: updated
+	}
+}
+
 
 graph.setNodeAttribute = async function (rid, data, userRID) {
 
@@ -1567,8 +2144,12 @@ graph.setNodeAttribute = async function (rid, data, userRID) {
 	let query = ''
 	let params = {rid: rid}
 	if(NODE_ATTRIBUTES.includes(data.key)) {
-		query = `UPDATE :rid SET ${data.key} = :${data.key}`
-		params[data.key] = data.value
+		if(data.value === null) {
+			query = `UPDATE :rid REMOVE ${data.key}`
+		} else {
+			query = `UPDATE :rid SET ${data.key} = :${data.key}`
+			params[data.key] = data.value
+		}
 	} else {
 		throw({'message': 'Invalid data'})
 	}
@@ -1611,13 +2192,7 @@ graph.setNodeAttribute_old = async function (rid, data, type, tid) {
 
 graph.getNodeAttributes = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `MATCH {
-		type: User, 
-		as:p, 
-		where:(@rid = ${userRID})}
-	-IS_OWNER->
-		{type:Project, as:project}--> 
-		{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
+	var query = `MATCH {type:User, as:p, where:(@rid = ${userRID})}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = ${rid}), while: ($depth < 30)} return node`
 
 	var response = await db.sql(query)
 	if(response.result.length == 0) return null
@@ -1723,8 +2298,20 @@ graph.getSelectionAsPercentage = async function(imageWidth, imageHeight, selecti
 		};
 	} else {
 		throw('File or metadata not found', rid)
+
 	}
 
+}
+
+
+graph.getProjectRidForNode = async function(node_rid) {
+	const clean = this.sanitizeRID(node_rid)
+	const query = `MATCH {type:Project, as:project}<--{as:node, where:(@rid = ${clean}), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1`
+	const response = await db.sql(query)
+	if(response.result[0] && response.result[0].rid) {
+		return response.result[0].rid
+	}
+	return null
 }
 
 graph.traverse = async function (rid, direction, userRID) {
@@ -1797,7 +2384,8 @@ graph.createEntity = async function (data, userRID) {
 		data.icon = 'mdi-tag'
 		data.color = '#ff8844'
 	}
-	var query = `CREATE Vertex Entity set type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
+	const entity_uuid = uuidv7()
+	var query = `CREATE Vertex Entity set uuid = "${entity_uuid}", type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
 	console.log(query)
 	return await db.sql(query)
 }
@@ -1867,12 +2455,13 @@ graph.getTags = async function (userRID) {
 
 graph.createTag = async function (label, userRID) {
 	if(!label) return
-	var query = `create Vertex Tag set label = "${label}", owner = "${userRID}"`
+	const tag_uuid = uuidv7()
+	var query = `create Vertex Tag set uuid = "${tag_uuid}", label = "${label}", owner = "${userRID}"`
 	return await db.sql(query)
 }
 
 graph.getNode = async function (rid, userRID) {
-	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}-IS_OWNER->{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
+	var query = `MATCH {type:User, as:user, where: (@rid = "${userRID}")}<-HAS_OWNER-{type:Project, as:project}-->{as:file, while: ($depth < 40), where:(@rid="${rid}")} return file`
 	
 	var response = await db.sql(query)
 	if(response.result.length == 0) return []
@@ -2033,10 +2622,39 @@ function isIntegerString(value) {
     return typeof value === "string" && /^-?\d+$/.test(value);
 }
 
+async function getFileSourceType(fileRid) {
+	if(!fileRid) return null
+	const cleanRid = graph.sanitizeRID(String(fileRid))
+	const query = `MATCH {type:File, as:target, where:(@rid = ${cleanRid})}-DERIVED_FROM->{type:File, as:source} RETURN source.type AS source_type LIMIT 1`
+	const response = await db.sql(query)
+	if(response.result[0] && response.result[0].source_type) {
+		return String(response.result[0].source_type).toLowerCase()
+	}
+	return null
+}
+
+async function shouldUsePdfThumbnail(file) {
+	if(!file || file.type !== 'pdf') return true
+
+	const pageCountRaw = file?.metadata?.page_count
+	const pageCount = Number(pageCountRaw)
+	if(Number.isFinite(pageCount) && pageCount > 1) return false
+
+	const sourceType = await getFileSourceType(file.rid || file['@rid'])
+	if(!sourceType) return false
+	if(sourceType === 'zip') return false
+
+	return true
+}
+
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
 async function getSetFileTypes(set_rid) {
-	const query = `match {type: Set, as: set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
+	const query = `match {type:File, as:file, where:(set = "${set_rid}")} return distinct file.extension AS extension_group, file.type AS type_group`
 	var response = await db.sql(query)	
+	if(!response.result.length) {
+		const query_fallback = `match {type: Set, as: set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:file} return distinct file.extension AS extension_group, file.type AS type_group`
+		response = await db.sql(query_fallback)
+	}
 	var extensions = []
 	var types = []
 	for(var result of response.result) {
@@ -2044,6 +2662,243 @@ async function getSetFileTypes(set_rid) {
 		types.push(result.type_group)
 	}
 	return {extensions, types}
+}
+
+function roundTo(value, decimals = 2) {
+	const factor = Math.pow(10, decimals)
+	return Math.round(value * factor) / factor
+}
+
+graph.getBatchProcess = async function(process_rid) {
+	const clean = this.sanitizeRID(process_rid)
+	let response = await db.sql(`SELECT FROM SetProcess WHERE @rid = ${clean} LIMIT 1`)
+	if(response.result[0]) return response.result[0]
+
+	response = await db.sql(`SELECT FROM Process WHERE @rid = ${clean} LIMIT 1`)
+	if(response.result[0]) return response.result[0]
+
+	return null
+}
+
+graph.updateBatchProcess = async function(process_rid, patch) {
+	const node = await this.getBatchProcess(process_rid)
+	if(!node) return null
+
+	const type = node['@type'] || 'SetProcess'
+	for(const key of Object.keys(patch)) {
+		await this.setNodeAttribute_old(node['@rid'], {key, value: patch[key]}, type)
+		node[key] = patch[key]
+	}
+	return node
+}
+
+graph.initBatchProcess = async function(process_rid, attrs = {}) {
+	const now = new Date().toISOString()
+	const initial = {
+		state: 'running',
+		processed_files: 0,
+		failed_files: 0,
+		total_time_sec: 0,
+		avg_sec_per_file: 0,
+		eta_sec: null,
+		started_at: now,
+		updated_at: now,
+		...attrs,
+	}
+
+	return this.updateBatchProcess(process_rid, initial)
+}
+
+graph.incrementBatchProcessed = async function(process_rid, response_time, total_files) {
+	const batch = await this.getBatchProcess(process_rid)
+	if(!batch) return null
+
+	const now = new Date().toISOString()
+	const processed = Number(batch.processed_files || 0) + 1
+	const failed = Number(batch.failed_files || 0)
+	const total = Number(total_files || batch.total_files || 0)
+	const timeDelta = Number(response_time || 0)
+	const totalTimeSec = Number(batch.total_time_sec || 0) + (Number.isFinite(timeDelta) ? timeDelta : 0)
+	const avgSecPerFile = processed > 0 ? roundTo(totalTimeSec / processed, 3) : 0
+	const remaining = total > 0 ? Math.max(total - processed, 0) : 0
+	const etaSec = total > 0 && avgSecPerFile > 0 ? Math.round(remaining * avgSecPerFile) : null
+
+	const patch = {
+		processed_files: processed,
+		failed_files: failed,
+		total_files: total || batch.total_files || 0,
+		total_time_sec: roundTo(totalTimeSec, 3),
+		avg_sec_per_file: avgSecPerFile,
+		eta_sec: etaSec,
+		updated_at: now,
+	}
+
+	if(total > 0 && processed >= total) {
+		patch.state = 'finished'
+		patch.finished_at = now
+		patch.eta_sec = 0
+	}
+
+	return this.updateBatchProcess(batch['@rid'], patch)
+}
+
+graph.incrementBatchFailed = async function(process_rid) {
+	const batch = await this.getBatchProcess(process_rid)
+	if(!batch) return null
+
+	const now = new Date().toISOString()
+	const failed = Number(batch.failed_files || 0) + 1
+	const patch = {
+		failed_files: failed,
+		updated_at: now,
+	}
+
+	return this.updateBatchProcess(batch['@rid'], patch)
+}
+
+graph.getProcessedInputFileRidsForBatch = async function(process_rid) {
+	const clean = this.sanitizeRID(process_rid)
+	const processResponse = await db.sql(`SELECT @rid FROM Process WHERE set_process = "${clean}"`)
+	if(!processResponse.result.length) {
+		return []
+	}
+
+	const processRids = processResponse.result
+		.map((item) => item['@rid'])
+		.filter(Boolean)
+
+	if(!processRids.length) {
+		return []
+	}
+
+	const where = processRids
+		.map((rid) => `process_rid = "${String(rid).replace(/"/g, '\\"')}"`)
+		.join(' OR ')
+
+	const query = `SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE ${where}`
+	const edgeResponse = await db.sql(query)
+	return edgeResponse.result.map((item) => item.rid).filter(Boolean)
+}
+
+graph.groupFilesByRootSource = async function(files, options = {}) {
+	const boundary = String(options.boundary || 'pdf').toLowerCase()
+	const excludedRootTypes = new Set((options.excludeRootTypes || ['zip']).map((type) => String(type).toLowerCase()))
+	if(!Array.isArray(files) || files.length === 0) return []
+
+	const fileByRid = new Map()
+	for(const file of files) {
+		if(!file || !file['@rid']) continue
+		fileByRid.set(this.sanitizeRID(file['@rid']), file)
+	}
+
+	const parentByTarget = new Map()
+	const nodeMetaByRid = new Map()
+	for(const [rid, file] of fileByRid.entries()) {
+		nodeMetaByRid.set(rid, {
+			'@rid': rid,
+			label: file.label,
+			type: file.type,
+			path: file.path,
+			original_filename: file.original_filename,
+		})
+	}
+
+	const ensureNodeMetadata = async (rids) => {
+		const missing = rids.filter((rid) => !nodeMetaByRid.has(rid))
+		if(!missing.length) return
+		const query = `SELECT @rid AS rid, label, type, path, original_filename FROM File WHERE @rid IN [${missing.join(',')}]`
+		const response = await db.sql(query)
+		for(const row of response.result || []) {
+			nodeMetaByRid.set(row.rid, {
+				'@rid': row.rid,
+				label: row.label,
+				type: row.type,
+				path: row.path,
+				original_filename: row.original_filename,
+			})
+		}
+	}
+
+	const traverseAncestorsBatched = async (seedRids, maxDepth = 40) => {
+		let frontier = Array.from(new Set(seedRids))
+		const visited = new Set()
+		let depth = 0
+
+		while(frontier.length > 0 && depth < maxDepth) {
+			const currentBatch = frontier.filter((rid) => !visited.has(rid))
+			if(!currentBatch.length) break
+			frontier = []
+			for(const rid of currentBatch) visited.add(rid)
+
+			const edgeQuery = `SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN [${currentBatch.join(',')}]`
+			const edgeResponse = await db.sql(edgeQuery)
+			const sourceRids = []
+			for(const edge of edgeResponse.result || []) {
+				if(!edge.target_rid || !edge.source_rid) continue
+				if(!parentByTarget.has(edge.target_rid)) {
+					parentByTarget.set(edge.target_rid, edge.source_rid)
+				}
+				sourceRids.push(edge.source_rid)
+				if(!visited.has(edge.source_rid)) {
+					frontier.push(edge.source_rid)
+				}
+			}
+
+			if(sourceRids.length) {
+				await ensureNodeMetadata(Array.from(new Set(sourceRids.map((rid) => this.sanitizeRID(rid)))))
+			}
+			depth += 1
+		}
+	}
+
+	const seedRids = Array.from(fileByRid.keys())
+	await traverseAncestorsBatched(seedRids)
+
+	const groupsByRid = new Map()
+	for(const [fileRid, file] of fileByRid.entries()) {
+		let cursor = fileRid
+		let boundaryCandidate = null
+		let highestNonExcluded = fileRid
+		let guard = 0
+
+		while(cursor && guard < 40) {
+			const meta = nodeMetaByRid.get(cursor) || {}
+			const nodeType = String(meta.type || '').toLowerCase()
+			if(!excludedRootTypes.has(nodeType)) {
+				highestNonExcluded = cursor
+				if(boundary === 'pdf' && nodeType === 'pdf') {
+					boundaryCandidate = cursor
+				}
+			}
+
+			const parent = parentByTarget.get(cursor)
+			if(!parent) break
+			cursor = parent
+			guard += 1
+		}
+
+		const rootRid = boundaryCandidate || highestNonExcluded || fileRid
+		if(!groupsByRid.has(rootRid)) {
+			const rootMeta = nodeMetaByRid.get(rootRid) || {}
+			groupsByRid.set(rootRid, {
+				source_rid: rootRid,
+				label: rootMeta.label || rootMeta.original_filename || file.label,
+				type: rootMeta.type || file.type,
+				path: rootMeta.path || null,
+				files: [],
+			})
+		}
+
+		groupsByRid.get(rootRid).files.push(file)
+	}
+
+	const groups = Array.from(groupsByRid.values())
+	groups.sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+	for(const group of groups) {
+		group.files.sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+	}
+
+	return groups
 }
 
 

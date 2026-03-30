@@ -3,10 +3,198 @@ import media from '../media.mjs';
 //import fs from 'fs';
 import fse from 'fs-extra';
 import path from 'path';
+import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
 import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
+
+const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
+const MAX_VERSION_TEXT_BYTES = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
+
+function getTmpDir() {
+    return path.resolve(DATA_DIR, 'tmp');
+}
+
+function createSetZipJobRecord(setRid, userRid) {
+    const requestId = randomUUID();
+    const shortId = requestId.slice(0, 8);
+    const setId = String(setRid).replace('#', '').replace(':', '_');
+    const zipOutputName = `files_${setId}_${shortId}.zip`;
+    const tmpDir = getTmpDir();
+    return {
+        id: requestId,
+        set_rid: setRid,
+        user_rid: userRid,
+        status: 'queued',
+        requested_at: Date.now(),
+        zip_output_name: zipOutputName,
+        zip_path: path.resolve(tmpDir, zipOutputName),
+    };
+}
+
+function getSetZipJobPath(jobId) {
+    return path.resolve(getTmpDir(), `set_zip_job_${jobId}.json`);
+}
+
+async function saveSetZipJob(job) {
+    await fse.outputJson(getSetZipJobPath(job.id), job);
+}
+
+async function loadSetZipJob(setRid, userRid, jobId) {
+    if (!/^[a-f0-9-]{36}$/i.test(jobId)) {
+        return null;
+    }
+    const jobPath = getSetZipJobPath(jobId);
+    if (!(await fse.pathExists(jobPath))) {
+        return null;
+    }
+    const job = await fse.readJson(jobPath);
+    if (job.set_rid !== setRid || job.user_rid !== userRid) {
+        return null;
+    }
+    return job;
+}
+
+async function cleanupSetZipJob(job) {
+    await Promise.allSettled([
+        fse.unlink(job.zip_path),
+        fse.unlink(getSetZipJobPath(job.id)),
+    ]);
+}
+
+async function queueSetZipJob(request, setRid) {
+    request.query.limit = '10000';
+    const filesResponse = await Graph.getSetFiles(setRid, request.auth.credentials.user.rid, request.query);
+
+    if (!filesResponse || !filesResponse.files || filesResponse.files.length === 0) {
+        throw Boom.notFound('No files found in set');
+    }
+
+    const fileList = filesResponse.files.filter((file) => file.path);
+    if (fileList.length === 0) {
+        throw Boom.notFound('No valid file paths found');
+    }
+
+    const job = createSetZipJobRecord(setRid, request.auth.credentials.user.rid);
+    await saveSetZipJob(job);
+
+    const dbName = path.basename(DATA_DIR);
+    const payload = {
+        service: { id: 'md-zip_fs' },
+        task: { id: 'zip', params: { compression: 0 }, name: 'Zip Set' },
+        file: { '@rid': setRid, '@type': 'Set', type: 'set', label: `Set ${setRid}` },
+        set_rid: setRid,
+        db_name: dbName,
+        zip_output_name: job.zip_output_name,
+        set_files: fileList.map((file) => ({
+            '@rid': file['@rid'],
+            path: file.path,
+            label: file.label,
+            original_filename: file.original_filename,
+        })),
+        userId: request.auth.credentials.user.rid,
+    };
+
+    await nats.publish('md-zip_fs', JSON.stringify(payload));
+
+    return job;
+}
+
+function getBackupPath(filePath) {
+    return `${filePath}.original`;
+}
+
+function resolveManagedFilePath(filePath) {
+    const absoluteDataDir = path.resolve(DATA_DIR);
+    const absoluteFilePath = path.resolve(filePath);
+    if (!absoluteFilePath.startsWith(absoluteDataDir + path.sep) && absoluteFilePath !== absoluteDataDir) {
+        throw Boom.forbidden('File path is outside managed data directory');
+    }
+    return absoluteFilePath;
+}
+
+async function saveUploadStreamToPath(fileStream, targetPath) {
+    await fse.ensureDir(path.dirname(targetPath));
+    await new Promise((resolve, reject) => {
+        const writeStream = fse.createWriteStream(targetPath);
+        writeStream.on('error', reject);
+        fileStream.on('error', reject);
+        writeStream.on('finish', resolve);
+        fileStream.pipe(writeStream);
+    });
+}
+
+function queueThumbnailRefresh(file, userId) {
+    if (!file || !file.type) return;
+
+    if (file.type === 'image') {
+        const data = {
+            file,
+            userId,
+            role: 'internal_versioning',
+            process: {kind: 'internal_versioning'},
+            target: file['@rid'],
+            task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
+            id: 'md-thumbnailer'
+        };
+        nats.publish(data.id, JSON.stringify(data));
+    } else if (file.type === 'pdf') {
+        const data = {
+            file,
+            userId,
+            process: {kind: 'internal_versioning'},
+            target: file['@rid'],
+            task: {
+                id: 'thumbnail',
+                params: {
+                    page: 1,
+                    previewResolution: 150,
+                    thumbnailResolution: 80
+                }
+            },
+            role: 'thumbnail',
+            id: 'md-poppler'
+        };
+        nats.publish(data.id, JSON.stringify(data));
+    }
+}
+
+async function updateFileMetadata(file, userRid) {
+    const stats = await fse.stat(file.path);
+    const metadata = {
+        ...(file.metadata || {}),
+        size: Number((stats.size / (1024 * 1024)).toFixed(1)),
+    };
+
+    if (file.type === 'image') {
+        const imageMetadata = await media.getImageSize(file.path);
+        Object.assign(metadata, imageMetadata || {});
+    }
+
+    await Graph.setNodeAttribute(file['@rid'], {
+        key: 'metadata',
+        value: metadata,
+    }, userRid);
+
+    if (['text', 'html', 'json', 'csv'].includes(file.type)) {
+        const info = await media.getTextDescription(file.path, file.type);
+        await Graph.setNodeAttribute(file['@rid'], {
+            key: 'info',
+            value: info,
+        }, userRid);
+    }
+}
+
+function sendFileUpdate(userRid, fileRid, edited) {
+    userManager.sendToUser(userRid, {
+        command: 'update',
+        target: fileRid,
+        node: {
+            edited,
+        },
+    });
+}
 
 export default [
     {
@@ -59,7 +247,7 @@ export default [
 
                 // Upload file to storage
                 var filepath = filegraph.path.split('/').slice(0, -1).join('/');
-                await fse.ensureDir(path.join(filepath, 'process'));
+                await fse.ensureDir(filepath);
 
                 const filesave = fse.createWriteStream(filegraph.path);
 
@@ -99,7 +287,8 @@ console.log('filetype', file_type);
                                     task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
                                     file: filegraph,
                                     userId: request.auth.credentials.user.rid,
-                                    role: 'exif_rotate'
+                                    role: 'internal_versioning',
+                                    process: {kind: 'internal_versioning'}
                             
                                 }
                                 nats.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
@@ -143,35 +332,9 @@ console.log('filetype', file_type);
                             }
                         }
 
-
-                        // PDF
-                        if (file_type === 'pdf') {
-                            const data = {
-                                topic: {id: 'md-pdf-splitter_fs'},
-                                service: {id: 'md-pdf-splitter_fs'},
-                                task: {id: 'split', params: {}},
-                                file: filegraph,
-                                userId: request.auth.credentials.user.rid,
-                                role: 'pdf-splitter'
-                            };
-                            nats.publish(data.topic.id, JSON.stringify(data));
-                        }
-
-                        // PDF
-                        if (file_type === 'zip') {
-                                // we save metadata for zip
-                                try {
-                                    await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                        key: 'metadata',
-                                        value: filegraph.metadata
-                                    }, 'File');
-                                } catch (error) {
-                                    console.log('Error setting node attribute:', error);
-                                }
-                        }
-
                         // Add file to UI
                         if (request.auth.credentials.user.id) {
+                            filegraph._type = file_type
                             const wsdata = {
                                 command: 'add',
                                 type: file_type,
@@ -222,6 +385,10 @@ console.log('filetype', file_type);
             const src = await media.getThumbnail(request.params.param);
             const response = h.response(src);
             response.type('image/jpeg');
+            response.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+            response.header('Pragma', 'no-cache');
+            response.header('Expires', '0');
+            response.header('Surrogate-Control', 'no-store');
             return response;
         }
     },
@@ -239,10 +406,9 @@ console.log('filetype', file_type);
                 if (file.type === 'image') {
                     const data = {
                         file: file,
-                        userId: request.auth.credentials.user.id,
+                        userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
-                        task: 'thumbnail',
-                        params: { width: 800, type: 'jpeg' },
+                        task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
                         id: 'md-thumbnailer'
                     };
                     nats.publish(data.id, JSON.stringify(data));
@@ -251,14 +417,15 @@ console.log('filetype', file_type);
                 } else if (file.type === 'pdf') {
                     const data = {
                         file: file,
-                        userId: request.auth.credentials.user.id,
+                        userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
-                        task: 'pdf2images',
-                        params: {
-                            firstPageToConvert: '1',
-                            lastPageToConvert: '1',
-                            resolutionXYAxis: '80',
-                            task: 'pdf2images'
+                        task: {
+                            id: 'thumbnail',
+                            params: {
+                                page: 1,
+                                previewResolution: 150,
+                                thumbnailResolution: 80
+                            }
                         },
                         role: 'thumbnail',
                         id: 'md-poppler'
@@ -269,6 +436,118 @@ console.log('filetype', file_type);
             } catch (e) {
                 return h.response().code(403);
             }
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/files/{file_rid}/version',
+        options: {
+            payload: {
+                maxBytes: 1000 * 1024 * 1024,
+                output: 'stream',
+                parse: true,
+                multipart: true,
+                allow: ['application/json', 'multipart/form-data']
+            }
+        },
+        handler: async (request, h) => {
+            const fileRid = Graph.sanitizeRID(request.params.file_rid);
+            const userRid = request.auth.credentials.user.rid;
+            const userId = request.auth.credentials.user.rid;
+
+            const file = await Graph.getUserFileMetadata(fileRid, userRid);
+            if (!file) {
+                throw Boom.notFound('File not found');
+            }
+
+            const managedPath = resolveManagedFilePath(file.path);
+            if (!(await fse.pathExists(managedPath))) {
+                throw Boom.notFound('File path not found');
+            }
+
+            const backupPath = getBackupPath(managedPath);
+            const payload = request.payload || {};
+            const upload = payload.file;
+            const hasUpload = upload && typeof upload.pipe === 'function';
+            const hasTextContent = typeof payload.content === 'string';
+
+            if (!hasUpload && !hasTextContent) {
+                throw Boom.badRequest('Missing edited file upload or content payload');
+            }
+
+            if (hasTextContent && Buffer.byteLength(payload.content, 'utf8') > MAX_VERSION_TEXT_BYTES) {
+                throw Boom.badRequest('Text payload exceeds size limit');
+            }
+
+            if (await fse.pathExists(backupPath)) {
+                await fse.remove(backupPath);
+            }
+            await fse.move(managedPath, backupPath, { overwrite: true });
+
+            try {
+                if (hasUpload) {
+                    await saveUploadStreamToPath(upload, managedPath);
+                } else {
+                    if (!['text', 'html', 'json', 'csv'].includes(file.type)) {
+                        throw Boom.badRequest('Content payload is only supported for text-like files');
+                    }
+                    await fse.writeFile(managedPath, payload.content, 'utf8');
+                }
+            } catch (error) {
+                if (!(await fse.pathExists(managedPath)) && (await fse.pathExists(backupPath))) {
+                    await fse.move(backupPath, managedPath, { overwrite: true });
+                }
+                throw error;
+            }
+
+            const edited = {
+                task: hasUpload ? (payload.operation || 'upload-edit') : 'text-edit',
+                time: new Date().toISOString(),
+                user: userId,
+            };
+
+            await Graph.setNodeAttribute(fileRid, { key: 'edited', value: edited }, userRid);
+            await updateFileMetadata(file, userRid);
+            queueThumbnailRefresh(file, userId);
+            sendFileUpdate(userRid, fileRid, edited);
+
+            const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
+            updatedFile.edited = edited;
+            return h.response(updatedFile).code(200);
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/files/{file_rid}/revert',
+        handler: async (request, h) => {
+            const fileRid = Graph.sanitizeRID(request.params.file_rid);
+            const userRid = request.auth.credentials.user.rid;
+            const userId = request.auth.credentials.user.rid;
+
+            const file = await Graph.getUserFileMetadata(fileRid, userRid);
+            if (!file) {
+                throw Boom.notFound('File not found');
+            }
+
+            const managedPath = resolveManagedFilePath(file.path);
+            const backupPath = getBackupPath(managedPath);
+
+            if (!(await fse.pathExists(backupPath))) {
+                throw Boom.conflict('No original version exists to revert');
+            }
+
+            if (await fse.pathExists(managedPath)) {
+                await fse.remove(managedPath);
+            }
+            await fse.move(backupPath, managedPath, { overwrite: true });
+
+            await Graph.setNodeAttribute(fileRid, { key: 'edited', value: null }, userRid);
+            await updateFileMetadata(file, userRid);
+            queueThumbnailRefresh(file, userId);
+            sendFileUpdate(userRid, fileRid, null);
+
+            const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
+            return h.response(updatedFile).code(200);
         }
     },
     {
@@ -377,45 +656,7 @@ console.log('filetype', file_type);
             }
         }
     },
-    {
-        method: 'GET',
-        path: '/api/files/{file_rid}/pages/{page_number}',
-        handler: async (request, h) => {
-            try {
-                const file_metadata = await Graph.getUserFileMetadata(
-                    request.params.file_rid,
-                    request.auth.credentials.user.rid
-                );
 
-                const pageFilename = path.join(
-                    path.dirname(file_metadata.path),
-                    'pages',
-                    `page_${request.params.page_number}.pdf`
-                );
-                // Verify file exists before creating read stream
-                try {
-                    await fse.access(pageFilename);
-                } catch (err) {
-                    return h.response().code(404);
-                }
-
-                const src = fse.createReadStream(pageFilename);
-                const response = h.response(src);
-
-                // Only set PDF headers if original file was PDF
-                if (file_metadata.type === 'pdf') {
-                    const pageLabel = `page_${request.params.page_number}_${file_metadata.label}`;
-                    response.header('Content-Disposition', `inline; filename=${pageLabel}`);
-                    response.type('application/pdf');
-                }
-
-                return response;
-            } catch (e) {
-                console.error('Error accessing file:', e);
-                return h.response().code(403);
-            }
-        }
-    },
     {
         method: 'GET',
         path: '/api/sets/{rid}/files',
@@ -423,9 +664,114 @@ console.log('filetype', file_type);
             const n = await Graph.getSetFiles(
                 Graph.sanitizeRID(request.params.rid), 
                 request.auth.credentials.user.rid, 
-                {thumbnails: true, limit:request.query.limit, skip:request.query.skip}
+                {
+                    thumbnails: true,
+                    limit: request.query.limit,
+                    skip: request.query.skip,
+                    group_by_origin: request.query.group_by_origin,
+                    group_boundary: request.query.group_boundary,
+                    source_rid: request.query.source_rid ? Graph.sanitizeRID(request.query.source_rid) : null,
+                }
             );
             return h.response(n);
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/sets/{rid}/files/zip/jobs',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const job = await queueSetZipJob(request, setRid);
+                return h.response({
+                    job_id: job.id,
+                    status: 'queued',
+                    status_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}`,
+                    download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                }).code(202);
+            } catch (err) {
+                if (Boom.isBoom(err)) {
+                    throw err;
+                }
+                console.error('Error creating set zip job:', err);
+                throw Boom.internal('Error creating zip job');
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files/zip/jobs/{job_id}',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const job = await loadSetZipJob(setRid, userRid, request.params.job_id);
+
+                if (!job) {
+                    return h.response({ message: 'Zip job not found' }).code(404);
+                }
+
+                if (await fse.pathExists(job.zip_path)) {
+                    return h.response({
+                        job_id: job.id,
+                        status: 'ready',
+                        download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                    });
+                }
+
+                if (Date.now() - job.requested_at > SET_ZIP_JOB_TTL_MS) {
+                    await cleanupSetZipJob(job);
+                    return h.response({
+                        job_id: job.id,
+                        status: 'failed',
+                        message: 'Zip generation timed out',
+                    }).code(504);
+                }
+
+                return h.response({
+                    job_id: job.id,
+                    status: 'processing',
+                });
+            } catch (err) {
+                console.error('Error checking set zip job:', err);
+                return h.response({ message: 'Error checking zip job status' }).code(500);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/sets/{rid}/files/zip/jobs/{job_id}/download',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const job = await loadSetZipJob(setRid, userRid, request.params.job_id);
+
+                if (!job) {
+                    return h.response('Zip job not found').code(404);
+                }
+
+                if (!(await fse.pathExists(job.zip_path))) {
+                    return h.response('Zip not ready').code(409);
+                }
+
+                const setId = String(setRid).replace('#', '').replace(':', '_');
+                const filename = `files_${setId}.zip`;
+                const response = h.file(job.zip_path, {
+                    filename,
+                    mode: 'attachment',
+                    confine: false,
+                });
+
+                response.events.on('finish', async () => {
+                    await cleanupSetZipJob(job);
+                });
+
+                return response;
+            } catch (err) {
+                console.error('Error downloading set zip job output:', err);
+                return h.response('Error downloading zip file').code(500);
+            }
         }
     },
     {
@@ -433,31 +779,20 @@ console.log('filetype', file_type);
         path: '/api/sets/{rid}/files/zip',
         handler: async (request, h) => {
             try {
-                // usually we want all files so set params to high number
-                request.query.limit = '1000';
-                // Get the set files with proper authentication
-                const set_rid = Graph.sanitizeRID(request.params.rid);
-                const n = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, request.query);
-
-                if (!n || !n.files || n.files.length === 0) {
-                    return h.response('No files found in set').code(404);
-                }
-
-                const fileList = [];
-                n.files.forEach(file => {
-                    if (file.path) {
-                        fileList.push(file);
-                    }
-                });
-
-                if (fileList.length === 0) {
-                    return h.response('No valid file paths found').code(404);
-                }
-
-                // Create and stream the zip file
-                return await media.createZipAndStream(fileList, request, h, set_rid);
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const job = await queueSetZipJob(request, setRid);
+                return h.response({
+                    job_id: job.id,
+                    status: 'queued',
+                    message: 'Zip generation started. Poll status_url until ready.',
+                    status_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}`,
+                    download_url: `/api/sets/${String(setRid).replace('#', '')}/files/zip/jobs/${job.id}/download`,
+                }).code(202);
 
             } catch (err) {
+                if (Boom.isBoom(err)) {
+                    throw err;
+                }
                 console.error('Error creating zip:', err);
                 return h.response('Error creating zip file').code(500);
             }
