@@ -451,7 +451,14 @@ console.log('filetype', file_type);
             const n = await Graph.getSetFiles(
                 Graph.sanitizeRID(request.params.rid), 
                 request.auth.credentials.user.rid, 
-                {thumbnails: true, limit:request.query.limit, skip:request.query.skip}
+                {
+                    thumbnails: true,
+                    limit: request.query.limit,
+                    skip: request.query.skip,
+                    group_by_origin: request.query.group_by_origin,
+                    group_boundary: request.query.group_boundary,
+                    source_rid: request.query.source_rid ? Graph.sanitizeRID(request.query.source_rid) : null,
+                }
             );
             return h.response(n);
         }

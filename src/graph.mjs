@@ -582,8 +582,13 @@ graph.getProjectFiles = async function (rid, user_rid) {
 }
 
 graph.getSetFiles = async function (set_rid, user_rid, params) {
-	if(!params || !isIntegerString(params.skip) && !Number.isInteger(params.skip)) params.skip = 0
-	if(!params || !isIntegerString(params.limit) && !Number.isInteger(params.limit)) params.limit = 10
+	params = params || {}
+	if(!isIntegerString(params.skip) && !Number.isInteger(params.skip)) params.skip = 0
+	if(!isIntegerString(params.limit) && !Number.isInteger(params.limit)) params.limit = 10
+	params.skip = Number(params.skip)
+	params.limit = Number(params.limit)
+	const groupByOrigin = String(params.group_by_origin || '').toLowerCase() === 'true' || params.group_by_origin === true || params.group_by_origin === '1'
+	const groupBoundary = String(params.group_boundary || '').toLowerCase()
 	
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
@@ -591,6 +596,256 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	const has_access = await this.hasAccess(set_rid, user_rid)
 	if(!has_access) {
 		throw new Error('Set not found')
+	}
+
+	if(groupByOrigin) {
+		const fileQuery = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN DISTINCT node ORDER by node.label`
+		let fileResponse = await db.sql(fileQuery)
+		if(!fileResponse.result.length) {
+			const fallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:node, where:(@type = 'File')} RETURN DISTINCT node ORDER by node.label`
+			fileResponse = await db.sql(fallback)
+		}
+
+		const files = (fileResponse.result || []).map((row) => row.node).filter(Boolean)
+		const fileRidSet = new Set(files.map((file) => file['@rid']))
+		const fileByRid = new Map(files.map((file) => [file['@rid'], file]))
+
+		const edgeQuery = `MATCH {type:File, as:target, where:(set = "${set_rid}")}-DERIVED_FROM->{type:File, as:source} RETURN target.@rid AS target_rid, source.@rid AS source_rid, source.label AS source_label, source.type AS source_type, source.path AS source_path, source.original_filename AS source_original_filename`
+		let edgeResponse = await db.sql(edgeQuery)
+		if(!edgeResponse.result.length) {
+			const edgeFallback = `MATCH {type:Set, as:set, where:(@rid = ${set_rid})}-HAS_ITEM->{type:File, as:target}-DERIVED_FROM->{type:File, as:source} RETURN target.@rid AS target_rid, source.@rid AS source_rid, source.label AS source_label, source.type AS source_type, source.path AS source_path, source.original_filename AS source_original_filename`
+			edgeResponse = await db.sql(edgeFallback)
+		}
+
+		const parentByTarget = new Map()
+		const sourceMetaByRid = new Map()
+		for(const row of edgeResponse.result || []) {
+			if(!row.target_rid || !row.source_rid) continue
+			if(!parentByTarget.has(row.target_rid)) {
+				parentByTarget.set(row.target_rid, row.source_rid)
+			}
+			if(!sourceMetaByRid.has(row.source_rid)) {
+				sourceMetaByRid.set(row.source_rid, {
+					'@rid': row.source_rid,
+					label: row.source_label,
+					type: row.source_type,
+					path: row.source_path,
+					original_filename: row.source_original_filename,
+				})
+			}
+		}
+
+		const ensureSourceMetadata = async (sourceRids) => {
+			if(!sourceRids.length) return
+			const cleaned = sourceRids.map((rid) => this.sanitizeRID(rid))
+			const query = `SELECT @rid AS rid, label, type, path, original_filename FROM File WHERE @rid IN [${cleaned.join(',')}]`
+			const response = await db.sql(query)
+			for(const row of response.result || []) {
+				sourceMetaByRid.set(row.rid, {
+					'@rid': row.rid,
+					label: row.label,
+					type: row.type,
+					path: row.path,
+					original_filename: row.original_filename,
+				})
+			}
+		}
+
+		const traverseAncestorsBatched = async (seedRids, maxDepth = 40) => {
+			let frontier = Array.from(new Set(seedRids.map((rid) => this.sanitizeRID(rid))))
+			const visited = new Set()
+			let depth = 0
+
+			while(frontier.length > 0 && depth < maxDepth) {
+				const currentBatch = frontier.filter((rid) => !visited.has(rid))
+				if(!currentBatch.length) break
+				frontier = []
+
+				for(const rid of currentBatch) {
+					visited.add(rid)
+				}
+
+				const linkQuery = `SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN [${currentBatch.join(',')}]`
+				const linkResponse = await db.sql(linkQuery)
+
+				const sourceRidsToLoad = []
+				for(const row of linkResponse.result || []) {
+					if(!row.target_rid || !row.source_rid) continue
+					if(!parentByTarget.has(row.target_rid)) {
+						parentByTarget.set(row.target_rid, row.source_rid)
+					}
+					if(!sourceMetaByRid.has(row.source_rid)) {
+						sourceMetaByRid.set(row.source_rid, {'@rid': row.source_rid})
+						sourceRidsToLoad.push(row.source_rid)
+					}
+					if(!visited.has(row.source_rid)) {
+						frontier.push(row.source_rid)
+					}
+				}
+
+				await ensureSourceMetadata(Array.from(new Set(sourceRidsToLoad)))
+				depth++
+			}
+		}
+
+		if(groupBoundary === 'pdf') {
+			await traverseAncestorsBatched(files.map((file) => file['@rid']))
+		}
+
+		const resolveOriginRid = (fileRid) => {
+			let cursor = fileRid
+			let parent = parentByTarget.get(cursor)
+			if(!parent) return fileRid
+
+			let guard = 0
+			while(parent && fileRidSet.has(parent) && guard < 20) {
+				cursor = parent
+				parent = parentByTarget.get(cursor)
+				guard++
+			}
+
+			return parent || cursor
+		}
+
+		const resolveBoundaryOriginRid = async (file) => {
+			const fileRid = file['@rid']
+			if(groupBoundary !== 'pdf') return resolveOriginRid(fileRid)
+
+			let cursor = fileRid
+			let lastPdfRid = null
+			const localType = String(file?.type || '').toLowerCase()
+			if(localType === 'pdf') lastPdfRid = fileRid
+
+			let guard = 0
+			while(cursor && guard < 40) {
+				const sourceRid = parentByTarget.get(cursor)
+				if(!sourceRid) break
+				cursor = sourceRid
+				const sourceMeta = sourceMetaByRid.get(sourceRid) || {}
+				if(String(sourceMeta.type || '').toLowerCase() === 'pdf') {
+					lastPdfRid = sourceRid
+				}
+				guard++
+			}
+
+			if(lastPdfRid) return lastPdfRid
+			return resolveOriginRid(fileRid)
+		}
+
+		const guessOrder = (file) => {
+			const md = file?.metadata || {}
+			const candidates = [md.page, md.page_number, md.pageIndex, md.index]
+			for(const c of candidates) {
+				const n = Number(c)
+				if(Number.isFinite(n)) return n
+			}
+			const label = String(file?.label || '')
+			const m = label.match(/(\d+)(?!.*\d)/)
+			if(m) {
+				const n = Number(m[1])
+				if(Number.isFinite(n)) return n
+			}
+			return Number.MAX_SAFE_INTEGER
+		}
+
+		const groupsMap = new Map()
+		for(const file of files) {
+			const originRid = await resolveBoundaryOriginRid(file)
+			if(!groupsMap.has(originRid)) {
+				const sourceMeta = sourceMetaByRid.get(originRid) || fileByRid.get(originRid) || {}
+				groupsMap.set(originRid, {
+					is_group: true,
+					source_rid: originRid,
+					'@rid': originRid,
+					label: sourceMeta.label || sourceMeta.original_filename || file.label,
+					type: sourceMeta.type || file.type,
+					path: sourceMeta.path || null,
+					file_count: 0,
+					children: [],
+				})
+			}
+			const group = groupsMap.get(originRid)
+			group.children.push(file)
+			group.file_count = group.children.length
+		}
+
+		for(const group of groupsMap.values()) {
+			group.children.sort((a, b) => {
+				const aOrder = guessOrder(a)
+				const bOrder = guessOrder(b)
+				if(aOrder !== bOrder) return aOrder - bOrder
+				return String(a.label || '').localeCompare(String(b.label || ''))
+			})
+
+			const cover = group.children.find((child) => child.path)
+			if(cover?.path) {
+				group.thumb = API_URL + 'api/thumbnails/' + cover.path.split('/').slice(0, -1).join('/')
+			}
+		}
+
+		const groups = Array.from(groupsMap.values()).sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')))
+
+		const decorateFiles = async (list) => {
+			if(!params.thumbnails) return
+			for (const file of list) {
+				if(file.path && (file.type !== 'pdf' || await shouldUsePdfThumbnail(file))) {
+					file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/')
+				}
+				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
+				const entity_response = await db.cypher(entity_query)
+				file.entities = entity_response.result
+			}
+		}
+
+		const allSingleFileGroups = groups.length === files.length && groups.every((group) => group.file_count === 1)
+		if(!params.source_rid && allSingleFileGroups) {
+			const pagedFiles = files.slice(params.skip, params.skip + params.limit)
+			await decorateFiles(pagedFiles)
+			return {
+				grouped: false,
+				mode: 'flat',
+				group_boundary: groupBoundary || null,
+				file_count: files.length,
+				limit: params.limit,
+				skip: params.skip,
+				groups: [],
+				files: pagedFiles,
+			}
+		}
+
+		if(params.source_rid) {
+			const sourceRid = this.sanitizeRID(params.source_rid)
+			const selectedGroup = groupsMap.get(sourceRid)
+			const children = selectedGroup ? selectedGroup.children : []
+			const pagedChildren = children.slice(params.skip, params.skip + params.limit)
+			await decorateFiles(pagedChildren)
+
+			return {
+				grouped: true,
+				mode: 'children',
+				group_boundary: groupBoundary || null,
+				source_rid: sourceRid,
+				file_count: children.length,
+				group_count: groups.length,
+				limit: params.limit,
+				skip: params.skip,
+				groups: [],
+				files: pagedChildren,
+			}
+		}
+
+		const pagedGroups = groups.slice(params.skip, params.skip + params.limit)
+		return {
+			grouped: true,
+			mode: 'groups',
+			group_boundary: groupBoundary || null,
+			file_count: files.length,
+			group_count: groups.length,
+			limit: params.limit,
+			skip: params.skip,
+			groups: pagedGroups,
+			files: [],
+		}
 	}
 
 	const count_query = `MATCH {type:File, as:node, where:(set = "${set_rid}")} RETURN count(node) AS file_count`
