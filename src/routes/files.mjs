@@ -237,6 +237,7 @@ console.log('filetype', file_type);
 
                         // Add file to UI
                         if (request.auth.credentials.user.id) {
+                            filegraph._type = file_type
                             const wsdata = {
                                 command: 'add',
                                 type: file_type,
@@ -318,12 +319,12 @@ console.log('filetype', file_type);
                         file: file,
                         userId: request.auth.credentials.user.id,
                         target: file['@rid'],
-                        task: 'pdf2images',
+                        task: 'thumbnail',
                         params: {
-                            firstPageToConvert: '1',
-                            lastPageToConvert: '1',
-                            resolutionXYAxis: '80',
-                            task: 'pdf2images'
+                            page: 1,
+                            previewResolution: 150,
+                            thumbnailResolution: 80,
+                            task: 'thumbnail'
                         },
                         role: 'thumbnail',
                         id: 'md-poppler'

@@ -399,7 +399,7 @@ export default [
                     if(set_files.files.length > 0) {
                         set_type = set_files.files[0].type;
                     }
-                    if(set_type == 'text' || set_type.includes('json') || set_type == 'csv') {
+                    if(set_type.includes('json') || set_type == 'csv') {
                         console.log('just one request');
 
                         var file_metadata = await Graph.getUserFileMetadata(set_files.files[0]['@rid'], request.auth.credentials.user.rid);

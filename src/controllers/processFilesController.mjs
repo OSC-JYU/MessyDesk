@@ -26,7 +26,23 @@ function parseMessagePayload(payloadMessage) {
 }
 
 function resolveTmpFilePath(payload, message) {
-    const tmpRoot = path.resolve(DATA_DIR, 'tmp');
+    console.log('Resolving tmp file path...');
+    console.log('message:', message);
+    const dataRoot = path.resolve(DATA_DIR, '..');
+    const sourcePath = message?.file?.path;
+    let tmpRoot = path.resolve(dataRoot, 'tmp');
+
+    if (typeof sourcePath === 'string' && sourcePath) {
+        const normalized = sourcePath.replace(/\\/g, '/');
+        const parts = normalized.split('/').filter(Boolean);
+        for (let i = 0; i < parts.length - 1; i += 1) {
+            if (parts[i] === 'data' && parts[i + 1]) {
+                tmpRoot = path.resolve(dataRoot, parts[i + 1], 'tmp');
+                break;
+            }
+        }
+    }
+
     const fromPayload = payload?.tmp_file
         || payload?.tmp_path
         || payload?.content_file
@@ -48,9 +64,12 @@ function resolveTmpFilePath(payload, message) {
         ? candidateRaw.path
         : candidateRaw;
 
-    const resolvedPath = path.isAbsolute(candidate)
-        ? path.resolve(candidate)
-        : path.resolve(tmpRoot, candidate);
+    const filename = path.basename(String(candidate || ''));
+    if (!filename || filename === '.' || filename === '..') {
+        throw Boom.badData('Invalid tmp file name');
+    }
+
+    const resolvedPath = path.resolve(tmpRoot, filename);
 
     if (resolvedPath !== tmpRoot && !resolvedPath.startsWith(tmpRoot + path.sep)) {
         throw Boom.badData('Invalid tmp file path');
@@ -61,6 +80,24 @@ function resolveTmpFilePath(payload, message) {
     }
 
     return resolvedPath;
+}
+
+function shouldCreateSplitPdfThumbnail(message, fileNode) {
+    if (fileNode?.type !== 'pdf') {
+        return false;
+    }
+
+    const serviceId = message?.service?.id || message?.process?.service_id || '';
+    const taskId = message?.task?.id || message?.process?.task || '';
+
+    // Support both current and legacy splitter service ids.
+    const splitterServices = new Set(['md-pdf-splitter_fs', 'md-pypdf_fs']);
+    return splitterServices.has(serviceId) && taskId === 'split';
+}
+
+function isThumbnailRole(message) {
+    const role = String(message?.role || '').toLowerCase();
+    return role === 'thumbnail' || role === 'thumbnails';
 }
 
 async function processFilesCore(request, infoFilepath, contentFilepath, message) {
@@ -95,7 +132,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 
     // THUMBNAIL
     // role' is for PDF thumbnail via Poppler)
-    } else if (message?.topic?.id === 'md-thumbnailer' || message?.role === 'thumbnail') {
+    } else if (message?.topic?.id === 'md-thumbnailer' || isThumbnailRole(message)) {
         const filepath = message.file.path;
         const base_path = path.dirname(filepath);
         const filename = message.thumb_name || 'preview.jpg';
@@ -105,7 +142,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             //console.log('saving thumbnail to', base_path, filename);
             let wsdata = {};
             await media.saveThumbnail(contentFilepath, base_path, filename);
-            if (filename == 'thumbnail.jpg' || message.role === 'thumbnail') {
+            if (filename == 'thumbnail.jpg' || isThumbnailRole(message)) {
                 console.log('sending thumbnail WS', filename);
                 wsdata = {
                     command: 'update',
@@ -186,6 +223,31 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 
             };
             nats.publish(th.service.id, JSON.stringify(th));
+        }
+
+        // Only split-task PDFs get automatic poppler thumbnails.
+        if (shouldCreateSplitPdfThumbnail(message, fileNode)) {
+            console.log('Scheduling thumbnail creation for split PDF file', fileNode['@rid']);
+            const thumbMsg = {
+                service: { id: 'md-poppler' },
+                task: {
+                    id: 'thumbnail',
+                    params: {
+                        page: 1,
+                        previewResolution: 150,
+                        thumbnailResolution: 80,
+                        task: 'thumbnail'
+                    }
+                },
+                file: fileNode,
+                process: message.process,
+                output_set: message.output_set,
+                userId: message.userId,
+                role: 'thumbnail',
+                total_files: message.total_files,
+                current_file: message.current_file,
+            };
+            nats.publish('md-poppler', JSON.stringify(thumbMsg));
         }
 
         // update set file count or add file to visual graph

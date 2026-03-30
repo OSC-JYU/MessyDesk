@@ -63,6 +63,24 @@ export default [
                 if (request.payload.message) {
                     const message = request.payload.message;
                     let target = message.target;
+                    const role = String(message?.role || '').toLowerCase();
+                    const isThumbnailFailure = role === 'thumbnail'
+                        || role === 'thumbnails'
+                        || message?.task?.id === 'thumbnail'
+                        || message?.topic?.id === 'md-thumbnailer'
+                        || message?.service?.id === 'md-thumbnailer';
+
+                    if (isThumbnailFailure) {
+                        logger.warn('Thumbnail processing failed (non-fatal), skipping error node creation', {
+                            error,
+                            process: message?.process?.['@rid'],
+                            file: message?.file?.['@rid'],
+                            service: message?.service?.id,
+                            task: message?.task?.id,
+                            role: message?.role,
+                        });
+                        return [];
+                    }
                     //logger.error('Error processing files', { error: error, message: message });
                     logger.error('Error processing files', { error: error, message: message });
                     console.log(message)

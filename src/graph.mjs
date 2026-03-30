@@ -16,6 +16,7 @@ import { DATA_DIR, DB_URL, API_URL } from './env.mjs';
 const MAX_STR_LENGTH = 2048;
 const DEFAULT_USER = 'local.user@localhost';
 const MAX_POSITION = 10000; // max x and y for project nodes
+const PDF_ICON_SENTINEL = '__pdf_icon__';
 const graph = {};
 
 function uuidv7() {
@@ -473,12 +474,21 @@ graph.getProjects = async function (user_rid, data_dir) {
 
 graph.getSetThumbnailsForNode = async function(set_rid) {
 	if(!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const query = `select path from File where set =  ${set_rid} ORDER by label LIMIT 4`
+	const query = `select @rid AS rid, path, type, metadata from File where set =  ${set_rid} ORDER by label LIMIT 20`
 	var response = await db.sql(query)
-	return response.result.map(item => {
+	const thumbs = []
+	for (const item of response.result || []) {
+		if(item?.type === 'pdf' && !(await shouldUsePdfThumbnail(item))) {
+			if(thumbs.length < 4) thumbs.push(PDF_ICON_SENTINEL)
+			continue
+		}
+		if(!item?.path) continue
+		if(thumbs.length >= 4) break
 		const dirPath = item.path.split('/').slice(0, -1).join('/')
-		return dirPath.replace('data/', 'api/thumbnails/data/')
-	})
+		thumbs.push(dirPath.replace('data/', 'api/thumbnails/data/'))
+	}
+
+	return thumbs
 
 }
 
@@ -512,7 +522,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 
 	const setIds = setNodes.map((node) => String(node.data.id))
 	const quotedSetIds = setIds.map((rid) => `"${rid.replace(/"/g, '\\"')}"`).join(',')
-	const query = `SELECT set, path, label FROM File WHERE set IN [${quotedSetIds}] ORDER BY label`
+	const query = `SELECT @rid AS rid, set, path, label, type, metadata FROM File WHERE set IN [${quotedSetIds}] ORDER BY label`
 	const response = await db.sql(query)
 
 	const thumbsBySet = new Map()
@@ -520,7 +530,11 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 		if(!item?.set || !item?.path) continue
 		if(!thumbsBySet.has(item.set)) thumbsBySet.set(item.set, [])
 		const list = thumbsBySet.get(item.set)
-		if(list.length >= 4) continue
+		if(list.length >= 2) continue
+		if(item?.type === 'pdf' && !(await shouldUsePdfThumbnail(item))) {
+			list.push(PDF_ICON_SENTINEL)
+			continue
+		}
 		const dirPath = item.path.split('/').slice(0, -1).join('/')
 		list.push(API_URL + 'api/thumbnails/' + dirPath + '/thumbnail.jpg')
 	}
@@ -601,7 +615,9 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 	// thumbnails and entities
 	if(params.thumbnails) {
 		for (var file of files) {
-			file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+			if(file.path && (file.type !== 'pdf' || await shouldUsePdfThumbnail(file))) {
+				file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+			}
 				// TODO: do this in one query!
 				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
 				var entity_response = await db.cypher(entity_query)
@@ -1761,9 +1777,9 @@ graph.setNodeError = async function (rid, error, userRID) {
 
 
 graph.getSetProcessNode = async function (set, userRID) {
-	if(!await this.isNodeOwner(set, userRID)) throw({'message': 'You are not the owner of this set'})
-	let query = `MATCH {type:Set, as:set, where:(@rid = ${set})}-[r:DERIVED_FROM]->{type:Set, as:input}
-		RETURN r.process_rid AS process_rid LIMIT 1`
+	const cleanSetRid = this.sanitizeRID(set)
+	if(!await this.isNodeOwner(cleanSetRid, userRID)) throw({'message': 'You are not the owner of this set'})
+	let query = `SELECT process_rid FROM DERIVED_FROM WHERE @out = ${cleanSetRid} AND process_rid IS NOT NULL LIMIT 1`
 	let response = await db.sql(query)
 	if(response.result[0] && response.result[0].process_rid) {
 		const process = await db.sql(`SELECT FROM ${response.result[0].process_rid}`)
@@ -1771,7 +1787,7 @@ graph.getSetProcessNode = async function (set, userRID) {
 	}
 
 	// legacy fallback
-	query = `MATCH {type: Set, where: (@rid = ${set})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
+	query = `MATCH {type: Set, where: (@rid = ${cleanSetRid})}.in('PRODUCED') {as: setprocess} RETURN setprocess`
 	response = await db.sql(query)
 	return response.result[0]
 }
@@ -2343,6 +2359,31 @@ function cleanRIDList(list) {
 
 function isIntegerString(value) {
     return typeof value === "string" && /^-?\d+$/.test(value);
+}
+
+async function getFileSourceType(fileRid) {
+	if(!fileRid) return null
+	const cleanRid = graph.sanitizeRID(String(fileRid))
+	const query = `MATCH {type:File, as:target, where:(@rid = ${cleanRid})}-DERIVED_FROM->{type:File, as:source} RETURN source.type AS source_type LIMIT 1`
+	const response = await db.sql(query)
+	if(response.result[0] && response.result[0].source_type) {
+		return String(response.result[0].source_type).toLowerCase()
+	}
+	return null
+}
+
+async function shouldUsePdfThumbnail(file) {
+	if(!file || file.type !== 'pdf') return true
+
+	const pageCountRaw = file?.metadata?.page_count
+	const pageCount = Number(pageCountRaw)
+	if(Number.isFinite(pageCount) && pageCount > 1) return false
+
+	const sourceType = await getFileSourceType(file.rid || file['@rid'])
+	if(!sourceType) return false
+	if(sourceType === 'zip') return false
+
+	return true
 }
 
 // TODO: this should be saved to Set node when processing of the files in set is done (might slow things in large sets)
