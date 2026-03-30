@@ -178,6 +178,8 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
         const base_path = path.dirname(filepath);
         const filename = message.thumb_name || 'preview.jpg';
         const cacheBuster = Date.now();
+        const isInternalVersioning = String(message?.role || '').toLowerCase() === 'internal_versioning'
+            || String(message?.process?.kind || '').toLowerCase() === 'internal_versioning';
         //console.log('THUMBNAIL MESSAGE: ', message);
 
         try {
@@ -215,6 +217,27 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 // if we batch processing, don't send WS to user since this would create lot of traffic
                 }else if(!message.output_set) {
                     userManager.sendToUser(message.userId, wsdata);
+
+                    // Internal version/revert updates should also refresh parent Set node preview grid.
+                    if(isInternalVersioning && String(filename).toLowerCase() === 'thumbnail.jpg') {
+                        const parentSet = await Graph.getFileSet(message.file['@rid']);
+                        if(parentSet && parentSet['@rid']) {
+                            const setThumbnails = await Graph.getSetThumbnailsForNode(parentSet['@rid']);
+                            const setThumbnailsWithVersion = setThumbnails.map((entry) => {
+                                if(typeof entry !== 'string') return entry;
+                                return entry.includes('?') ? `${entry}&v=${cacheBuster}` : `${entry}?v=${cacheBuster}`;
+                            });
+                            const setWsData = {
+                                command: 'update',
+                                target: parentSet['@rid'],
+                                node: {
+                                    paths: setThumbnailsWithVersion,
+                                    thumbnail_version: cacheBuster,
+                                }
+                            };
+                            userManager.sendToUser(message.userId, setWsData);
+                        }
+                    }
                 }
             }
         } catch (e) {
