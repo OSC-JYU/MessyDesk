@@ -126,7 +126,7 @@ async function saveUploadStreamToPath(fileStream, targetPath) {
 }
 
 function queueThumbnailRefresh(file, userId) {
-    if (!file || !file.type) return;
+    if (!file || !file.type) return false;
 
     if (file.type === 'image') {
         const data = {
@@ -139,6 +139,7 @@ function queueThumbnailRefresh(file, userId) {
             id: 'md-thumbnailer'
         };
         nats.publish(data.id, JSON.stringify(data));
+        return true;
     } else if (file.type === 'pdf') {
         const data = {
             file,
@@ -157,7 +158,10 @@ function queueThumbnailRefresh(file, userId) {
             id: 'md-poppler'
         };
         nats.publish(data.id, JSON.stringify(data));
+        return true;
     }
+
+    return false;
 }
 
 async function updateFileMetadata(file, userRid) {
@@ -196,6 +200,25 @@ function sendFileUpdate(userRid, fileRid, edited) {
     });
 }
 
+function isTruthyOption(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function shouldSkipThumbnails(request) {
+    const query = request.query || {};
+    const payload = request.payload || {};
+    return isTruthyOption(query['no-thumbnails'])
+        || isTruthyOption(query.no_thumbnails)
+        || isTruthyOption(query.noThumbnails)
+        || isTruthyOption(payload['no-thumbnails'])
+        || isTruthyOption(payload.no_thumbnails)
+        || isTruthyOption(payload.noThumbnails);
+}
+
 export default [
     {
         method: 'POST',
@@ -228,11 +251,37 @@ export default [
                 // Get original filename
                 const originalFilename = file.hapi.filename;
                 console.log('Uploading file:', originalFilename);
+                const noThumbnails = shouldSkipThumbnails(request);
+                if (noThumbnails) {
+                    console.log('Upload option no-thumbnails enabled, skipping thumbnail queue actions');
+                }
 
                 // Get file type
                 const file_type = await media.detectType(file);
                 if (!file_type) {
                     throw Boom.badRequest('Could not determine file type');
+                }
+
+                if (request.params.set) {
+                    const setRid = Graph.sanitizeRID(request.params.set);
+                    const setMetadata = await Graph.getUserFileMetadata(setRid, request.auth.credentials.user.rid);
+                    if (!setMetadata || setMetadata['@type'] !== 'Set') {
+                        throw Boom.notFound('Set not found');
+                    }
+
+                    const existingTypes = Array.from(new Set(
+                        (Array.isArray(setMetadata.types) ? setMetadata.types : [])
+                            .map((value) => String(value || '').toLowerCase())
+                            .filter(Boolean)
+                    ));
+
+                    if (existingTypes.length > 1) {
+                        throw Boom.badRequest('Set contains mixed file types; new uploads are blocked until set type is normalized');
+                    }
+
+                    if (existingTypes.length === 1 && existingTypes[0] !== String(file_type).toLowerCase()) {
+                        throw Boom.badRequest(`Set accepts only ${existingTypes[0]} files`);
+                    }
                 }
 
                 // Create file node in graph
@@ -277,6 +326,20 @@ console.log('filetype', file_type);
                             console.log('metadata', image_metadata);
                             filegraph.metadata = {...filegraph.metadata, ...image_metadata}
 
+                            // Always store metadata for image node.
+                            try {
+                                await Graph.setNodeAttribute_old(filegraph['@rid'], {
+                                    key: 'metadata',
+                                    value: filegraph.metadata
+                                }, 'File');
+                            } catch (error) {
+                                console.log('Error setting node attribute:', error);
+                            }
+
+                            if (noThumbnails) {
+                                // Skip thumbnail/update queue actions when explicitly requested.
+                            } else {
+
 	                        // ************** EXIF FIX **************
 	                        // if file has EXIF orientation, then we need to rotate it
                             if(image_metadata.rotate) {
@@ -295,16 +358,6 @@ console.log('filetype', file_type);
 
                             // ************** EXIF FIX ENDS **************
                             } else {
-                                // we save metadata for image (resolution, etc.)
-                                try {
-                                    await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                        key: 'metadata',
-                                        value: filegraph.metadata
-                                    }, 'File');
-                                } catch (error) {
-                                    console.log('Error setting node attribute:', error);
-                                }
-    
                                 const data = {
                                     topic: {id: 'md-thumbnailer'},
                                     service: {id: 'md-imaginary'},
@@ -314,6 +367,7 @@ console.log('filetype', file_type);
                                 };
                                 
                                 nats.publish(data.topic.id, JSON.stringify(data));
+                            }
                             }
                         } 
 
@@ -621,6 +675,26 @@ console.log('filetype', file_type);
     },
     {
         method: 'GET',
+        path: '/api/files/{file_rid}/ancestors',
+        handler: async (request, h) => {
+            try {
+                const clean_rid = Graph.sanitizeRID(request.params.file_rid);
+                const ancestors = await Graph.getFileAncestors(
+                    clean_rid,
+                    request.auth.credentials.user.rid
+                );
+                if (ancestors === null) {
+                    return h.response().code(403);
+                }
+                return ancestors;
+            } catch (e) {
+                console.error('Error fetching ancestors:', e);
+                return h.response().code(500);
+            }
+        }
+    },
+    {
+        method: 'GET',
         path: '/api/files/{file_rid}/source',
         handler: async (request, h) => {
             try {
@@ -668,12 +742,83 @@ console.log('filetype', file_type);
                     thumbnails: true,
                     limit: request.query.limit,
                     skip: request.query.skip,
-                    group_by_origin: request.query.group_by_origin,
-                    group_boundary: request.query.group_boundary,
-                    source_rid: request.query.source_rid ? Graph.sanitizeRID(request.query.source_rid) : null,
                 }
             );
             return h.response(n);
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/sets/{rid}/thumbnails',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const limit = Math.max(1, Number(request.query.limit) || 1000);
+
+                let skip = 0;
+                let totalFiles = 0;
+                let queued = 0;
+                let skipped = 0;
+                let imageQueued = 0;
+                let pdfQueued = 0;
+                const seen = new Set();
+
+                while (true) {
+                    const page = await Graph.getSetFiles(setRid, userRid, {
+                        thumbnails: false,
+                        limit,
+                        skip,
+                    });
+
+                    const files = page?.files || [];
+                    const pageTotal = Number(page?.file_count || 0);
+                    if (totalFiles === 0 && Number.isFinite(pageTotal)) {
+                        totalFiles = pageTotal;
+                    }
+
+                    if (files.length === 0) {
+                        break;
+                    }
+
+                    for (const file of files) {
+                        const rid = file?.['@rid'];
+                        if (!rid || seen.has(rid)) continue;
+                        seen.add(rid);
+
+                        if (queueThumbnailRefresh(file, userRid)) {
+                            queued += 1;
+                            if (file.type === 'image') imageQueued += 1;
+                            if (file.type === 'pdf') pdfQueued += 1;
+                        } else {
+                            skipped += 1;
+                        }
+                    }
+
+                    skip += files.length;
+                    if (skip >= pageTotal) {
+                        break;
+                    }
+                }
+
+                return h.response({
+                    set_rid: setRid,
+                    total_files: totalFiles,
+                    scanned_files: seen.size,
+                    queued,
+                    skipped,
+                    queued_by_type: {
+                        image: imageQueued,
+                        pdf: pdfQueued,
+                    },
+                }).code(202);
+            } catch (error) {
+                if (Boom.isBoom(error)) {
+                    throw error;
+                }
+                console.error('Error recreating set thumbnails:', error);
+                throw Boom.badImplementation('Failed to queue set thumbnails');
+            }
         }
     },
     {

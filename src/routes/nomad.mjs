@@ -199,11 +199,52 @@ export default [
                 if(message?.output_set) {
                     const wsdata = {
                         command: 'process_finished',
-                        process: message.process,
+                        process: { ...message.process, status: 'done' },
                         metadata: message.file.metadata,
                         paths: message.paths
                     };
                     await userManager.sendToUser(message.userId, wsdata);
+                }
+
+                if(message?.set_process) {
+                    const processRid = Graph.sanitizeRID(message.set_process);
+                    const totalFiles = Number(message?.total_files || message?.batch_total_files || 0);
+                    const currentFile = Number(message?.current_file || 0);
+
+                    let batch = null;
+                    if(totalFiles > 0 && currentFile > 0) {
+                        batch = await Graph.incrementBatchProcessed(
+                            processRid,
+                            Number(message?.response?.time || 0),
+                            totalFiles
+                        );
+                    }
+
+                    if(message?.summary) {
+                        const processNode = await Graph.getBatchProcess(processRid);
+                        if(processNode) {
+                            const processType = processNode['@type'] || 'Process';
+                            await Graph.setNodeAttribute_old(processNode['@rid'], {
+                                key: 'summary',
+                                value: message.summary,
+                            }, processType);
+                        }
+                    }
+
+                    const batchStatus = batch?.status || batch?.state;
+                    const isDone = batchStatus === 'done' || (totalFiles > 0 && currentFile >= totalFiles);
+                    if(isDone) {
+                        const wsdata = {
+                            command: 'process_finished',
+                            process: {
+                                ...(message.process || {'@rid': processRid}),
+                                '@rid': processRid,
+                                status: 'done',
+                            },
+                            summary: message.summary || null,
+                        };
+                        await userManager.sendToUser(message.userId, wsdata);
+                    }
                 }
 
             }

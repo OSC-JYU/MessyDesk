@@ -253,7 +253,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
         if (message.file.type == 'text' || message.file.type.includes('json') || message.file.type == 'csv') {
             info = await media.getTextDescription(contentFilepath, message.file.type);
         }
-        console.log(message)
+        //console.log(message)
         const process_rid = message.process['@rid'];
 
         // if we have output_rid and output_path set in message, then output node and path are already created
@@ -265,7 +265,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             fileNode = await Graph.createProcessFileNode(process_rid, message, '', info)
         }
         fileNode.metadata = await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
-        console.log('METADATA: ', fileNode.metadata)
+        //console.log('METADATA: ', fileNode.metadata)
         
         if(fileNode.metadata) {
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
@@ -335,28 +335,37 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 console.log('** updating set file count **', message.output_set)
                 const count = await Graph.updateFileCount(message.output_set);
                 const effectiveBatchTotal = message.batch_total_files || message.total_files;
+                const setProcessRid = message.set_process || message.process['@rid'];
+                const currentBatch = await Graph.getBatchProcess(setProcessRid);
+                const currentBatchStatus = currentBatch?.status || currentBatch?.state || 'running';
+                if(['paused', 'cancelling', 'cancelled', 'done'].includes(currentBatchStatus)) {
+                    wsdata = null;
+                } else {
                 const batch = await Graph.incrementBatchProcessed(
-                    message.set_process || message.process['@rid'],
+                    setProcessRid,
                     message?.response?.time,
                     effectiveBatchTotal
                 );
                 const batchProcessed = batch?.processed_files ?? message.current_file;
                 const batchTotal = batch?.total_files ?? effectiveBatchTotal;
-                const isBatchFinished = batch?.state === 'finished' || (batchTotal && batchProcessed >= batchTotal);
+                const batchStatus = batch?.status || batch?.state;
+                const isBatchFinished = batchStatus === 'done' || (batchTotal && batchProcessed >= batchTotal);
+                const isGroupedManyToOne = message.output === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
                 // check if current file is the last file -> we are done!
                 if(isBatchFinished) {
                     
                     wsdata = {
                         command: 'process_finished',
-                        process: { '@rid': message.set_process || message.process['@rid'], status: 'finished'},
+                        process: { '@rid': setProcessRid, status: 'done'},
                         set: { '@rid': message.output_set, status: 'finished', count: count },
                         batch: batch ? {
-                            state: batch.state || 'finished',
+                            status: batch.status || batch.state || 'done',
+                            state: batch.status || batch.state || 'done',
                             processed_files: batch.processed_files || batchProcessed,
                             failed_files: batch.failed_files || 0,
                             total_files: batch.total_files || batchTotal,
                             avg_sec_per_file: batch.avg_sec_per_file || 0,
-                            eta_sec: batch.eta_sec ?? 0,
+                            eta_sec: isGroupedManyToOne ? null : (batch.eta_sec ?? 0),
                         } : undefined,
                         //paths: set_thumbnails,
                         current_file: batchProcessed}
@@ -366,15 +375,16 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                     if(batchProcessed % 10 === 0) {
                         wsdata = {
                             command: 'process_update',
-                            process: { '@rid': message.set_process || message.process['@rid'], status: 'running'},
+                            process: { '@rid': setProcessRid, status: 'running'},
                             set: { '@rid': message.output_set, status: 'running', count: count },
                             batch: batch ? {
-                                state: batch.state || 'running',
+                                status: batch.status || batch.state || 'running',
+                                state: batch.status || batch.state || 'running',
                                 processed_files: batch.processed_files || batchProcessed,
                                 failed_files: batch.failed_files || 0,
                                 total_files: batch.total_files || batchTotal,
                                 avg_sec_per_file: batch.avg_sec_per_file || 0,
-                                eta_sec: batch.eta_sec ?? null,
+                                eta_sec: isGroupedManyToOne ? null : (batch.eta_sec ?? null),
                             } : undefined,
                             current_file: batchProcessed,
                             total_files: batchTotal
@@ -382,6 +392,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                     } else {
                         wsdata = null; // Don't send message for non-10th files
                     }
+                }
                 }
             } else {
                 // single file processing

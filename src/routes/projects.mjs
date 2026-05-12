@@ -1,9 +1,53 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
 import nats from '../queue.mjs';
+import services from '../services.mjs';
+import solr from '../solr.mjs';
 import { DATA_DIR } from '../env.mjs';
 
 import Boom from '@hapi/boom';
+
+async function dispatchSetFilesForReindex({service, task, files, setProcessRid, inputSetRid, outputSetRid, userRid, totalFiles, searchOutput = false}) {
+    let fileCount = 1;
+    for (const file of files) {
+        const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], userRid);
+        if (!fileMetadata) {
+            fileCount += 1;
+            continue;
+        }
+
+        const msg = {
+            service,
+            task,
+            file: fileMetadata,
+            set_rid: inputSetRid,
+            set_process: setProcessRid,
+            process: { '@rid': setProcessRid },
+            output_set: outputSetRid,
+            total_files: totalFiles,
+            current_file: fileCount,
+            userId: userRid,
+        };
+
+        if(searchOutput) {
+            msg.search_output = true;
+            msg.search_source_set = inputSetRid;
+        }
+
+        if (service.tasks?.[task.id]?.source == 'source_file') {
+            const source = await Graph.getFileSource(file['@rid'], msg.file['@type']);
+            if (source) {
+                const sourceMetadata = await Graph.getUserFileMetadata(source['@rid'], userRid);
+                if (sourceMetadata) msg.file.source = sourceMetadata;
+            }
+        }
+
+        await nats.createSetProcessNodesAndPublish(msg);
+        fileCount += 1;
+    }
+
+    return fileCount - 1;
+}
 
 export default [
     {
@@ -110,6 +154,95 @@ export default [
                 nats
             );
             return result;
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/projects/{rid}/reindex-search',
+        handler: async (request) => {
+            const projectRid = Graph.sanitizeRID(request.params.rid);
+            const userRid = request.auth.credentials.user.rid;
+            const ownerOk = await Graph.isProjectOwner(projectRid, userRid);
+            if (!ownerOk) {
+                throw Boom.forbidden('Project not found or access denied');
+            }
+
+            const service = services.getServiceAdapterByName('md-solr');
+            if (!service?.tasks?.index) {
+                throw Boom.badRequest('md-solr index task is not available');
+            }
+
+            await solr.dropProjectIndex(userRid, projectRid);
+
+            const sources = await Graph.getProjectSolrReindexSources(projectRid, userRid);
+            let requeuedSets = 0;
+            let requeuedFiles = 0;
+            const warnings = [];
+
+            for (const source of sources) {
+                try {
+                    const setRid = Graph.sanitizeRID(source.input_set);
+                    const setMetadata = await Graph.getUserFileMetadata(setRid, userRid);
+                    if (!setMetadata) {
+                        warnings.push({ set_rid: setRid, reason: 'set metadata not found' });
+                        continue;
+                    }
+
+                    const setFiles = await Graph.getSetFiles(setRid, userRid, { limit: 10000 });
+                    const files = setFiles?.files || [];
+                    if (files.length === 0) {
+                        warnings.push({ set_rid: setRid, reason: 'set has no files' });
+                        continue;
+                    }
+
+                    const task = { id: 'index', name: service.tasks.index.name || 'Search index' };
+                    const isSearchOutput = Graph.isSearchOutputTask(service, task);
+
+                    const processNode = await Graph.createManyToOneProcessNode(task.name, service, task, setMetadata);
+                    const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
+                        input_set: setRid,
+                        label: `${task.name || task.id} output`,
+                        project_rid: setMetadata.project_rid,
+                        search_output: isSearchOutput,
+                    });
+
+                    await Graph.initBatchProcess(processNode['@rid'], {
+                        topic: 'md-solr',
+                        task_id: 'index',
+                        input_set: setRid,
+                        output_set: outputSetNode ? outputSetNode['@rid'] : null,
+                        task_payload_json: JSON.stringify(task),
+                        total_files: files.length,
+                        search_output: isSearchOutput,
+                    });
+
+                    const dispatched = await dispatchSetFilesForReindex({
+                        service,
+                        task,
+                        files,
+                        setProcessRid: processNode['@rid'],
+                        inputSetRid: setRid,
+                        outputSetRid: outputSetNode ? outputSetNode['@rid'] : null,
+                        userRid,
+                        totalFiles: files.length,
+                        searchOutput: isSearchOutput,
+                    });
+
+                    requeuedSets += 1;
+                    requeuedFiles += dispatched;
+                } catch (error) {
+                    warnings.push({ set_rid: source.input_set, reason: error.message || 'requeue failed' });
+                }
+            }
+
+            return {
+                project_rid: projectRid,
+                deleted: true,
+                source_sets_found: sources.length,
+                requeued_sets: requeuedSets,
+                requeued_files: requeuedFiles,
+                warnings,
+            };
         }
     }
 ]; 

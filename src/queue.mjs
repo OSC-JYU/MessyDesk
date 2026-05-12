@@ -7,6 +7,7 @@ import fs from 'fs-extra';
 import Graph from './graph.mjs';
 import nomad from './nomad.mjs';
 import media from './media.mjs';
+import { createProcessQueueMessage } from './messageFactory.mjs';
 
 import { connect } from "@nats-io/transport-node";
 import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-io/jetstream";
@@ -14,11 +15,13 @@ import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-i
 
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
 const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
+const LOG_QUEUE_CONTEXT = ['1', 'true', 'yes', 'on'].includes(String(process.env.LOG_QUEUE_CONTEXT || '').trim().toLowerCase())
 
 const nats = {}
 
 nats.pausedBatches = new Set()
 nats.cancelledBatches = new Set()
+nats._queueContextSampledTopics = new Set()
 
 
 nats.init = async function(services) {
@@ -137,7 +140,21 @@ nats.publish = async function(topic, data) {
     //const service_url = await nomad.getServiceURL(topic)
     //service.url = service_url
     //service.queue.add(service, data, filenode)
-    const payload = typeof data === 'string' ? data : JSON.stringify(data);
+    const enriched = await createProcessQueueMessage(data, {
+      resolveProjectRidForNode: (rid) => Graph.getProjectRidForNode(rid)
+    })
+    if(LOG_QUEUE_CONTEXT && enriched && typeof enriched === 'object' && !Array.isArray(enriched) && !this._queueContextSampledTopics.has(topic)) {
+      this._queueContextSampledTopics.add(topic)
+      console.log('queue_context_sample', {
+        topic,
+        project_rid: enriched.project_rid || null,
+        set_rid: enriched.set_rid || null,
+        set_process: enriched.set_process || null,
+        file_rid: enriched.file?.['@rid'] || null,
+      })
+    }
+
+    const payload = typeof enriched === 'string' ? enriched : JSON.stringify(enriched);
     await this.js.publish(`process.${topic}`, payload)
   } catch(e) {
     console.log(`ERROR: Could not add topic ${topic} to queue!\n`, e)
@@ -463,15 +480,15 @@ nats.listenDBQueue = async function(topic) {
               const batchRid = msg?.set_process || msg?.set_process_rid
               if(batchRid) {
                 const batchNode = await Graph.getBatchProcess(batchRid)
-                const batchState = batchNode?.state || 'running'
+                const batchStatus = batchNode?.status || batchNode?.state || 'running'
 
-                if(batchState === 'paused' || this.pausedBatches.has(batchRid)) {
+                if(batchStatus === 'paused') {
                   // Drop queued create_and_publish tasks while paused; resume will rebuild pending files from graph.
                   m.ack();
                   continue;
                 }
 
-                if(batchState === 'cancelling' || batchState === 'cancelled' || this.cancelledBatches.has(batchRid)) {
+                if(batchStatus === 'cancelling' || batchStatus === 'cancelled' || batchStatus === 'done') {
                   m.ack();
                   continue;
                 }

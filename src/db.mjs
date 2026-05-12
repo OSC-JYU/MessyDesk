@@ -502,18 +502,39 @@ async function convert2VueFlow(data, options) {
 	const edges = []
 	const nodeIds = new Set()
 	const edgeIds = new Set()
+	const processMetaCache = new Map()
+
+	const resolveProcessMeta = async (processRid) => {
+		if(!processRid) return null
+		if(processMetaCache.has(processRid)) return processMetaCache.get(processRid)
+
+		let record = null
+		let response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id FROM Process WHERE @rid = ${processRid} LIMIT 1`)
+		if(response.result[0]) {
+			record = response.result[0]
+		} else {
+			response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id FROM SetProcess WHERE @rid = ${processRid} LIMIT 1`)
+			if(response.result[0]) {
+				record = response.result[0]
+			}
+		}
+
+		processMetaCache.set(processRid, record)
+		return record
+	}
 
 
 	if(data?.result?.vertices) {
 		for(const v of data.result.vertices) {
 			if(!v?.r || nodeIds.has(v.r)) continue
 			const vp = v.p || {}
+			const semanticType = vp.type || v.t
 			const node = {
 				data: {
 					id: v.r,
 					name: vp.label,
 					uuid: vp.uuid,
-					type: v.t,
+					type: semanticType,
 					info: vp.info,
 					description: vp.description,
 					roi_count: vp.roi_count,
@@ -521,7 +542,7 @@ async function convert2VueFlow(data, options) {
 				}
 			}
 
-			if(vp.type) node.data._type = vp.type
+			node.data._type = v.t
 			if(vp.node_error) node.data.error = vp.node_error
 			if(vp.error_count) node.data.error_count = vp.error_count
 			if(vp.metadata) node.data.metadata = vp.metadata
@@ -550,18 +571,19 @@ async function convert2VueFlow(data, options) {
 
 			if(edgeType === 'DERIVED_FROM') {
 				const derivedNodeId = ep.process_rid
+				const processMeta = await resolveProcessMeta(derivedNodeId)
 				if(!nodeIds.has(derivedNodeId)) {
 					const derivedNode = {
 						data: {
 							id: derivedNodeId,
-							name: ep.task || edgeType,
-							type: 'Process',
+							name: processMeta?.label || ep.task || ep.process_id || ep.cruncher || edgeType,
+							type: processMeta?.node_type || 'Process',
 							edge_type: edgeType,
 							edge_rid: e.r,
 							process_rid: ep.process_rid,
 							process_id: ep.process_id,
-							service: ep.cruncher,
-							task: ep.task,
+							service: processMeta?.service_id || processMeta?.service || ep.cruncher,
+							task: processMeta?.task || ep.task,
 						}
 					}
 					nodes.push(derivedNode)
