@@ -3,6 +3,36 @@ import nomad from '../nomad.mjs';
 import Graph from '../graph.mjs';
 import filters from '../filters.mjs';
 
+function doesFilterMatchNode(filter, node) {
+    if (!filter || !node) return false;
+
+    const nodeType = String(node['@type'] || '').toLowerCase();
+    const fileType = String(node.type || '').toLowerCase();
+    const extension = String(node.extension || '').toLowerCase();
+
+    if (Number(filter.set_only || 0) === 1 && nodeType !== 'set') {
+        return false;
+    }
+
+    const supportedTypes = Array.isArray(filter.supported_types)
+        ? filter.supported_types.map((t) => String(t).toLowerCase())
+        : [];
+    if (supportedTypes.length > 0) {
+        const typeCandidates = [fileType, nodeType];
+        const hasTypeMatch = supportedTypes.some((type) => typeCandidates.includes(type));
+        if (!hasTypeMatch) return false;
+    }
+
+    const supportedFormats = Array.isArray(filter.supported_formats)
+        ? filter.supported_formats.map((f) => String(f).toLowerCase())
+        : [];
+    if (supportedFormats.length > 0 && !supportedFormats.includes(extension)) {
+        return false;
+    }
+
+    return true;
+}
+
 export default [
     {
         method: 'GET',
@@ -58,7 +88,10 @@ export default [
             );
             const prompts = await Graph.getPrompts(request.auth.credentials.user.rid);
             const filterList = await filters.loadFilters();
-            const filtersArray = Object.values(filterList);
+            const allFilters = Object.values(filterList);
+            const filtersArray = file
+                ? allFilters.filter((filter) => doesFilterMatchNode(filter, file))
+                : allFilters;
 
             if (file) {
                 const matches = await services.getServicesForNode(

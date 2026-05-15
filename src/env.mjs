@@ -13,5 +13,7 @@ export const DATA_DIR = 'data/' + DB_NAME;
 export const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr';
 export const SOLR_CORE = process.env.SOLR_CORE || 'messydesk';
 export const NOMAD = process.env.NOMAD || false;
+export const DISK_QUOTA_GB = Number(process.env.DISK_QUOTA) || 100;
+export const PROJECT_EXPIRATION_DAYS = Number(process.env.PROJECT_EXPIRATION_DAYS) || 180;
 
 

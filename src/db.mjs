@@ -509,11 +509,11 @@ async function convert2VueFlow(data, options) {
 		if(processMetaCache.has(processRid)) return processMetaCache.get(processRid)
 
 		let record = null
-		let response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id FROM Process WHERE @rid = ${processRid} LIMIT 1`)
+		let response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM Process WHERE @rid = ${processRid} LIMIT 1`)
 		if(response.result[0]) {
 			record = response.result[0]
 		} else {
-			response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id FROM SetProcess WHERE @rid = ${processRid} LIMIT 1`)
+			response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM SetProcess WHERE @rid = ${processRid} LIMIT 1`)
 			if(response.result[0]) {
 				record = response.result[0]
 			}
@@ -584,6 +584,7 @@ async function convert2VueFlow(data, options) {
 							process_id: ep.process_id,
 							service: processMeta?.service_id || processMeta?.service || ep.cruncher,
 							task: processMeta?.task || ep.task,
+							info: processMeta?.info || processMeta?.description,
 						}
 					}
 					nodes.push(derivedNode)

@@ -6,7 +6,13 @@ export default [
         method: 'POST',
         path: '/api/filters/{type}/files/{node_id}',
         handler: async (request) => {
-            const result = await Graph.createFilter(request.params.type, request.params.node_id, request.auth.credentials.user.rid);
+            const payload = request.payload || {};
+            const result = await Graph.createFilter(
+                request.params.type,
+                request.params.node_id,
+                request.auth.credentials.user.rid,
+                payload,
+            );
             return result;
         }
     },

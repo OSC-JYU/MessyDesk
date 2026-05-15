@@ -25,20 +25,20 @@
             "output": "store",
             "output_set": "texts of PDF",
             "name": "Extract text from PDF",
-            "description": "This will extract text from searchable PDF and output a .txt file per page. Note that this is does NOT do Optical Character Regonition. ",
+            "description": "Extract text and produce one .txt output per input PDF file. In the recommended workflow, run this on page-split PDFs.",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 5
                 }
             },
-            "info": "Text from page {{firstPageToConvert}} to {{lastPageToConvert}} "
+            "info": "Text extracted from input PDF file"
         },
         "pdf2images": {
             "params": {
@@ -50,20 +50,20 @@
             "output_set": "PDF as images",
             "always_batch": true,
             "name": "Render PDF as images",
-            "description": "Create screenshot images of pages in any resolution.",
+            "description": "Render pages and produce one image output per input PDF file. In the recommended workflow, run this on page-split PDFs.",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 5
                 }
             },
-            "info": "Images from page {{firstPageToConvert}} to {{lastPageToConvert}} "           
+            "info": "Rendered image from input PDF file"           
         },
         "pdfimages": {
             "params": {
@@ -75,20 +75,20 @@
             "output_set": "images of PDF",
             "always_batch": true,
             "name": "Extract images from PDF (png)",
-            "description": "Extract images from PDF as png files.",
+            "description": "Extract embedded images from PDF. Can produce multiple outputs per input PDF file.",
             "params_help": {
                 "firstPageToConvert": {
                     "name": "first page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 1
                 },
                 "lastPageToConvert": {
                     "name": "last page to convert",
-                    "help": "",
+                    "help": "Used for direct full-PDF processing. In split-page workflow this stays at page 1.",
                     "default": 5
                 }
             },
-            "info": "Pages as images from page {{firstPageToConvert}} to {{lastPageToConvert}} "            
+            "info": "Embedded images extracted from input PDF file"            
         },
         "thumbnail": {
             "params": {

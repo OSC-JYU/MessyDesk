@@ -134,6 +134,27 @@ function shouldNotifyThumbnailUpdate(message, filename) {
     return false;
 }
 
+function normalizeRid(value) {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    if (!/^#?\d+:\d+$/.test(raw)) return null;
+    return raw.startsWith('#') ? raw : `#${raw}`;
+}
+
+function getReferenceSourceRid(message) {
+    const explicitRefRid = normalizeRid(
+        message?.ref_file_rid
+        || message?.ref
+        || message?.reference_rid
+    );
+    if (explicitRefRid) return explicitRefRid;
+    if (message?.isReference === true) {
+        return normalizeRid(message?.file?.['@rid']);
+    }
+    return null;
+}
+
 async function processFilesCore(request, infoFilepath, contentFilepath, message) {
     const isRotateTask = String(message?.task?.id || '').toLowerCase() === 'rotate';
     const isInternalRotate = message?.role === 'exif_rotate'
@@ -247,10 +268,38 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 
     } else if (infoFilepath && contentFilepath) {
 
+        if (message.output_set) {
+            const setProcessRid = message.set_process || message.process?.['@rid'];
+            if (setProcessRid) {
+                const currentBatch = await Graph.getBatchProcess(setProcessRid);
+                const currentBatchStatus = String(currentBatch?.status || currentBatch?.state || 'running').toLowerCase();
+                if (['paused', 'cancelling', 'cancelled', 'done'].includes(currentBatchStatus)) {
+                    console.log('Skipping cancelled/paused batch output materialization', {
+                        setProcessRid,
+                        status: currentBatchStatus,
+                        file: message?.file?.label,
+                    });
+                    return;
+                }
+            }
+        }
+
         console.log('creating file node', message.file.type)
+        const referenceSourceRid = getReferenceSourceRid(message);
+        const isReferenceOutput = Boolean(referenceSourceRid);
+        let referenceSourceNode = null;
+        if (isReferenceOutput) {
+            referenceSourceNode = await Graph.getNodeByRid(referenceSourceRid);
+            if (!referenceSourceNode) {
+                throw Boom.badData(`Reference source file not found: ${referenceSourceRid}`);
+            }
+        }
         let info = '';
+        // Reference outputs reuse source info and do not materialize new bitstreams.
+        if (isReferenceOutput && typeof referenceSourceNode?.info === 'string') {
+            info = referenceSourceNode.info;
         // for text nodes we create a description from the content of the file
-        if (message.file.type == 'text' || message.file.type.includes('json') || message.file.type == 'csv') {
+        } else if (message.file.type == 'text' || message.file.type.includes('json') || message.file.type == 'csv') {
             info = await media.getTextDescription(contentFilepath, message.file.type);
         }
         //console.log(message)
@@ -262,9 +311,17 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             console.log('SET: output node and path already created')
             fileNode = await Graph.getNodeByRid(message.output_rid)
         } else {
-            fileNode = await Graph.createProcessFileNode(process_rid, message, '', info)
+            if (isReferenceOutput) {
+                fileNode = await Graph.createReferenceFileNode(process_rid, message, referenceSourceRid, '', info)
+            } else {
+                fileNode = await Graph.createProcessFileNode(process_rid, message, '', info)
+            }
         }
-        fileNode.metadata = await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
+        if (isReferenceOutput) {
+            fileNode.metadata = referenceSourceNode?.metadata || null;
+        } else {
+            fileNode.metadata = await media.uploadFile(contentFilepath, fileNode, DATA_DIR);
+        }
         //console.log('METADATA: ', fileNode.metadata)
         
         if(fileNode.metadata) {
@@ -287,7 +344,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 
 
         // for image files we create normal thumbnails
-        if (message.file.type == 'image') {
+        if (!isReferenceOutput && message.file.type == 'image') {
             const th = {
                 topic: {id: 'md-thumbnailer'},
                 service: {id: 'md-thumbnailer'},
@@ -303,7 +360,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
         }
 
         // Only split-task PDFs get automatic poppler thumbnails.
-        if (shouldCreateSplitPdfThumbnail(message, fileNode)) {
+        if (!isReferenceOutput && shouldCreateSplitPdfThumbnail(message, fileNode)) {
             console.log('Scheduling thumbnail creation for split PDF file', fileNode['@rid']);
             const thumbMsg = {
                 service: { id: 'md-poppler' },
@@ -336,16 +393,22 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 const count = await Graph.updateFileCount(message.output_set);
                 const effectiveBatchTotal = message.batch_total_files || message.total_files;
                 const setProcessRid = message.set_process || message.process['@rid'];
+                const outputFileTotal = Number(message.file_total || 0);
+                const outputFileIndex = Number(message.file_count || 0);
+                const shouldAdvanceBatchCounter = !(outputFileTotal > 1) || outputFileIndex >= outputFileTotal;
                 const currentBatch = await Graph.getBatchProcess(setProcessRid);
                 const currentBatchStatus = currentBatch?.status || currentBatch?.state || 'running';
                 if(['paused', 'cancelling', 'cancelled', 'done'].includes(currentBatchStatus)) {
                     wsdata = null;
                 } else {
-                const batch = await Graph.incrementBatchProcessed(
-                    setProcessRid,
-                    message?.response?.time,
-                    effectiveBatchTotal
-                );
+                let batch = currentBatch;
+                if(shouldAdvanceBatchCounter) {
+                    batch = await Graph.incrementBatchProcessed(
+                        setProcessRid,
+                        message?.response?.time,
+                        effectiveBatchTotal
+                    );
+                }
                 const batchProcessed = batch?.processed_files ?? message.current_file;
                 const batchTotal = batch?.total_files ?? effectiveBatchTotal;
                 const batchStatus = batch?.status || batch?.state;
@@ -372,7 +435,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                         console.log('wsdata', wsdata)
                 } else {
                     // Send update message only every 10th file
-                    if(batchProcessed % 10 === 0) {
+                    if(shouldAdvanceBatchCounter && batchProcessed % 10 === 0) {
                         wsdata = {
                             command: 'process_update',
                             process: { '@rid': setProcessRid, status: 'running'},

@@ -15,7 +15,7 @@
             "params": {"task":"split"},
             "output": "set",
             "output_set": "Pages from PDF",
-            "name": "Split PDF",
+            "name": "Split to pages",
             "description": "Split a PDF file into separate pages."
         },
         "extract_text": {

@@ -16,7 +16,18 @@
 
     "tasks": {
         "unzip": {
-            "params": {"task":"unzip"},
+            "params": {
+                "task":"unzip",
+                "allowed_extensions": ""
+            },
+            "params_help": {
+                "allowed_extensions": {
+                    "name": "allowed_extensions",
+                    "help": "Optional. Extract only these extensions (comma-separated), for example: pdf,txt,png",
+                    "description": "Optional. Extract only these extensions (comma-separated), for example: pdf,txt,png",
+                    "display": "textinput"
+                }
+            },
             "output": "set",
             "output_set": "Files from zip",
             "name": "Unzip",

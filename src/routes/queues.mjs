@@ -409,6 +409,10 @@ export default [
                     task.name = task.name;
                 } else {
                     task.name = service.tasks[task.id].name;
+                    if(service.tasks[task.id].description && !task.description)
+                        task.description = service.tasks[task.id].description;
+                    if(service.tasks[task.id].info && !task.info)
+                        task.info = service.tasks[task.id].info;
                 }
                 var msg = {task: task}
                 var task_name = task?.name || task?.id || topic;
@@ -441,7 +445,7 @@ export default [
                 // in many-to-one outputs we do not create process nodes for each file 
                 if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
                     const isSearchOutput = Graph.isSearchOutputTask(service, task)
-                    var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
+                    var processNode = await Graph.createManyToOneProcessNode(task_name, service, task, set_metadata)
                     const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
                         input_set: set_rid,
                         label: `${task.name || task.id} output`,

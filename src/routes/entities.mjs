@@ -61,6 +61,14 @@ export default [
     },
     {
         method: 'GET',
+        path: '/api/entities/sets/{rid}',
+        handler: async (request) => {
+            const result = await Graph.getSetEntities(request.params.rid, request.auth.credentials.user.rid);
+            return result;
+        }
+    },
+    {
+        method: 'GET',
         path: '/api/entities/{rid}',
         handler: async (request) => {
             const result = await Graph.getEntity(request.params.rid, request.auth.credentials.user.rid);

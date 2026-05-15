@@ -3,7 +3,7 @@ import media from '../media.mjs';
 import nats from '../queue.mjs';
 import services from '../services.mjs';
 import solr from '../solr.mjs';
-import { DATA_DIR } from '../env.mjs';
+import { DATA_DIR, DISK_QUOTA_GB } from '../env.mjs';
 
 import Boom from '@hapi/boom';
 
@@ -81,6 +81,24 @@ export default [
             } catch (error) {
                 throw Boom.badRequest(error.message);
             }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/projects/storage-summary',
+        handler: async (request) => {
+            const projects = await Graph.getProjects(request.auth.credentials.user.rid, DATA_DIR);
+            let totalMb = 0;
+            for (const p of projects) {
+                const mb = Number(p.size_mb ?? p.sizeMB ?? p.sizeMb ?? p.total_size_mb ?? p.total_mb ?? p.size ?? 0);
+                if (Number.isFinite(mb)) totalMb += mb;
+            }
+            return {
+                used_mb: Math.round(totalMb * 100) / 100,
+                quota_gb: DISK_QUOTA_GB,
+                quota_mb: DISK_QUOTA_GB * 1024,
+                used_percent: Math.min(100, Math.round((totalMb / (DISK_QUOTA_GB * 1024)) * 10000) / 100),
+            };
         }
     },
     {

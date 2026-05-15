@@ -1,0 +1,11 @@
+{
+    "id": "mdf-set-filter",
+    "type": "filter",
+    "name" :"Tag Filter",
+    "set_only": 1,
+
+    "supported_types": [],
+    "supported_formats": [],
+
+    "description": "Create a new Set from selected tags using reference file nodes"
+}
