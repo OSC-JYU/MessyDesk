@@ -5,7 +5,8 @@
   "type": "module",
   "main": "index.mjs",
   "scripts": {
-    "test": "mocha --timeout 50000 --exit"
+    "test": "mocha --timeout 50000 --exit",
+    "build:help": "node tools/build-help.mjs"
   },
   "author": "Ari Häyrinen",
   "license": "ISC",
@@ -25,6 +26,7 @@
     "got": "^14.4.5",
     "image-size": "^1.1.1",
     "json5": "^2.2.3",
+    "marked": "^18.0.3",
     "susie": "^3.0.0",
     "timers-promises": "^1.0.1",
     "unzipper": "^0.12.3",
