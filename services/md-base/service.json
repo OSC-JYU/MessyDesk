@@ -3,22 +3,21 @@
     "id": "md-base",
     "adapter": "elg_fs",
     "api": "/api",
-    "name" :"Base Service",
+    "name": "Base Service",
     "source_url": "https://github.com/MD-python",
     "status": "experimental",
-    "supported_formats": ["txt"],
+    "supported_formats": [
+        "txt"
+    ],
     "supported_types": [],
-
     "description": "Base Python scripts for texts and images.",
-
-
     "tasks": {
         "wordcloud": {
             "name": "Create Wordcloud",
             "description": "Create wordcloud from text",
-            "info": "Wordcloud"
+            "info": "Wordcloud",
+            "behaviour": "one-to-one"
         },
-
         "remove_stop_words": {
             "name": "Remove Stop Words",
             "description": "Remove stop words from text",
@@ -35,15 +34,24 @@
                     "name": "language",
                     "help": "Define the language of the text",
                     "values": [
-                        {"value":"en", "title":"English"},
-                        {"value":"fi", "title":"Finnish"},
-                        {"value":"sv", "title":"Swedish"}
+                        {
+                            "value": "en",
+                            "title": "English"
+                        },
+                        {
+                            "value": "fi",
+                            "title": "Finnish"
+                        },
+                        {
+                            "value": "sv",
+                            "title": "Swedish"
+                        }
                     ],
-                    "display":"dropdown"
+                    "display": "dropdown"
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
-
         "split_text": {
             "name": "Split Text",
             "description": "Split text into chunks",
@@ -62,14 +70,14 @@
                     "description": "Chunk size",
                     "display": "textinput"
                 }
-            }
+            },
+            "behaviour": "one-to-many"
         },
-
         "join_text": {
             "name": "Join texts",
             "description": "Join texts into one text",
             "info": "Join Text",
-            "output": "many-to-one",
+            "behaviour": "many-to-one",
             "set_only": 1,
             "params": {
                 "separator": {

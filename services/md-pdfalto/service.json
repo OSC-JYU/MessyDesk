@@ -5,15 +5,14 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"PDFAlto",
-    
-    "supported_types": ["pdf"],
-    "supported_formats": ["pdf"],
-
+    "name": "PDFAlto",
+    "supported_types": [
+        "pdf"
+    ],
+    "supported_formats": [
+        "pdf"
+    ],
     "description": "pdfalto is a command line executable for parsing PDF files and producing structured XML representations of the PDF content in ALTO format, capturing in particular all the layout and style information of the PDF.",
-
-
-
     "tasks": {
         "pdf2alto": {
             "params": {
@@ -21,7 +20,6 @@
                 "lastPageToConvert": 0,
                 "task": "pdf2text"
             },
-            "output": "store",
             "name": "Create ALTO XML from PDF",
             "description": "Creates a alto file from PDF.",
             "params_help": {
@@ -33,7 +31,8 @@
                     "name": "last page to convert",
                     "help": ""
                 }
-            }
+            },
+            "behaviour": "one-to-many"
         }
     }
 }

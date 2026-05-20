@@ -4,28 +4,28 @@
     "type": "source",
     "api_type": "elg",
     "api": "/process",
-    "name" :"nextcloud",
+    "name": "nextcloud",
     "source_url": "https://nextcloud.com/",
-    
-    "supported_types": ["source"],
-    "supported_formats": ["nextcloud"],
-
+    "supported_types": [
+        "source"
+    ],
+    "supported_formats": [
+        "nextcloud"
+    ],
     "description": "Open source content collaboration platform.",
-
-
     "tasks": {
         "get_directory_content": {
             "name": "Get list of directory content",
-            "output": "json",
             "description": "Hidden task for getting directory content info (size and count)",
             "info": "",
-            "filter": "hidden"
+            "filter": "hidden",
+            "behaviour": "one-to-one"
         },
         "get_files": {
             "name": "Download files",
-            "output": "json",
             "description": "Download files from nextcloud",
-            "info": ""
+            "info": "",
+            "behaviour": "one-to-one"
         }
     }
 }

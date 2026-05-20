@@ -5,21 +5,23 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"Noteshrink",
+    "name": "Noteshrink",
     "source_url": "https://github.com/mzucker/noteshrink",
-    
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg", "jpeg"],
-
+    "supported_types": [
+        "image"
+    ],
+    "supported_formats": [
+        "png",
+        "jpg",
+        "jpeg"
+    ],
     "description": "A program to clean up scans of handwritten notes while simultaneously reducing file size",
-
-
     "tasks": {
         "clean": {
             "name": "Clean up scan",
-            "output": "image",
             "description": "Clean up especially for handwritten notes",
-            "info": "I tried to clean up scanned image. "
+            "info": "I tried to clean up scanned image. ",
+            "behaviour": "one-to-one"
         }
     }
 }

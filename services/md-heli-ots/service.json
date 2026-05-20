@@ -4,18 +4,22 @@
     "type": "text",
     "api_type": "elg",
     "api": "/process",
-    "name" :"HELI-OTS",
-
-    "supported_types": ["text"],
-    "supported_formats": ["txt"],
-
+    "name": "HELI-OTS",
+    "supported_types": [
+        "text"
+    ],
+    "supported_formats": [
+        "txt"
+    ],
     "description": "The HeLI-OTS language identifier is equipped with language models for 200 languages and licensed for academic as well as commercial use. https://zenodo.org/record/7066611#.ZHb2FkhBzmE",
-
     "params": {
         "nbest": 1,
-        "languages": ["fin","swe","eng"]
+        "languages": [
+            "fin",
+            "swe",
+            "eng"
+        ]
     },
-
     "params_help": {
         "nbest": {
             "name": "language count",
@@ -25,18 +29,21 @@
         },
         "languages": {
             "name": "language selection",
-            "default": ["fin","swe","eng"],
+            "default": [
+                "fin",
+                "swe",
+                "eng"
+            ],
             "help": "You can limit language selection with this list of strings. Use ISO 639-3 language codes separated with comma.",
             "display": "textinput",
             "type": "array"
         }
     },
-
     "tasks": {
         "language_detection_doc": {
             "name": "Detect language per document",
-            "output": "json",
-            "description": "Detect language of the text."
+            "description": "Detect language of the text.",
+            "behaviour": "one-to-one"
         }
     }
 }

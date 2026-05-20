@@ -413,7 +413,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 const batchTotal = batch?.total_files ?? effectiveBatchTotal;
                 const batchStatus = batch?.status || batch?.state;
                 const isBatchFinished = batchStatus === 'done' || (batchTotal && batchProcessed >= batchTotal);
-                const isGroupedManyToOne = message.output === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
+                const isGroupedManyToOne = message.behaviour === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
                 // check if current file is the last file -> we are done!
                 if(isBatchFinished) {
                     

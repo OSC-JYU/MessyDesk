@@ -5,16 +5,17 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"Human Library",
-    
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg", "jpeg"],
-
+    "name": "Human Library",
+    "supported_types": [
+        "image"
+    ],
+    "supported_formats": [
+        "png",
+        "jpg",
+        "jpeg"
+    ],
     "description": "AI-powered 3D Face Detection & Rotation Tracking, Face Description & Recognition, Body Pose Tracking, 3D Hand & Finger Tracking, Iris Analysis, Age and Gender & Emotion Prediction, Gaze Tracking, Gesture Recognition, Body Segmentation",
     "source_url": "https://github.com/vladmandic/human",
-
-
-
     "tasks": {
         "detect": {
             "params": {
@@ -22,9 +23,9 @@
                 "lastPageToConvert": 0,
                 "task": "detect"
             },
-            "output": "human.json",
             "name": "Detect human faces and bodies",
-            "description": ""
+            "description": "",
+            "behaviour": "one-to-one"
         }
     }
 }

@@ -432,18 +432,12 @@ export default [
                         }
                     }
                 } 
-
-
-
-                // if(service.tasks[task.id].output) {
-                //     task_output = service.tasks[task.id].output;
-                // }
-
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
                 var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit: 10000});
+                const behaviour = Graph.resolveTaskBehaviour(service, task)
 
                 // in many-to-one outputs we do not create process nodes for each file 
-                if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
+                if(!service.external_tasks && behaviour === 'many-to-one') {
                     const isSearchOutput = Graph.isSearchOutputTask(service, task)
                     var processNode = await Graph.createManyToOneProcessNode(task_name, service, task, set_metadata)
                     const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
@@ -481,7 +475,7 @@ export default [
                         msg.set_rid = set_rid;
                         msg.input_set = set_rid;
                         msg.output_set = outputSetNode['@rid'];
-                        msg.output = service.tasks[task.id].output;
+                        msg.behaviour = behaviour;
                         msg.set_process = processNode['@rid'];
                         // Use full batch counters so consumer emits a single final output file.
                         msg.total_files = set_files.files.length;

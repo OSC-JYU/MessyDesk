@@ -5,23 +5,21 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"finbert-ner",
+    "name": "finbert-ner",
     "source_url": "https://huggingface.co/Kansallisarkisto/finbert-ner",
     "auto-tagger": true,
     "auto-tagger-label": "finbert",
     "status": "experimental",
-    
-    "supported_formats": ["txt"],
-
+    "supported_formats": [
+        "txt"
+    ],
     "description": "The model performs named entity recognition from text input in Finnish. ",
-
-
     "tasks": {
         "predict": {
             "name": "Find named entities",
-            "output": "json",
             "description": "",
-            "info": "Detected named entities. "
+            "info": "Detected named entities. ",
+            "behaviour": "one-to-one"
         }
     }
 }

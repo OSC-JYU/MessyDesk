@@ -30,6 +30,7 @@ import promptRoutes from './routes/prompts.mjs';
 import searchRoutes from './routes/search.mjs';
 import filterRoutes from './routes/filters.mjs';
 import roiRoutes from './routes/rois.mjs';
+import helpRoutes from './routes/help.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -209,7 +210,8 @@ const init = async () => {
 		...promptRoutes,
 		...searchRoutes,
 		...filterRoutes,
-		...roiRoutes
+		...roiRoutes,
+		...helpRoutes
 	]);
 
 	// Start the server

@@ -3,28 +3,25 @@
     "id": "md-opencv",
     "adapter": "elg",
     "api": "/api",
-    "name" :"OpenCV Service",
+    "name": "OpenCV Service",
     "source_url": "https://github.com/MD-opencv",
     "status": "experimental",
     "supported_formats": [],
-    "supported_types": ["roi.json"],
-
+    "supported_types": [
+        "roi.json"
+    ],
     "description": "OpenCV Python scripts for image ROI processing.",
-
-
     "tasks": {
         "extract": {
             "name": "Extract ROI",
-            "source":"source_file",
-            "output": "store",
+            "source": "source_file",
             "description": "Extract regions of interest from images",
-            "info": "Extract ROI"
+            "info": "Extract ROI",
+            "behaviour": "one-to-many"
         },
-
         "isolate": {
             "name": "Isolate ROI",
-            "source":"source_file",
-            "output": "store",
+            "source": "source_file",
             "description": "Isolate regions of interest in images",
             "info": "Isolate ROI",
             "params": {
@@ -34,13 +31,12 @@
                     "default": false,
                     "display": "checkbox"
                 }
-            }
+            },
+            "behaviour": "one-to-many"
         },
-
         "fill": {
             "name": "Fill ROI",
-            "source":"source_file",
-            "output": "store",
+            "source": "source_file",
             "description": "Fill regions of interest in images",
             "info": "Fill ROI",
             "params": {
@@ -56,11 +52,12 @@
                     "help": "Define the color to fill the ROI",
                     "display": "textinput"
                 }
-            }
+            },
+            "behaviour": "one-to-many"
         },
         "border": {
             "name": "Border ROI",
-            "source":"source_file",
+            "source": "source_file",
             "description": "Add border to regions of interest in images",
             "info": "Border ROI",
             "params": {
@@ -76,11 +73,12 @@
                     "help": "Show labels on borders",
                     "display": "checkbox"
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
         "blur": {
             "name": "Blur ROI",
-            "source":"source_file",
+            "source": "source_file",
             "description": "Blur regions of interest in images",
             "info": "Blur ROI",
             "params": {
@@ -96,20 +94,22 @@
                     "help": "Show labels on blurred areas",
                     "display": "checkbox"
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
         "binary": {
             "name": "Binary ROI",
-            "source":"source_file",
+            "source": "source_file",
             "description": "Binary threshold regions of interest in images",
-            "info": "Binary ROI"
+            "info": "Binary ROI",
+            "behaviour": "one-to-one"
         },
         "binary_invert": {
             "name": "Binary Invert ROI",
-            "source":"source_file",
+            "source": "source_file",
             "description": "Binary invert threshold regions of interest in images",
-            "info": "Binary Invert ROI"
+            "info": "Binary Invert ROI",
+            "behaviour": "one-to-one"
         }
     }
 }
-

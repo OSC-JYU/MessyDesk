@@ -2,15 +2,22 @@
     "local_url": "http://localhost:10001",
     "id": "md-pillow_fs",
     "adapter": "pillow_fs",
-    "name" :"Pillow Image Processor",
+    "name": "Pillow Image Processor",
     "location": "on-premise",
     "description": "Pillow is a Python library that provides a wide range of image processing capabilities.",
     "source_url": "https://github.com/python-pillow/Pillow",
-    
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg","jpeg","webp","tiff","tif", "pdf"],
-
-
+    "supported_types": [
+        "image"
+    ],
+    "supported_formats": [
+        "png",
+        "jpg",
+        "jpeg",
+        "webp",
+        "tiff",
+        "tif",
+        "pdf"
+    ],
     "params_help": {
         "width": {
             "name": "width",
@@ -25,60 +32,56 @@
             "display": "textinput"
         }
     },
-
     "tasks": {
         "extract": {
             "name": "Extract",
-            "output": "image",
             "description": "Create images based on Regions of Interest (ROI).",
             "info": "I extracted images based on your selections.",
-            "roi_params": { 
+            "roi_params": {
                 "top": 0,
                 "left": 0,
                 "areawidth": 0,
                 "areaheight": 0
             },
-
-            "params": {                
+            "params": {
                 "_create_set": {
                     "name": "Create Set",
                     "help": "Create new Set and place extracted images in it.",
                     "display": "checkbox"
-            }},
-            "params_help": {}
+                }
+            },
+            "params_help": {},
+            "behaviour": "one-to-one"
         },
         "resize": {
             "name": "Resize by width",
-            "output": "image",
             "description": "Resize image.",
-            "params": {"width": 400},
+            "params": {
+                "width": 400
+            },
             "params_help": {
                 "width": {
                     "name": "Image width in pixels",
                     "help": "How much image is resized."
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
         "fit": {
             "name": "Resize",
-            "output": "image",
-            "description": "Resize image."
+            "description": "Resize image.",
+            "behaviour": "one-to-one"
         },
-
         "flip": {
             "name": "Flip",
-            "output": "image",
             "description": "Flip image.",
             "params": {},
             "params_help": {},
-            "info": "I flipped image"
+            "info": "I flipped image",
+            "behaviour": "one-to-one"
         },
-
-
-
         "rotate": {
             "name": "Rotate",
-            "output": "image",
             "description": "Rotate image by given angle.",
             "params": {
                 "rotate": 90
@@ -88,29 +91,40 @@
                     "name": "rotate angle (90, 180, 270)",
                     "help": "How much image is rotated.",
                     "default": 90,
-                    "values":[{"title": "90", "value": 90}, {"title": "180", "value": 180}, {"title": "-90", "value": 270}],
+                    "values": [
+                        {
+                            "title": "90",
+                            "value": 90
+                        },
+                        {
+                            "title": "180",
+                            "value": 180
+                        },
+                        {
+                            "title": "-90",
+                            "value": 270
+                        }
+                    ],
                     "display": "dropdown"
                 }
             },
-            "info": "I rotated image {{rotate}} degrees"
-           
+            "info": "I rotated image {{rotate}} degrees",
+            "behaviour": "one-to-one"
         },
-
         "OSD_rotate": {
             "name": "Auto-rotate (OSD)",
-            "output": "image",
-            "source":"source_file",
+            "source": "source_file",
             "description": "Rotate image by angle given by orientation detection.",
-            "supported_types": ["osd.json"],
+            "supported_types": [
+                "osd.json"
+            ],
             "params": {},
-            "params_help": {
-            },
-            "info": "I rotated image based on orientation detection."
+            "params_help": {},
+            "info": "I rotated image based on orientation detection.",
+            "behaviour": "one-to-one"
         },
-
         "blur": {
             "name": "Blur",
-            "output": "image",
             "description": "Blur image",
             "params": {
                 "sigma": 2
@@ -122,12 +136,11 @@
                     "default": 2
                 }
             },
-            "info": "I blurred image by {{sigma}}. "
+            "info": "I blurred image by {{sigma}}. ",
+            "behaviour": "one-to-one"
         },
-
         "convert": {
             "name": "Convert",
-            "output": "image",
             "description": "Convert image to other format",
             "params": {
                 "type": "jpg",
@@ -138,7 +151,20 @@
                     "name": "format",
                     "help": "Format to convert to",
                     "default": "jpeg",
-                    "values":[{"title": "jpg", "value": "jpeg"}, {"title": "png", "value": "png"}, {"title": "webp", "value": "webp"}],
+                    "values": [
+                        {
+                            "title": "jpg",
+                            "value": "jpeg"
+                        },
+                        {
+                            "title": "png",
+                            "value": "png"
+                        },
+                        {
+                            "title": "webp",
+                            "value": "webp"
+                        }
+                    ],
                     "display": "dropdown"
                 },
                 "quality": {
@@ -148,7 +174,8 @@
                     "display": "textinput"
                 }
             },
-            "info": "I converted image to {{type}}. JPEG quality is {{quality}}. "
+            "info": "I converted image to {{type}}. JPEG quality is {{quality}}. ",
+            "behaviour": "one-to-one"
         }
     }
 }

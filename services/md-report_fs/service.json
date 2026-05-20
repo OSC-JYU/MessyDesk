@@ -5,19 +5,17 @@
     "api_type": "elg",
     "adapter": "elg_fs",
     "api": "/process",
-    "name" :"Report",
-    "supported_formats": ["txt"],
-
+    "name": "Report",
+    "supported_formats": [
+        "txt"
+    ],
     "description": "Create reports (very experimental)",
-
-
-
     "tasks": {
         "html-text": {
             "params": {},
-            "output": "always file",
             "name": "HTML text",
-            "description": "Combine text files to one HTML file."
+            "description": "Combine text files to one HTML file.",
+            "behaviour": "one-to-one"
         }
     }
 }

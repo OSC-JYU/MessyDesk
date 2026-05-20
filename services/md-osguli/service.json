@@ -1,0 +1,48 @@
+{
+    "local_url": "http://promaxgb10-f2b0:11434/api/generate",
+    "id": "md-osguli",
+    "adapter": "ollama",
+    "location": "on-premise",
+    "access": "free",
+    "name": "OSCGuli",
+    "source_url": "",
+    "description": "OSC:n oma GPU-palvelu.",
+    "service_groups": [
+        "OSGuli"
+    ],
+    "external_tasks": "prompts",
+    "params": {},
+    "tasks": {},
+    "models": {
+        "gemma4:26b": {
+            "name": "gemma4:26b",
+            "description": "Gemma 4 on Googlen avoin kielimalli.",
+            "supported_types": [
+                "image",
+                "text"
+            ],
+            "supported_formats": [
+                "jpg",
+                "png",
+                "jpeg",
+                "txt"
+            ],
+            "url": ""
+        },
+        "nemotron3": {
+            "name": "nemotron3:120b",
+            "description": "Nemotron 3 on Nvidian avoin kielimalli.",
+            "supported_types": [
+                "image",
+                "text"
+            ],
+            "supported_formats": [
+                "jpg",
+                "png",
+                "jpeg",
+                "txt"
+            ],
+            "url": ""
+        }
+    }
+}

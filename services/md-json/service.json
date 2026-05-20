@@ -1,31 +1,30 @@
 {
     "local_url": "http://localhost:9008",
     "id": "md-json",
-    "type": "text",
     "adapter": "elg",
-    "api": "/api",
-    "name" :"JSON Processing",
+    "name": "JSON Processing",
     "source_url": "https://github.com/MD-python/MD-json",
     "status": "experimental",
-    "supported_formats": ["json"],
+    "supported_formats": [
+        "json"
+    ],
     "supported_types": [],
-
     "description": "Generic JSON scripts. ",
-
-
     "tasks": {
         "json2csv": {
             "name": "Convert JSON to CSV",
-            "output": "many-to-one",
             "description": "Create comma separated values from JSON files",
-            "info": "JSON to CSV"
+            "info": "JSON to CSV",
+            "behaviour": "many-to-one"
         },
         "json2text": {
             "name": "Convert OCR JSON to Text",
-            "output": "many-to-one",
             "description": "Create text from OCR JSON files",
             "info": "JSON to Text",
-            "supported_types": ["ocr.json"]
+            "supported_types": [
+                "ocr.json"
+            ],
+            "behaviour": "many-to-one"
         }
     }
 }

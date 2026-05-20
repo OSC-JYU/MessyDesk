@@ -4,21 +4,18 @@
     "type": "solr",
     "adapter": "solr",
     "api": "/process",
-    "name" :"Solr",
-
-
+    "name": "Solr",
     "description": "Solr",
-
-
-
     "tasks": {
         "index": {
             "params": {},
-            "output": "many-to-one",
             "source": "source_file",
             "name": "Search index",
             "description": "Create a search index for the texts.",
-            "supported_formats": ["txt"]
+            "supported_formats": [
+                "txt"
+            ],
+            "behaviour": "many-to-one"
         }
     }
 }

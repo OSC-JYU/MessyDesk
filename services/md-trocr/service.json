@@ -4,21 +4,18 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"TROCR",
-
+    "name": "TROCR",
     "description": "TROCR is a library for Optical Character Recognition. It is a deep learning model that can be used to extract text from images.",
-
-
-
     "tasks": {
         "extract_text": {
-            "output": "store",
-            "source":"source_file",
+            "source": "source_file",
             "name": "Extract hand written text from image",
             "description": "This will extract text from hand written image and output a .txt file. ",
             "info": "Text from image",
-            "supported_types": ["polygons.json"]
+            "supported_types": [
+                "polygons.json"
+            ],
+            "behaviour": "one-to-many"
         }
- 
     }
 }

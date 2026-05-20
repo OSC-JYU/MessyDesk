@@ -5,32 +5,37 @@
     "api_type": "elg",
     "adapter": "elg_fs",
     "api": "/process",
-    "name" :"PDF Splitter",
-    
+    "name": "PDF Splitter",
     "supported_types": [],
-    "supported_formats": ["pdf"],
+    "supported_formats": [
+        "pdf"
+    ],
     "description": "PDF Page Split",
     "tasks": {
         "split": {
-            "params": {"task":"split"},
-            "output": "set",
+            "params": {
+                "task": "split"
+            },
             "output_set": "Pages from PDF",
             "name": "Split to pages",
-            "description": "Split a PDF file into separate pages."
+            "description": "Split a PDF file into separate pages.",
+            "behaviour": "one-to-many"
         },
         "extract_text": {
-            "params": {"task":"extract_text"},
-            "output": "set",
+            "params": {
+                "task": "extract_text"
+            },
             "output_set": "Texts from PDF pages",
             "name": "Extract Text",
-            "description": "Extract text from each PDF page into separate text files."
+            "description": "Extract text from each PDF page into separate text files.",
+            "behaviour": "one-to-many"
         },
         "extract_images": {
             "params": {
-                "task":"extract_images",
+                "task": "extract_images",
                 "min_width": 200,
                 "min_height": 200,
-                "max_aspect_ratio": 8.0
+                "max_aspect_ratio": 8
             },
             "params_help": {
                 "min_width": {
@@ -49,10 +54,10 @@
                     "display": "textinput"
                 }
             },
-            "output": "set",
             "output_set": "Images from PDF pages",
             "name": "Extract Images",
-            "description": "Extract embedded images from each PDF page into image files."
+            "description": "Extract embedded images from each PDF page into image files.",
+            "behaviour": "one-to-many"
         }
     }
 }

@@ -4,27 +4,25 @@
     "type": "json",
     "api_type": "elg",
     "adapter": "json-tagger",
-    "api": "/process",
-    "name" :"JSON Tagger",
-    
-    "supported_types": ["ner.json"],
-    "supported_formats": ["json"],
-
+    "name": "JSON Tagger",
+    "supported_types": [
+        "ner.json"
+    ],
+    "supported_formats": [
+        "json"
+    ],
     "description": "Create MessyDesk tags from JSON",
-
-
-
     "tasks": {
         "tag": {
-            "source":"source_file",
+            "source": "source_file",
             "params": {
                 "firstPageToConvert": 0,
                 "lastPageToConvert": 0,
                 "task": "tag"
             },
-            "output": "tags.json",
             "name": "Create MessyDesk tags",
-            "description": ""
+            "description": "",
+            "behaviour": "one-to-one"
         }
     }
 }

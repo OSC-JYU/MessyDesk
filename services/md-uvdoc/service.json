@@ -5,22 +5,24 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"UVDoc",
+    "name": "UVDoc",
     "source_url": "https://github.com/tanguymagne/UVDoc",
-    
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg", "jpeg"],
-
+    "supported_types": [
+        "image"
+    ],
+    "supported_formats": [
+        "png",
+        "jpg",
+        "jpeg"
+    ],
     "description": "Neural Grid-based Document Unwarping",
-
-
     "tasks": {
         "dewarp": {
             "name": "Dewarp image",
-            "output": "image",
             "description": "Dewarp an document image to remove perspective distortion",
             "params": {},
-            "info": "I tried to dewarp an image"
+            "info": "I tried to dewarp an image",
+            "behaviour": "one-to-one"
         }
     }
 }

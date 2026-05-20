@@ -22,6 +22,15 @@ function filterTask(filter, task) {
 	return false
 }
 
+function resolveTaskBehaviour(service, taskId, task = {}) {
+	const taskDef = service?.tasks?.[taskId] || task || {}
+	const explicit = task?.behaviour || taskDef?.behaviour || service?.behaviour
+	if(['one-to-one', 'one-to-many', 'many-to-one'].includes(explicit)) {
+		return explicit
+	}
+	return 'one-to-one'
+}
+
 
 
 function checkService(array, service) {
@@ -192,55 +201,57 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 	}
 
 	for(var task in service.tasks) {
+		const taskConfig = service.tasks[task]
+		const behaviour = resolveTaskBehaviour(service, task, taskConfig)
 
 		// task can be disabled/enabled by service_groups
-		if(service.tasks[task].service_groups) {
-			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+		if(taskConfig.service_groups) {
+			if(!taskConfig.service_groups.some(value => user.service_groups.includes(value))) {
 				continue
 			}
 		}
 		
 		// task can be disabled for Sets
 		if(node_type == 'Set') {
-			if(service.tasks[task].set_disabled) {
+			if(taskConfig.set_disabled) {
 				continue
 			}
 		}
 
-		// task can be disabled for individual files
-		if(node_type == 'text' || node_type == 'pdf' || node_type == 'image' || node_type == 'json' ) {
-			if(service.tasks[task].set_only) {
+		// many-to-one tasks require Set inputs; legacy set_only keeps old behavior intact.
+		if(node_type !== 'Set') {
+			if(taskConfig.set_only || behaviour === 'many-to-one') {
 				continue
 			}
 		}
 		
 		// if task has its own supported types then compare to node type (NOT @type!)
-		if(service.tasks[task].supported_types && service.tasks[task].supported_types.length > 0) {
-			console.log('supported types: ', service.tasks[task].supported_types)
+		if(taskConfig.supported_types && taskConfig.supported_types.length > 0) {
+			console.log('supported types: ', taskConfig.supported_types)
 			console.log('types: ', types)
-			if(service.tasks[task].supported_types.some(value => types.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+			if(taskConfig.supported_types.some(value => types.includes(value))) {
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		// if task has its own supported formats then compare to file extension
-		} else if(service.tasks[task].supported_formats && service.tasks[task].supported_formats.length > 0) {
-			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+		} else if(taskConfig.supported_formats && taskConfig.supported_formats.length > 0) {
+			if(taskConfig.supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		
 
 		// otherwise compare file extension to service's supported formats
 		} else if(service.supported_types && service.supported_types.length > 0) {
 			if(service.supported_types.some(value => types.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 			
 		} else if(service.supported_formats && service.supported_formats.length > 0) {
 			if(service.supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		}
 		

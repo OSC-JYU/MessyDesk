@@ -5,16 +5,15 @@
     "api_type": "elg",
     "adapter": "elg_fs",
     "api": "/process",
-    "name" :"Poppler",
-    
-    "supported_types": ["pdf"],
-    "supported_formats": ["pdf"],
+    "name": "Poppler",
+    "supported_types": [
+        "pdf"
+    ],
+    "supported_formats": [
+        "pdf"
+    ],
     "set_disabled": 0,
-
     "description": "Poppler is a PDF rendering library that also includes a collection of utility binaries, which allows for the manipulation and extraction of data from PDF documents such as converting PDF files to HTML, TXT, or PostScript",
-
-
-
     "tasks": {
         "pdf2text": {
             "params": {
@@ -22,7 +21,6 @@
                 "lastPageToConvert": 0,
                 "task": "pdf2text"
             },
-            "output": "store",
             "output_set": "texts of PDF",
             "name": "Extract text from PDF",
             "description": "Extract text and produce one .txt output per input PDF file. In the recommended workflow, run this on page-split PDFs.",
@@ -38,7 +36,8 @@
                     "default": 5
                 }
             },
-            "info": "Text extracted from input PDF file"
+            "info": "Text extracted from input PDF file",
+            "behaviour": "one-to-many"
         },
         "pdf2images": {
             "params": {
@@ -46,7 +45,6 @@
                 "lastPageToConvert": 0,
                 "task": "pdf2images"
             },
-            "output": "store",
             "output_set": "PDF as images",
             "always_batch": true,
             "name": "Render PDF as images",
@@ -63,7 +61,8 @@
                     "default": 5
                 }
             },
-            "info": "Rendered image from input PDF file"           
+            "info": "Rendered image from input PDF file",
+            "behaviour": "one-to-many"
         },
         "pdfimages": {
             "params": {
@@ -71,7 +70,6 @@
                 "lastPageToConvert": 0,
                 "task": "pdfimages"
             },
-            "output": "store",
             "output_set": "images of PDF",
             "always_batch": true,
             "name": "Extract images from PDF (png)",
@@ -88,7 +86,8 @@
                     "default": 5
                 }
             },
-            "info": "Embedded images extracted from input PDF file"            
+            "info": "Embedded images extracted from input PDF file",
+            "behaviour": "one-to-many"
         },
         "thumbnail": {
             "params": {
@@ -97,11 +96,11 @@
                 "thumbnailResolution": 80,
                 "task": "thumbnail"
             },
-            "output": "store",
             "hidden": true,
             "name": "Create PDF thumbnails",
             "description": "Create preview.jpg and thumbnail.jpg for a PDF file.",
-            "info": "Creates preview and thumbnail images for first page"
+            "info": "Creates preview and thumbnail images for first page",
+            "behaviour": "one-to-many"
         }
     }
 }

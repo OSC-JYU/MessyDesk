@@ -5,16 +5,12 @@
     "api_type": "elg",
     "adapter": "dspace7",
     "api": "/process",
-    "name" :"dspace7",
+    "name": "dspace7",
     "source_url": "https://dspace.org/",
-    
     "description": "Open source digital repository software.",
-
-
     "tasks": {
         "make_query": {
             "name": "Query",
-            "output": "json",
             "description": "Get metadata from dspace7",
             "info": "{{scopeLabel}} query: {{query}}",
             "init_data": "init.json",
@@ -26,12 +22,14 @@
                     "default": "",
                     "component": "dspace"
                 }
-            },    
-            "supported_types": ["dspace7"]
+            },
+            "supported_types": [
+                "dspace7"
+            ],
+            "behaviour": "one-to-one"
         },
         "get_abstracts": {
             "name": "Get Abstracts",
-            "output": "json",
             "description": "Create one text file per item with abstract",
             "info": "",
             "params": {
@@ -47,13 +45,19 @@
                 },
                 "language_source": {
                     "default": "trust metadata",
-                    "values": ["trust metadata", "detect language"],
+                    "values": [
+                        "trust metadata",
+                        "detect language"
+                    ],
                     "name": "language source",
                     "help": "Trust metadata or detect language. NOTE: detect will give two-letter ISO 639-1 code (like en, fr, de, etc.). Uses https://github.com/CLD2Owners/cld2/blob/master/README.md",
                     "display": "dropdown"
                 }
             },
-            "supported_formats": ["dspace7.json"]
+            "supported_formats": [
+                "dspace7.json"
+            ],
+            "behaviour": "one-to-one"
         }
     }
 }

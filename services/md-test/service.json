@@ -4,15 +4,21 @@
     "type": "text",
     "adapter": "test",
     "api": "/api",
-    "name" :"Test Service",
+    "name": "Test Service",
     "source_url": "https://github.com/MD-python/MD-test",
     "status": "experimental",
-    "supported_formats": ["txt", "json", "png", "jpg", "jpeg"],
-    "supported_types": ["text", "image"],
-
+    "supported_formats": [
+        "txt",
+        "json",
+        "png",
+        "jpg",
+        "jpeg"
+    ],
+    "supported_types": [
+        "text",
+        "image"
+    ],
     "description": "Test service for queue testing",
-
-
     "tasks": {
         "test": {
             "name": "Test process",
@@ -21,7 +27,6 @@
             "params": {
                 "delay": 5
             },
-        
             "params_help": {
                 "delay": {
                     "name": "delay",
@@ -29,12 +34,14 @@
                     "help": "Delay in seconds",
                     "display": "textinput"
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
         "json": {
             "name": "Create JSON",
             "description": "Create one JSON file per input",
-            "info": "I created JSON"
+            "info": "I created JSON",
+            "behaviour": "one-to-one"
         }
     }
 }

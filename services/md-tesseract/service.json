@@ -5,19 +5,20 @@
     "api_type": "elg",
     "adapter": "elg",
     "api": "/process",
-    "name" :"Tesseract",
+    "name": "Tesseract",
     "source_url": "https://tesseract-ocr.github.io/tessdoc/",
-    
-    "supported_types": ["image"],
-    "supported_formats": ["png", "jpg", "jpeg"],
-
+    "supported_types": [
+        "image"
+    ],
+    "supported_formats": [
+        "png",
+        "jpg",
+        "jpeg"
+    ],
     "description": "Tesseract is an open source text recognition (OCR) Engine, available under the Apache 2.0 license.",
-
-
     "tasks": {
         "image2text": {
             "name": "Image to text",
-            "output": "text",
             "description": "Recognices text from images and outputs a text file",
             "params": {
                 "lang": "eng"
@@ -27,22 +28,36 @@
                     "name": "language",
                     "help": "Define the language of the text",
                     "values": [
-                        {"value":"eng", "title":"English"},
-                        {"value":"deu", "title":"Deutch"},
-                        {"value":"fin", "title":"Suomi"},
-                        {"value":"fi_frak_nlf", "title":"Fraktur (fin) by NLF"},
-                        {"value":"frk", "title":"Fraktur (deu)"}
-                        ],
-                    "display":"checkbox",
-                    "multi":true
+                        {
+                            "value": "eng",
+                            "title": "English"
+                        },
+                        {
+                            "value": "deu",
+                            "title": "Deutch"
+                        },
+                        {
+                            "value": "fin",
+                            "title": "Suomi"
+                        },
+                        {
+                            "value": "fi_frak_nlf",
+                            "title": "Fraktur (fin) by NLF"
+                        },
+                        {
+                            "value": "frk",
+                            "title": "Fraktur (deu)"
+                        }
+                    ],
+                    "display": "checkbox",
+                    "multi": true
                 }
             },
-            "info": "I tried to detect text in image assuming language {{lang}} "
+            "info": "I tried to detect text in image assuming language {{lang}} ",
+            "behaviour": "one-to-one"
         },
-
         "searchable_pdf": {
             "name": "Image to searchable PDF",
-            "output": "pdf",
             "description": "Create a PDF file from image",
             "params": {
                 "lang": "en"
@@ -52,27 +67,41 @@
                     "name": "language",
                     "help": "Define the language of the text",
                     "values": [
-                        {"value":"eng", "title":"English"},
-                        {"value":"deu", "title":"Deutch"},
-                        {"value":"fin", "title":"Suomi"},
-                        {"value":"fi_frak_nlf", "title":"Fraktur (fin) by NLF"},
-                        {"value":"frk", "title":"Fraktur (deu)"}
-                        ],
-                    "display":"checkbox",
-                    "multi":true
+                        {
+                            "value": "eng",
+                            "title": "English"
+                        },
+                        {
+                            "value": "deu",
+                            "title": "Deutch"
+                        },
+                        {
+                            "value": "fin",
+                            "title": "Suomi"
+                        },
+                        {
+                            "value": "fi_frak_nlf",
+                            "title": "Fraktur (fin) by NLF"
+                        },
+                        {
+                            "value": "frk",
+                            "title": "Fraktur (deu)"
+                        }
+                    ],
+                    "display": "checkbox",
+                    "multi": true
                 }
-            }
+            },
+            "behaviour": "one-to-one"
         },
-
-
         "orientation_detection": {
             "name": "Detect page orientation",
-            "output": "text",
             "description": "Detect orientation of image based on text",
             "params": {
                 "psm": 0
             },
-            "info": "I tried to detect orientation of image based on text."
+            "info": "I tried to detect orientation of image based on text.",
+            "behaviour": "one-to-one"
         }
     }
 }

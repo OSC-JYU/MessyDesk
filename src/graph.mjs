@@ -429,18 +429,29 @@ graph.getProject = async function (rid, user_rid) {
 graph.isSearchOutputTask = function(service, task) {
 	const taskId = task?.id
 	const taskDef = taskId ? service?.tasks?.[taskId] : null
-	const output = String(task?.output || taskDef?.output || '').toLowerCase()
+	const behaviour = this.resolveTaskBehaviour(service, task)
 	const searchOutput = task?.search_output ?? taskDef?.search_output
 	if(searchOutput === true) return true
-	if(['search', 'search-set', 'search_set', 'search-output', 'search_output'].includes(output)) return true
 
 	const serviceType = String(service?.type || '').toLowerCase()
 	const serviceId = String(service?.id || '').toLowerCase()
-	if(output === 'many-to-one' && (serviceType === 'solr' || serviceType === 'faiss' || serviceId.includes('solr') || serviceId.includes('faiss'))) {
+	if(behaviour === 'many-to-one' && (serviceType === 'solr' || serviceType === 'faiss' || serviceId.includes('solr') || serviceId.includes('faiss'))) {
 		return true
 	}
 
 	return false
+}
+
+graph.resolveTaskBehaviour = function(service, task = {}) {
+	const taskId = task?.id
+	const taskDef = taskId ? service?.tasks?.[taskId] : null
+
+	const explicit = String(task?.behaviour || taskDef?.behaviour || service?.behaviour || '').toLowerCase()
+	if(['one-to-one', 'one-to-many', 'many-to-one'].includes(explicit)) {
+		return explicit
+	}
+
+	return 'one-to-one'
 }
 
 
@@ -989,7 +1000,8 @@ graph.createRequestsFromPipeline = async function(data, file_rid, roi) {
 // Some services have long processing time (especially PDF services), so we need to add those to batch queue
 // These services have 'batch' property in service.json
 graph.getQueueName = function(service, data, topic) {
-	if(service.tasks[data.task] && service.tasks[data.task].always_batch) {
+	const taskId = data?.task || data?.id
+	if(taskId && service?.tasks?.[taskId] && service.tasks[taskId].always_batch) {
 		return topic + '_batch'
 	}
 	return topic	
@@ -1066,8 +1078,10 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 	}
 
 	// if output of task is "Set", then create Set node and link it to Process node
-	if(service.tasks[task.id] && service.tasks[task.id].output_set) {
-		var setNode = await this.createOutputSetNode(service.tasks[task.id].output_set, msg.process)
+	const behaviour = this.resolveTaskBehaviour(service, task)
+	if(behaviour === 'one-to-many') {
+		const outputSetLabel = service?.tasks?.[task.id]?.output_set || task?.output_set || task?.name || task?.id || 'Output set'
+		var setNode = await this.createOutputSetNode(outputSetLabel, msg.process)
 		msg.output_set = setNode['@rid']
 		msg.set_node = setNode
 	}
@@ -1416,7 +1430,8 @@ graph.createSetAndProcessNodes = async function (service, task, filegraph ) {
 	}
 
 	// create process output Set
-	if(service.external_tasks || service.tasks[task.id].output != 'always file') {
+	const behaviour = this.resolveTaskBehaviour(service, task)
+	if(service.external_tasks || behaviour !== 'many-to-one') {
 		setNode = await this.create('Set', {})
 		if(set_project_rid) {
 			await this.setNodeAttribute_old(setNode['@rid'], {key: 'project_rid', value: set_project_rid}, 'Set')
