@@ -20,6 +20,20 @@ Things you can do:
 
 Development in progress.
 
+### Help And Tutorial Pages
+
+Help content lives in `docs/help/*.md` and is converted to HTML for the UI/backend help endpoint.
+
+Help images should be stored in `docs/images`. In help markdown, you can reference image files by bare filename (for example `![Diagram](input_output.png)`), and the build will resolve them automatically.
+
+Build help pages with:
+
+```bash
+npm run build:help
+```
+
+Generated files are written to `public/help` and served by `GET /api/help/{slug?}`.
+
 
 ### How does it work?
 

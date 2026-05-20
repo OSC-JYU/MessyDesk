@@ -29,8 +29,15 @@ export default [
             console.log('POST /api/nomad/service/{name}');
             console.log(request.params.name);
             const adapter = await services.getServiceAdapterByName(request.params.name);
+            const hclOverride = request.payload?.nomad_hcl;
+
+            const serviceConfig = { ...adapter };
+            if (typeof hclOverride === 'string' && hclOverride.trim().length > 0) {
+                serviceConfig.nomad_hcl = hclOverride;
+                serviceConfig.nomad = true;
+            }
             try {
-                const service = await nomad.createService(adapter);
+                const service = await nomad.createService(serviceConfig);
                 return service;
             } catch(e) {
                 logger.error('Error creating service', { error: e });

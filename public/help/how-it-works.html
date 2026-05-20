@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - How It Works</title>
+  <style>
+    :root {
+      --bg: #f2f7f8;
+      --panel: #ffffff;
+      --line: #d6e4e8;
+      --text: #21313b;
+      --accent: #0f8a8f;
+      --accent-soft: #e6f6f7;
+    }
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 15% 10%, #e0f3f4 0%, #f7fbfc 35%, #eef3f6 100%);
+      color: var(--text);
+      font-family: "Segoe UI", "Noto Sans", sans-serif;
+      line-height: 1.6;
+    }
+    .page {
+      max-width: 1060px;
+      padding: 24px 18px 48px;
+    }
+    .help-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+      margin-top: 18px;
+    }
+    .help-nav a {
+      text-decoration: none;
+      color: #0f5d61;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 14px;
+    }
+    .help-nav a.active {
+      background: var(--accent-soft);
+      border-color: #7fc8cb;
+      color: #0a4c50;
+      font-weight: 600;
+    }
+    .content {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 10px 25px rgba(12, 44, 56, 0.08);
+    }
+    h1, h2, h3 { color: #113944; }
+    pre {
+      background: #1e2c34;
+      color: #eaf4f7;
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    code {
+      font-family: "Fira Mono", "Consolas", monospace;
+      font-size: 0.92em;
+    }
+    a { color: #0f6f75; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a class="active" href="/help/how-it-works">How It Works</a><a href="/help/search">Search</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h2>How It All Works Together</h2>
+<p>MessyDesk is built on five core components that work together to process files. This introduction explains how each part functions and how they connect.</p>
+<p>Imagine you want to extract text from a image using OCR. You upload your image file to MessyDesk and choose OCR service. The system creates a message that says &quot;take this image file and run OCR on it.&quot; This message goes into a queue, waiting for the OCR service to be ready. When ready, the service processes your file and returns the results. The outputs are saved as new files, which you can then process further if needed.</p>
+<h2>Files</h2>
+<p>Everything in MessyDesk revolves around files. You start with files—PDFs, images, documents—and when you process them, the results are also files. A processed PDF might become multiple text files, or an image might generate thumbnails and metadata files. Files flow through the system, being transformed step by step into the information you need.</p>
+<p><img src="/api/help/images/image-file.jpg" alt="Image file"></p>
+<p>Files are organized in your project folders, and each processing step creates new files that you can view, download, or process further. This file-centric approach makes it easy to see what happened at each stage.</p>
+<h2>Services</h2>
+<p>Services are the tools that do the actual work. Think of them as specialized helpers: one might extract text from images (OCR), another might analyze language patterns, and another might resize or format pictures. Each service knows how to handle specific types of files and can perform particular tasks.</p>
+<p>Services are independent applications that can run anywhere—on your local computer, on a server cluster, or even in the cloud. This flexibility means MessyDesk can use powerful tools without needing to install everything directly. </p>
+<h2>Tasks</h2>
+<p>Tasks are what users see as &quot;Crunchers&quot; in the interface. Each task is a specific job a service can do—like &quot;extract text&quot; or &quot;rotate image&quot; or &quot;detect language.&quot; When you click a Cruncher, you&#39;re telling MessyDesk: &quot;run this task on this file.&quot;</p>
+<p>Tasks are defined in service configuration files, which tell MessyDesk what each service can do, what types of files it accepts, and what parameters you can adjust. This setup makes it relatively easy to add new capabilities.</p>
+<h2>Messages</h2>
+<p>Messages are like work orders that travel with your file through the system. When you start processing a file, MessyDesk creates a message that contains everything needed: which file to process, which task to run, any settings you chose, and where to save the results.</p>
+<p>The message follows your file from start to finish. It goes to the service with instructions, the service processes according to those instructions, and then the message comes back with the results. Messages are stored on the file system, so you can always see what was requested and what happened.</p>
+<h2>Queues</h2>
+<p>Processing files can take time and use significant resources. To prevent overwhelming the system, MessyDesk uses queues to organize work. Think of it like a waiting line at a busy store—when you request processing, your task joins a queue. The system processes tasks one at a time (or a few at a time), ensuring everything runs smoothly without crashing under too much simultaneous work.</p>
+<p>Queues ensure that each service gets work in an orderly fashion. Instead of everyone&#39;s requests hitting a service at once and causing problems, they wait their turn. This makes the system reliable even when many people are using it at the same time.</p>
+
+    </article>
+  </main>
+</body>
+</html>

@@ -2,9 +2,213 @@ import path from 'path';
 import fs from 'fs';
 
 import nomad from './nomad.mjs';
+import { DATA_DIR } from './env.mjs';
 //const queue = require('./queue.js');
 
 const services = {service_list: {}}
+services.registry_file_path = process.env.SERVICE_REGISTRY_PATH || path.join(DATA_DIR, 'service-registry.json')
+
+const ALLOWED_BEHAVIOURS = ['one-to-one', 'one-to-many', 'many-to-one']
+
+function nowIso() {
+	return new Date().toISOString()
+}
+
+function ensureRegistrationMetadata(service, source = 'runtime') {
+	const current = service.registration || {}
+	return {
+		source,
+		registered_at: current.registered_at || current.last_seen || nowIso(),
+		last_seen: nowIso()
+	}
+}
+
+function mergeServiceWithDescriptor(existing = {}, descriptor = {}, source = 'runtime') {
+	const merged = {
+		...(existing || {}),
+		...(descriptor || {}),
+		consumers: Array.isArray(existing?.consumers) ? existing.consumers : []
+	}
+
+	if(existing?.path && !descriptor.path) merged.path = existing.path
+	if(existing?.nomad_hcl && !descriptor.nomad_hcl) merged.nomad_hcl = existing.nomad_hcl
+	if(existing?.nomad !== undefined && descriptor.nomad === undefined) merged.nomad = existing.nomad
+	if(existing?.url && !descriptor.url) merged.url = existing.url
+
+	merged.registration = ensureRegistrationMetadata(merged, source)
+
+	return merged
+}
+
+async function ensureRegistryDirectoryExists(filePath) {
+	const dir = path.dirname(filePath)
+	await fs.promises.mkdir(dir, { recursive: true })
+}
+
+async function readRegistryFile(filePath) {
+	try {
+		const content = await fs.promises.readFile(filePath, 'utf-8')
+		const parsed = JSON.parse(content)
+		if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { version: 1, services: {} }
+		if(!parsed.services || typeof parsed.services !== 'object' || Array.isArray(parsed.services)) {
+			return { version: 1, services: {} }
+		}
+		return parsed
+	} catch(error) {
+		if(error.code === 'ENOENT') {
+			return { version: 1, services: {} }
+		}
+		throw error
+	}
+}
+
+async function writeRegistryFile(filePath, data) {
+	await ensureRegistryDirectoryExists(filePath)
+	await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+function registryEntriesToServiceMap(registryData) {
+	const result = {}
+	const entries = registryData?.services || {}
+	for(const [serviceId, entry] of Object.entries(entries)) {
+		if(!entry || typeof entry !== 'object') continue
+		const descriptor = entry.descriptor || {}
+		if(!descriptor.id) continue
+		result[serviceId] = {
+			...descriptor,
+			registration: {
+				source: entry.source || 'registry',
+				registered_at: entry.registered_at || entry.last_seen || nowIso(),
+				last_seen: entry.last_seen || entry.registered_at || nowIso()
+			}
+		}
+	}
+	return result
+}
+
+function serviceMapToRegistryEntries(serviceMap) {
+	const entries = {}
+	for(const [serviceId, service] of Object.entries(serviceMap || {})) {
+		if(!service || typeof service !== 'object') continue
+		const {
+			consumers,
+			path: _path,
+			nomad_hcl,
+			url,
+			registration,
+			...descriptor
+		} = service
+		entries[serviceId] = {
+			source: registration?.source || 'runtime',
+			registered_at: registration?.registered_at || nowIso(),
+			last_seen: registration?.last_seen || nowIso(),
+			descriptor
+		}
+	}
+	return entries
+}
+
+function overlayRegistryServices(baseServices = {}, registryServices = {}) {
+	const merged = { ...baseServices }
+	for(const [serviceId, registryService] of Object.entries(registryServices)) {
+		const existing = merged[serviceId] || {}
+		merged[serviceId] = mergeServiceWithDescriptor(existing, registryService, registryService?.registration?.source || 'registry')
+	}
+	return merged
+}
+
+function createValidationError(message) {
+	const error = new Error(message)
+	error.statusCode = 400
+	return error
+}
+
+function asStringArray(value, fieldName) {
+	if(value === undefined) return undefined
+	if(!Array.isArray(value)) {
+		throw createValidationError(`${fieldName} must be an array`)
+	}
+	return value.map((v) => String(v).toLowerCase())
+}
+
+function normalizeTaskDescriptor(serviceDescriptor, taskName, taskValue) {
+	if(!taskValue || typeof taskValue !== 'object' || Array.isArray(taskValue)) {
+		throw createValidationError(`tasks.${taskName} must be an object`)
+	}
+
+	if(taskValue.behaviour !== undefined && !ALLOWED_BEHAVIOURS.includes(taskValue.behaviour)) {
+		throw createValidationError(`tasks.${taskName}.behaviour is invalid`)
+	}
+
+	const behaviour = resolveTaskBehaviour(serviceDescriptor, taskName, taskValue)
+	if(!ALLOWED_BEHAVIOURS.includes(behaviour)) {
+		throw createValidationError(`tasks.${taskName}.behaviour is invalid`)
+	}
+
+	const normalizedTask = {
+		...taskValue,
+		behaviour
+	}
+
+	const supportedTypes = asStringArray(taskValue.supported_types, `tasks.${taskName}.supported_types`)
+	if(supportedTypes !== undefined) {
+		normalizedTask.supported_types = supportedTypes
+	}
+
+	const supportedFormats = asStringArray(taskValue.supported_formats, `tasks.${taskName}.supported_formats`)
+	if(supportedFormats !== undefined) {
+		normalizedTask.supported_formats = supportedFormats
+	}
+
+	return normalizedTask
+}
+
+function normalizeServiceDescriptor(rawDescriptor = {}) {
+	if(!rawDescriptor || typeof rawDescriptor !== 'object' || Array.isArray(rawDescriptor)) {
+		throw createValidationError('service descriptor must be an object')
+	}
+
+	if(!rawDescriptor.id || typeof rawDescriptor.id !== 'string') {
+		throw createValidationError('service descriptor id is required')
+	}
+
+	const id = rawDescriptor.id.trim()
+	if(id.length === 0) {
+		throw createValidationError('service descriptor id must not be empty')
+	}
+
+	if(rawDescriptor.tasks !== undefined && (typeof rawDescriptor.tasks !== 'object' || Array.isArray(rawDescriptor.tasks))) {
+		throw createValidationError('tasks must be an object when provided')
+	}
+
+	const normalizedDescriptor = {
+		...rawDescriptor,
+		id
+	}
+
+	const supportedTypes = asStringArray(rawDescriptor.supported_types, 'supported_types')
+	if(supportedTypes !== undefined) {
+		normalizedDescriptor.supported_types = supportedTypes
+	}
+
+	const supportedFormats = asStringArray(rawDescriptor.supported_formats, 'supported_formats')
+	if(supportedFormats !== undefined) {
+		normalizedDescriptor.supported_formats = supportedFormats
+	}
+
+	const serviceBehaviour = rawDescriptor.behaviour
+	if(serviceBehaviour !== undefined && !ALLOWED_BEHAVIOURS.includes(serviceBehaviour)) {
+		throw createValidationError('behaviour is invalid')
+	}
+
+	const tasks = rawDescriptor.tasks || {}
+	normalizedDescriptor.tasks = {}
+	for(const [taskName, taskValue] of Object.entries(tasks)) {
+		normalizedDescriptor.tasks[taskName] = normalizeTaskDescriptor(normalizedDescriptor, taskName, taskValue)
+	}
+
+	return normalizedDescriptor
+}
 
 function filterTask(filter, task) {
 	// When filter is provided, we return only tasks that has that filter that matches to query filter
@@ -88,7 +292,10 @@ services.loadServiceAdapters = async function (service_path = 'services', nomad_
 
 		}
 
-		this.service_list = await markRegisteredAdapter(servicesObject, nomad_bool)
+		const fileServices = await markRegisteredAdapter(servicesObject, nomad_bool)
+		const registryData = await readRegistryFile(this.registry_file_path)
+		const registryServices = registryEntriesToServiceMap(registryData)
+		this.service_list = overlayRegistryServices(fileServices, registryServices)
 
 		return this.service_list
 
@@ -123,6 +330,44 @@ services.getServices = function () {
 
 services.getService = function (service) {
 	return this.service_list[service]
+}
+
+services.registerServiceDescriptor = function (rawDescriptor, options = {}) {
+	const descriptor = normalizeServiceDescriptor(rawDescriptor)
+	const source = options.source || 'runtime'
+	const existing = this.service_list[descriptor.id]
+	const merged = mergeServiceWithDescriptor(existing, descriptor, source)
+
+	this.service_list[descriptor.id] = merged
+
+	return {
+		status: existing ? 'updated' : 'created',
+		service: merged
+	}
+}
+
+services.setRegistryFilePath = function(filePath) {
+	this.registry_file_path = filePath
+}
+
+services.loadServiceRegistry = async function() {
+	const registryData = await readRegistryFile(this.registry_file_path)
+	return registryEntriesToServiceMap(registryData)
+}
+
+services.persistServiceRegistry = async function() {
+	const data = {
+		version: 1,
+		services: serviceMapToRegistryEntries(this.service_list)
+	}
+	await writeRegistryFile(this.registry_file_path, data)
+	return data
+}
+
+services.registerServiceDescriptorAndPersist = async function(rawDescriptor, options = {}) {
+	const response = this.registerServiceDescriptor(rawDescriptor, options)
+	await this.persistServiceRegistry()
+	return response
 }
 
 services.getServicesForNode = async function(node, filter, user, prompts) {

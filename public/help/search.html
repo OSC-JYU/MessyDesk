@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - Search</title>
+  <style>
+    :root {
+      --bg: #f2f7f8;
+      --panel: #ffffff;
+      --line: #d6e4e8;
+      --text: #21313b;
+      --accent: #0f8a8f;
+      --accent-soft: #e6f6f7;
+    }
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 15% 10%, #e0f3f4 0%, #f7fbfc 35%, #eef3f6 100%);
+      color: var(--text);
+      font-family: "Segoe UI", "Noto Sans", sans-serif;
+      line-height: 1.6;
+    }
+    .page {
+      max-width: 1060px;
+      padding: 24px 18px 48px;
+    }
+    .help-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+      margin-top: 18px;
+    }
+    .help-nav a {
+      text-decoration: none;
+      color: #0f5d61;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 14px;
+    }
+    .help-nav a.active {
+      background: var(--accent-soft);
+      border-color: #7fc8cb;
+      color: #0a4c50;
+      font-weight: 600;
+    }
+    .content {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 10px 25px rgba(12, 44, 56, 0.08);
+    }
+    h1, h2, h3 { color: #113944; }
+    pre {
+      background: #1e2c34;
+      color: #eaf4f7;
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    code {
+      font-family: "Fira Mono", "Consolas", monospace;
+      font-size: 0.92em;
+    }
+    a { color: #0f6f75; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a class="active" href="/help/search">Search</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>Search</h1>
+<p>Search is a core functionality for exploring text-based research material within your project graph.</p>
+<p><img src="/api/help/images/search_index.jpg" alt="search"></p>
+<p>By connecting a <strong>Search index</strong> cruncher to your text files, you add those texts to a shared search index. Once indexed, you can run queries across the entire dataset.</p>
+<blockquote>
+<p>⚠️ <strong>Note:</strong> No data is indexed by default. </p>
+</blockquote>
+<p>When you delete a Search cruncher, all associated text files are automatically removed from the search index. This graph-based approach keeps the indexing process transparent and gives you total control over your data.</p>
+<h2>Why this approach?</h2>
+<ul>
+<li><strong>Version Control:</strong> When running different text-processing experiments, you often generate multiple iterations of the same source text. This approach ensures your search results aren&#39;t cluttered with unwanted text variants.</li>
+<li><strong>Granular Pipeline Indexing:</strong> You can decide exactly <em>what</em> stage of your pipeline gets indexed. For example, you might generate a lemmatized token list from your corpus and choose to index only that list, while still using the search results to navigate back to the original source texts.</li>
+<li><strong>Performance Optimization:</strong> Digital humanities workflows can produce massive search indexes, especially when using intensive $n$-gram-based indexing to maximize discovery. By opting into indexing rather than automating it, you can utilize precise $n$-gram settings without bloating your storage with unused index data.</li>
+</ul>
+<h2>Re-indexing</h2>
+<p>Occasionally, a search index can become corrupted or out of sync (for instance, due to interrupted processing or failed update requests). To resolve this, the platform provides a project-wide utility to completely rebuild your search index data from scratch.</p>
+
+    </article>
+  </main>
+</body>
+</html>

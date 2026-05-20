@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - Working with Sets</title>
+  <style>
+    :root {
+      --bg: #f2f7f8;
+      --panel: #ffffff;
+      --line: #d6e4e8;
+      --text: #21313b;
+      --accent: #0f8a8f;
+      --accent-soft: #e6f6f7;
+    }
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at 15% 10%, #e0f3f4 0%, #f7fbfc 35%, #eef3f6 100%);
+      color: var(--text);
+      font-family: "Segoe UI", "Noto Sans", sans-serif;
+      line-height: 1.6;
+    }
+    .page {
+      max-width: 1060px;
+      padding: 24px 18px 48px;
+    }
+    .help-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 18px;
+      margin-top: 18px;
+    }
+    .help-nav a {
+      text-decoration: none;
+      color: #0f5d61;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 14px;
+      font-size: 14px;
+    }
+    .help-nav a.active {
+      background: var(--accent-soft);
+      border-color: #7fc8cb;
+      color: #0a4c50;
+      font-weight: 600;
+    }
+    .content {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 24px;
+      box-shadow: 0 10px 25px rgba(12, 44, 56, 0.08);
+    }
+    h1, h2, h3 { color: #113944; }
+    pre {
+      background: #1e2c34;
+      color: #eaf4f7;
+      border-radius: 8px;
+      padding: 14px;
+      overflow-x: auto;
+    }
+    code {
+      font-family: "Fira Mono", "Consolas", monospace;
+      font-size: 0.92em;
+    }
+    a { color: #0f6f75; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/search">Search</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a class="active" href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>Working with Sets</h1>
+<p>You can think of <strong>Sets</strong> as folders, with one major distinction: <strong>Sets cannot be nested.</strong> There are no subfolders within a set; they are strictly flat collections of files.</p>
+<p>Sets are designed to enable the batch processing of files. Just as you would connect a cruncher to an individual file node, you can connect that same cruncher to an entire set to process all its files simultaneously.</p>
+<p><img src="/api/help/images/sets.jpg" alt="An input set of images passing through an &#39;Image to text&#39; OCR cruncher to output a set of text files"></p>
+<h2>Batch Processing</h2>
+<p>When you pass a set through a cruncher, MessyDesk processes every item inside that collection using the same parameters. </p>
+<p>As shown in the example above, passing a set of two images through an <strong>Image to text</strong> cruncher automatically generates a matching output set containing the extracted text files (<code>.txt</code>) for each corresponding image.</p>
+<p>Note that crunchers can behave three distinct ways with sets.</p>
+<ul>
+<li><strong>One-to-One:</strong> Each input file produces exactly one corresponding output file. For example, passing a set of images through an <strong>Image to text</strong> (OCR) cruncher creates a matching set of individual text files.</li>
+<li><strong>One-to-Many:</strong> A single input file is expanded into multiple output files, automatically forming a new set. For example, applying a <strong>PDF Split</strong> cruncher to a single multi-page PDF node expands it into a set containing its individual pages.</li>
+<li><strong>Many-to-One:</strong> An entire set of input files is consolidated into a single output node. For example, applying a <strong>JSON to CSV</strong> cruncher to a set of separate JSON data files aggregates them into a single, unified CSV spreadsheet.</li>
+</ul>
+<h2>Creating Sets Efficiently</h2>
+<p>Manually adding files to a set one by one is tedious. The quickest and most efficient way to build a set is to leverage the ZIP workflow:</p>
+<ol>
+<li>Compress your working files into a <code>.zip</code> archive on your computer.</li>
+<li>Import that ZIP file into MessyDesk.</li>
+<li>Apply an <strong>Unzip</strong> cruncher to the archive node.</li>
+</ol>
+<p>The cruncher will automatically extract the files and create a set, ready for batch crunching.</p>
+<h2>Exporting sets</h2>
+<p>Once you are done processing your data, you can easily download your results. Simply select the desired set node in the interface graph and click <strong>Download set</strong> to export the entire collection back to your computer as a structured ZIP file.</p>
+
+    </article>
+  </main>
+</body>
+</html>

@@ -69,6 +69,20 @@ export default [
         }
     },
     {
+        method: 'POST',
+        path: '/api/services/register',
+        handler: async (request, h) => {
+            try {
+                const source = request.payload?.source || request.query?.source || 'runtime';
+                const descriptor = request.payload?.service || request.payload;
+                return await services.registerServiceDescriptorAndPersist(descriptor, { source });
+            } catch (error) {
+                const code = error.statusCode || 500;
+                return h.response({ error: error.message }).code(code);
+            }
+        }
+    },
+    {
         method: 'DELETE', 
         path: '/api/services/{service}/adapter/{id}',
         handler: async (request) => {

@@ -1,0 +1,201 @@
+
+1. # Clever Splitted files browsing 
+In UI clever browsing means that files that are splitted from original file are browsed by their origin file. For example in the case of set of PDF files there can be thousands of pages and it makes sense that user first sees the original PDF as starting point and clicking that shows the pages of that file.
+
+This requires changes in backend (how Set files are queried) and UI in SetViewNode. 
+
+Plan:
+1. Define data contract for split file browsing
+- Add/confirm file metadata links needed for grouping: original source rid, parent rid, split index (page/order), and display title.
+- Decide API response shape for grouped Set browsing (group node + child files) and keep backward compatibility for old consumers.
+
+2. Backend: grouped Set query endpoint behavior
+- Update Set file query logic so results can be returned grouped by original source file.
+- Include sorting rules: groups by source title/name, children by split index/page number.
+- Add a mode/flag so UI can request grouped vs flat results during rollout.
+
+3. Backend: process and graph consistency
+- Ensure split-producing flows always write source linkage fields for every split file.
+
+
+4. UI: SetViewNode grouped browsing
+- Load grouped Set response and render source files as first-level entries.
+- On click/expand of a source file, render its split children (pages/chunks) with paging controls.
+- Preserve existing actions (open, queue, select, delete) for both parent and child rows.
+
+5. UX safeguards and performance
+- Add lazy loading/virtualized rendering for large sets.
+- Keep URL/state so reloading preserves selected source group and page position.
+
+6. Tests and rollout
+- Backend tests: grouped query shape, sort order, fallback behavior, and flat-mode compatibility.
+- UI tests: expand/collapse, navigation between grouped children, and action behavior.
+- Roll out behind a feature flag, verify on large PDF projects, then make grouped mode default.
+
+Summary:
+Implement grouped Set browsing where split files are shown under their original source file. The backend will expose grouped query results based on source-link metadata, and SetViewNode will display a two-level browser (source -> pages/chunks) with preserved existing file actions. Add migration support for legacy data, performance protections for large sets, and test coverage before enabling by default.
+
+
+2. # Clever combine of PDF pages
+many-to-one crunchers must "group" files by their root source file (if there is such. We exclude ZIP files from this inspection). So, let's say there are several PDF files splitted to pages. Now if user extract texts from those pages and then combines them, then the result should be one text file per original pdf file.
+
+EXAMPLE:
+file1.pdf -> SPLITTED -> page_001.pdf -> TEXT EXTRACTED -> page_001.pdf.txt
+                         page_002.pdf -> TEXT EXTRACTED -> page_002.pdf.txt
+file2.pdf -> SPLITTED -> page_001.pdf -> TEXT EXTRACTED -> page_001.pdf.txt
+
+When texts are joined there would be file1.pdf.txt and file2.pdf.txt
+
+In practice this is done by MessyDesk backend when creating queue messages.
+
+UI:
+This does not require UI changes
+
+Plan:
+1. Define grouping contract for many-to-one tasks
+- Add a queue-time grouping mode for many-to-one tasks: `group_by_root_source`.
+- Define root source resolution rule: walk `DERIVED_FROM` ancestry until the highest non-ZIP `File` is found; if none, fallback to direct input file.
+
+2. Implement root-source resolver in backend graph layer
+- Add a helper that resolves a file's root source rid/label with bounded traversal and query batching.
+- Explicitly ignore ZIP as root boundary (`type == 'zip'`), and continue traversal above it when possible.
+
+3. Update queue message creation for many-to-one
+- In set queue dispatch for many-to-one tasks, partition input files by resolved root source rid.
+- Create one logical combine run per group (same task/process metadata, group-specific file list).
+
+4. Output naming and metadata consistency
+- Build output label from root source label (e.g. `file1.pdf.txt`).
+- Write provenance metadata to output file/process: `root_source_rid`, `root_source_label`, `group_size`.
+
+5. Process accounting and safety
+- Ensure `current_file`/`total_files` are tracked per group and also aggregated for batch progress.
+- Keep idempotency guard so retries do not emit duplicate combined files for same `process + root_source_rid`.
+
+6. Tests and rollout
+- Unit tests for resolver: simple chain, multi-hop chain, ZIP exclusion, missing ancestry fallback.
+- Integration tests for many-to-one dispatch: mixed input set should produce one output per root PDF.
+- Enable by default for PDF-derived many-to-one tasks; keep optional task flag for other types.
+
+Summary:
+For many-to-one processing, backend will group input files by their root non-ZIP ancestor file (typically original PDF) before dispatch. Each group is combined separately, producing one output per original PDF with stable provenance metadata and deterministic naming.
+
+
+3. # Versioning of file
+
+Add endpoint /files/version that uploads file and replaces the original file while saving the original file with .original suffix.
+Endpoint also writes "edited" property (task, time and user) to File node. This also calls thumbnail generation.
+
+Although this is named as versioning, we can only have one version currently.
+
+Add endpoint /files/revert that removes edited file and restores original. Also "edited" property must be deleted from File node. This also calls thumbnail creation.
+
+This is used in UI when user rotates image or corrects OCR text for example.
+
+UI:
+add "Create edited version" to image and text displays. For texts user can edit text and save. For images, there is rotate button (90 degree steps) and save buttton.
+
+Plan:
+1. Define endpoint contracts and edited metadata shape
+- Add `POST /api/files/{file_rid}/version` and `POST /api/files/{file_rid}/revert` in `src/routes/files.mjs`.
+- Request payload for version: `{ content?: string, operation?: "rotate", params?: { degrees: 90|180|270 } }`.
+- Store `edited` metadata on `File` node as object: `{ task, time, user, original_path }`.
+
+2. Backend: implement create edited version
+- Resolve file with `Graph.getUserFileMetadata` and verify ownership/access.
+- Move original file at `file.path` to `<same-filename>.original` (single-version policy: overwrite existing `.original` if needed).
+- Write edited file to original path:
+    - text-like files (`text`, `json`, `csv`, `html`): write payload content.
+    - images: execute rotate operation and persist to same path.
+- Persist `edited` on the `File` node and refresh metadata where needed.
+
+3. Backend: implement revert flow
+- Validate that `<file>.original` exists; if missing, return clear 409/404.
+- Remove current edited file, move `.original` back to original file path.
+- Remove `edited` field from `File` node (set to `null`/unset).
+- Recompute metadata if file dimensions/type-related properties changed.
+
+4. Thumbnail regeneration and UI update events
+- Reuse existing thumbnail queue path in `src/routes/files.mjs` (`md-thumbnailer` for images, `md-poppler` for pdf if needed).
+- Trigger thumbnail generation after both version and revert operations.
+- Emit websocket update to refresh current file card/view for the active user.
+
+5. Graph attribute support and safety
+- Extend editable node attribute allowlist in `src/graph.mjs` to include `edited` (or add dedicated helper for this field).
+- Sanitize and bound payload size for text edits.
+- Add file-system safety checks to prevent path traversal and cross-project writes.
+
+6. UI integration (MessyDesk-UI)
+- Add web client methods in `src/web.js`: `createFileVersion(fileRid, payload)` and `revertFileVersion(fileRid)`.
+- In `src/components/displays/ImageDisplay.vue` and `src/components/displays/MultiDisplay.vue`, add:
+    - `Create edited version` action,
+    - rotate controls (90-degree steps),
+    - save button that calls version endpoint.
+- In `src/components/displays/TextDisplay.vue` (and/or `TextRawDisplay.vue`), add text edit mode with save and revert buttons.
+- Show edited badge/state when `file.edited` exists.
+
+7. Tests and rollout
+- Backend tests: version create, single-version overwrite behavior, revert success, revert without `.original`, metadata updates, auth guard.
+- UI tests: text edit/save/revert, image rotate/save/revert, thumbnail refresh and edited badge.
+- Roll out behind a feature flag (`FILE_VERSIONING=true`), then enable by default after validation.
+
+Summary:
+Add single-version file editing with two endpoints that swap file contents in-place while keeping one backup (`.original`), store `edited` provenance in the File node, and regenerate thumbnails after save/revert. UI gets explicit edit/save/revert actions for text and image displays with visible edited status.
+
+
+4. # Search DONE
+Search may be the most important function of MessyDesk. 
+
+4.1 There must be way to re-index project. 
+Implement DELETE /api/search that drop user's search index
+- deletes records from SOLR where user is current user
+
+Implement POST /api/search/reindex that re-indexes users search indices
+- finds all Process and SetProcess nodes where service = "solr" and task_id="index"
+- Adds items back
+
+UI:
+rebuild search interface. Make browsing of search set possible like browsing a Set (arrow buttons etc.)
+
+Status: implemented
+
+5. # Tags
+Restructure tag UI
+- Tag-pad: User select a plate of tags that can be visually re-arranged + hot keys. For rapid tagging
+- Tag hierarhy editor
+- Tag metadata editor (description, person data etc.)
+
+6. # Set operators
+
+## Set selectors DONE
+With Set selectors one can create sets based on tags or file properties. Selectors are crunchers but under Filters. Selector create a new File nodes but is does not copy actual files. Original file path is just copied to new File. 
+
+## Set combine
+Set combine can be used to combine two or more Sets. No new files are created, just new File nodes.
+
+Decide where the code lives (backend or adapter).
+- This needs reference File node, so that we do not create duplicate bitstreams.
+
+7. # Replace imaginary with sharp
+Sharp image library is better choise for thumbnailing and image processing tasks.
+
+Thumbnailer must use direct file access, not rest api. Because of that we can build thumbnailer directly to consumer.
+
+8. Selective zip extract DONE
+User can choose what file formats to extract (or extract each file type to different set) DONE
+
+9. Image de-duplication
+
+10. # Tutorials *partly* DONE
+
+- Copy project feature (user can copy demo project for himself)
+- self-contained help files
+
+11. Replace NATS-jetstreams?
+- might be overkill
+- simple db-based solution might be better -> messages are written to db and consumed from there. SQLite?
+
+12. Option for user to set node render style
+- how much data is shown. Could per node/generic setting.
+
+13. PDF size and page count.

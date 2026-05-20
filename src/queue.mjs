@@ -16,12 +16,86 @@ import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-i
 const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
 const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
 const LOG_QUEUE_CONTEXT = ['1', 'true', 'yes', 'on'].includes(String(process.env.LOG_QUEUE_CONTEXT || '').trim().toLowerCase())
+const NATS_PRUNE_STALE_CONSUMERS = ['1', 'true', 'yes', 'on'].includes(String(process.env.NATS_PRUNE_STALE_CONSUMERS || '').trim().toLowerCase())
+const NATS_STALE_CONSUMER_IDLE_MS = Number(process.env.NATS_STALE_CONSUMER_IDLE_MS || 24 * 60 * 60 * 1000)
 
 const nats = {}
 
 nats.pausedBatches = new Set()
 nats.cancelledBatches = new Set()
 nats._queueContextSampledTopics = new Set()
+
+function readCounter(info, key) {
+  const top = Number(info?.[key])
+  if(Number.isFinite(top)) return top
+  const fromState = Number(info?.state?.[key])
+  if(Number.isFinite(fromState)) return fromState
+  return 0
+}
+
+function getConsumerName(info) {
+  return info?.name || info?.config?.durable_name || ''
+}
+
+function getConsumerTimestamp(info) {
+  const ts = info?.ts || info?.created || info?.state?.ts
+  if(!ts) return null
+  const parsed = Date.parse(ts)
+  if(Number.isNaN(parsed)) return null
+  return parsed
+}
+
+function isSafeToPruneConsumer(info, idleMsThreshold) {
+  const pending = readCounter(info, 'num_pending')
+  const ackPending = readCounter(info, 'num_ack_pending')
+  if(pending > 0 || ackPending > 0) {
+    return false
+  }
+
+  const ts = getConsumerTimestamp(info)
+  if(ts === null) {
+    return false
+  }
+
+  const idleMs = Date.now() - ts
+  return idleMs >= idleMsThreshold
+}
+
+nats.reconcileProcessConsumers = async function(expectedConsumers = new Set()) {
+  if(!NATS_PRUNE_STALE_CONSUMERS) {
+    return { scanned: 0, removed: 0, skipped: 0 }
+  }
+
+  let scanned = 0
+  let removed = 0
+  let skipped = 0
+
+  const lister = await this.jsm.consumers.list('PROCESS')
+  for await (const info of lister) {
+    scanned += 1
+    const consumerName = getConsumerName(info)
+    if(!consumerName || expectedConsumers.has(consumerName)) {
+      skipped += 1
+      continue
+    }
+
+    if(!isSafeToPruneConsumer(info, NATS_STALE_CONSUMER_IDLE_MS)) {
+      skipped += 1
+      continue
+    }
+
+    try {
+      await this.jsm.consumers.delete('PROCESS', consumerName)
+      removed += 1
+      console.log('NATS: pruned stale consumer', consumerName)
+    } catch(error) {
+      skipped += 1
+      console.log('NATS: failed to prune consumer', consumerName, error.message)
+    }
+  }
+
+  return { scanned, removed, skipped }
+}
 
 
 nats.init = async function(services) {
@@ -41,6 +115,17 @@ nats.init = async function(services) {
 
   // create consumers for all services
   console.log("NATS: creating consumers...")
+  const expectedConsumers = new Set()
+  for(const key in services) {
+    expectedConsumers.add(key)
+    expectedConsumers.add(key + '_batch')
+  }
+
+  const reconcileSummary = await this.reconcileProcessConsumers(expectedConsumers)
+  if(NATS_PRUNE_STALE_CONSUMERS) {
+    console.log('NATS: stale consumer reconciliation', reconcileSummary)
+  }
+
   for(var key in services) {
     try {
       await this.jsm.consumers.add("PROCESS", {

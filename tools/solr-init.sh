@@ -32,10 +32,18 @@ curl -X POST -H 'Content-type:application/json' \
         "filters": [
           { "class": "solr.LowerCaseFilterFactory" },
           { "class": "solr.ShingleFilterFactory", "minShingleSize": "2", "maxShingleSize": "2", "outputUnigrams": "true" },
-          { "class": "solr.NGramFilterFactory", "minGramSize": "3", "maxGramSize": "10" }
+          { "class": "solr.NGramFilterFactory", "minGramSize": "2", "maxGramSize": "10" }
         ]
       }
     }
+  }'
+
+curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
+    "name":"fulltext_exact",
+    "type":"text_general",
+    "stored":true,
+    "indexed":true
+  }
   }'
 
 curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
@@ -124,6 +132,14 @@ curl -X POST -H 'Content-Type: application/json' -d '{"add-field": {
     "stored":true,
     "indexed":true
   }
+  }' "http://localhost:8983/solr/messydesk/schema"
+
+
+  curl -X POST -H 'Content-Type: application/json' -d '{
+    "add-copy-field": {
+      "source": "fulltext",
+      "dest": "fulltext_exact"
+    }
   }' "http://localhost:8983/solr/messydesk/schema"
 
     #curl -X POST -H 'Content-Type: application/json' -d '{"add-copy-field": {"source":"description", "dest":"text"}}' "http://localhost:8983/solr/messydesk/schema"
