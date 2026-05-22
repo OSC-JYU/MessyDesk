@@ -628,15 +628,32 @@ console.log('filetype', file_type);
                 );
                 console.log(file_metadata)
 
+                if (!file_metadata || !file_metadata.path) {
+                    return h.response({ error: 'File not found' }).code(404);
+                }
+
+                if (String(file_metadata['@type'] || '').toLowerCase() !== 'file') {
+                    return h.response({ error: 'RID does not point to a file node' }).code(400);
+                }
+
+                const absolutePath = path.resolve(file_metadata.path);
+
                 // we first check if file exist
                 // if not, then we search for error.json
                 // if error.json exists, then we return it
                 // if not, then we return 404
-                if (!fse.existsSync(file_metadata.path)) {
+                if (!fse.existsSync(absolutePath)) {
                     console.log('file does not exist')
-                    const error_json_path = path.join(path.dirname(file_metadata.path), 'error.json')
+                    const error_json_path = path.join(path.dirname(absolutePath), 'error.json')
                     if (fse.existsSync(error_json_path)) {
+                        const errStat = fse.statSync(error_json_path);
+                        if (!errStat.isFile()) {
+                            return h.response({ error: 'error.json path is not a file' }).code(500);
+                        }
                         const src = fse.createReadStream(error_json_path);
+                        src.on('error', (streamError) => {
+                            console.error('Error streaming fallback error.json:', streamError);
+                        });
                         const response = h.response(src);
                         response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
                         response.type('application/json');
@@ -646,7 +663,15 @@ console.log('filetype', file_type);
                     }
                 }
 
-                const src = fse.createReadStream(file_metadata.path);
+                const fileStat = fse.statSync(absolutePath);
+                if (!fileStat.isFile()) {
+                    return h.response({ error: 'Requested RID path is not a file' }).code(400);
+                }
+
+                const src = fse.createReadStream(absolutePath);
+                src.on('error', (streamError) => {
+                    console.error('Error streaming file content:', streamError);
+                });
                 const response = h.response(src);
  
 
@@ -669,6 +694,7 @@ console.log('filetype', file_type);
 
                 return response;
             } catch (e) {
+                console.error('GET /api/files/{file_rid} failed:', e);
                 return h.response().code(403);
             }
         }
@@ -708,7 +734,20 @@ console.log('filetype', file_type);
                     request.auth.credentials.user.rid
                 );
 
-                const src = fse.createReadStream(path.join(DATA_DIR, file_metadata.path));
+                if (!file_metadata || !file_metadata.path) {
+                    return h.response().code(404);
+                }
+
+                const sourcePath = path.join(DATA_DIR, file_metadata.path);
+                const sourceStat = await fse.stat(sourcePath);
+                if (!sourceStat.isFile()) {
+                    return h.response({ error: 'Source path is not a file' }).code(400);
+                }
+
+                const src = fse.createReadStream(sourcePath);
+                src.on('error', (streamError) => {
+                    console.error('Error streaming file source:', streamError);
+                });
                 const response = h.response(src);
 
                 if (file_metadata.type === 'pdf') {

@@ -7,6 +7,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const HELP_DIR = path.resolve(__dirname, '../../public/help');
 const HELP_IMAGE_DIR = path.resolve(__dirname, '../../public/help/images');
+const HELP_STYLE_DIR = path.resolve(__dirname, '../../public/help/styles');
 const SLUG_PATTERN = /^[a-z0-9-]+$/i;
 
 function normalizeSlug(rawSlug) {
@@ -34,6 +35,21 @@ function resolveHelpImagePath(rawAssetPath) {
     return imagePath;
 }
 
+function resolveHelpStylePath(rawAssetPath) {
+    if (!rawAssetPath) {
+        throw Boom.badRequest('Missing help style path');
+    }
+
+    const normalized = path.normalize(String(rawAssetPath)).replace(/^[\\/]+/, '');
+    const stylePath = path.resolve(path.join(HELP_STYLE_DIR, normalized));
+
+    if (!stylePath.startsWith(HELP_STYLE_DIR + path.sep) && stylePath !== HELP_STYLE_DIR) {
+        throw Boom.forbidden('Help style path is outside allowed directory');
+    }
+
+    return stylePath;
+}
+
 export default [
     {
         method: 'GET',
@@ -50,6 +66,25 @@ export default [
             }
 
             return h.file(imagePath, {
+                confine: false,
+            });
+        },
+    },
+    {
+        method: 'GET',
+        path: '/api/help/styles/{assetPath*}',
+        options: {
+            auth: false,
+        },
+        handler: async (request, h) => {
+            const stylePath = resolveHelpStylePath(request.params.assetPath);
+            const exists = await fse.pathExists(stylePath);
+
+            if (!exists) {
+                throw Boom.notFound('Help style not found');
+            }
+
+            return h.file(stylePath, {
                 confine: false,
             });
         },

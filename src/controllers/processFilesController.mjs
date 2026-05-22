@@ -155,6 +155,27 @@ function getReferenceSourceRid(message) {
     return null;
 }
 
+function buildGroupedOutputLabel(message) {
+    const rootSourceLabel = String(message?.root_source_label || message?.root_source?.label || '').trim();
+    const outputExtension = String(message?.file?.extension || '').trim().toLowerCase();
+    if(!rootSourceLabel || !outputExtension) {
+        return null;
+    }
+
+    const suffix = `.${outputExtension}`;
+    if(rootSourceLabel.toLowerCase().endsWith(suffix)) {
+        return rootSourceLabel;
+    }
+
+    return `${rootSourceLabel}${suffix}`;
+}
+
+function shouldApplyGroupedManyToOneLabel(message) {
+    const behaviour = String(message?.behaviour || '').toLowerCase();
+    if(behaviour !== 'many-to-one') return false;
+    return Boolean(message?.root_source_rid || message?.root_source?.['@rid']);
+}
+
 async function processFilesCore(request, infoFilepath, contentFilepath, message) {
     const isRotateTask = String(message?.task?.id || '').toLowerCase() === 'rotate';
     const isInternalRotate = message?.role === 'exif_rotate'
@@ -284,6 +305,31 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             }
         }
 
+        if(shouldApplyGroupedManyToOneLabel(message)) {
+            const groupedLabel = buildGroupedOutputLabel(message);
+            if(groupedLabel) {
+                message.file.label = groupedLabel;
+            }
+        }
+
+        const groupedRootSourceRid = normalizeRid(message?.root_source_rid || message?.root_source?.['@rid']);
+        const isLastGroupedMessage = Number(message?.current_file || 0) >= Number(message?.total_files || 0);
+        if(message.output_set && groupedRootSourceRid && isLastGroupedMessage) {
+            const duplicateOutput = await Graph.getOutputFileForProcessSource(
+                message.process['@rid'],
+                groupedRootSourceRid,
+                message.output_set
+            );
+            if(duplicateOutput) {
+                console.log('Skipping duplicate grouped output for process/source', {
+                    process: message.process['@rid'],
+                    source: groupedRootSourceRid,
+                    output: duplicateOutput['@rid'],
+                });
+                return;
+            }
+        }
+
         console.log('creating file node', message.file.type)
         const referenceSourceRid = getReferenceSourceRid(message);
         const isReferenceOutput = Boolean(referenceSourceRid);
@@ -326,6 +372,22 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
         
         if(fileNode.metadata) {
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
+        }
+        if(groupedRootSourceRid) {
+            await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'root_source_rid', value: groupedRootSourceRid}, 'File');
+            const rootSourceLabel = message?.root_source_label || message?.root_source?.label || null;
+            if(rootSourceLabel) {
+                await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'root_source_label', value: rootSourceLabel}, 'File');
+            }
+            if(Number.isFinite(Number(message?.group_size))) {
+                await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'group_size', value: Number(message.group_size)}, 'File');
+            }
+        }
+        if(Number.isFinite(Number(message?.file?.page_number))) {
+            await Graph.setNodeAttribute_old(fileNode['@rid'], {
+                key: 'page_number',
+                value: Number(message.file.page_number),
+            }, 'File');
         }
         // Add "parent" file metadata to file node (like id or url of the original file)
         if(message.file.forward) {

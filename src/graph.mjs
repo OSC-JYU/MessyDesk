@@ -1854,7 +1854,9 @@ graph.createProcessFileNode = async function (process_rid, message, description,
 	const setRid = typeof message?.set_rid === 'string'
 		? message.set_rid
 		: message?.set_rid?.['@rid']
-	const fallbackLineageSourceRid = message?.root_source?.['@rid'] || message?.file?.['@rid']
+	const isManyToOne = String(message?.behaviour || '').toLowerCase() === 'many-to-one'
+	const fallbackLineageSourceRid = message?.root_source?.['@rid']
+		|| (isManyToOne ? (inputSetRid || setRid || message?.file?.['@rid']) : message?.file?.['@rid'])
 	const lineageSourceRid = isSearchOutput
 		? (searchSourceSetRid || inputSetRid || setRid || fallbackLineageSourceRid)
 		: fallbackLineageSourceRid
@@ -3225,6 +3227,26 @@ graph.getProcessedInputFileRidsForBatch = async function(process_rid) {
 	console.log('getProcessedInputFileRidsForBatch query', query)
 	const edgeResponse = await db.sql(query)
 	return edgeResponse.result.map((item) => item.rid).filter(Boolean)
+}
+
+graph.getOutputFileForProcessSource = async function(process_rid, source_rid, output_set = null) {
+	const cleanProcessRid = this.sanitizeRID(process_rid)
+	const cleanSourceRid = this.sanitizeRID(source_rid)
+	const edgeQuery = `SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = "${cleanProcessRid}" AND @in = ${cleanSourceRid} LIMIT 10`
+	const edgeResponse = await db.sql(edgeQuery)
+
+	for(const row of edgeResponse.result || []) {
+		if(!row?.rid) continue
+		const node = await this.getNodeByRid(row.rid)
+		if(!node || node['@type'] !== 'File') continue
+		if(output_set) {
+			const cleanOutputSet = this.sanitizeRID(output_set)
+			if(this.sanitizeRID(node.set) !== cleanOutputSet) continue
+		}
+		return node
+	}
+
+	return null
 }
 
 graph.groupFilesByRootSource = async function(files, options = {}) {

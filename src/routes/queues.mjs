@@ -54,12 +54,126 @@ function getFileSortName(file) {
     return '';
 }
 
+function getFilePageNumber(file) {
+    if (!file) return null;
+    const raw = Number(file.page_number);
+    if (!Number.isFinite(raw)) return null;
+    return raw;
+}
+
 function sortFilesByFilename(files) {
     return [...(files || [])].sort((a, b) => {
+        const aPage = getFilePageNumber(a);
+        const bPage = getFilePageNumber(b);
+        if (aPage !== null && bPage !== null && aPage !== bPage) {
+            return aPage - bPage;
+        }
+        if (aPage !== null && bPage === null) {
+            return -1;
+        }
+        if (aPage === null && bPage !== null) {
+            return 1;
+        }
+
         const aName = getFileSortName(a);
         const bName = getFileSortName(b);
         return aName.localeCompare(bName);
     });
+}
+
+function shouldUseRootSourceGrouping({ service, task, isSearchOutput }) {
+    const taskConfig = service?.tasks?.[task?.id] || {};
+
+    if(task?.group_by_root_source === false || taskConfig?.group_by_root_source === false) {
+        return { enabled: false, explicit: true };
+    }
+
+    if(task?.grouping_mode === 'group_by_root_source' || taskConfig?.grouping_mode === 'group_by_root_source') {
+        return { enabled: true, explicit: true };
+    }
+
+    if(task?.group_by_root_source === true || taskConfig?.group_by_root_source === true) {
+        return { enabled: true, explicit: true };
+    }
+
+    if(isSearchOutput) {
+        return { enabled: false, explicit: false };
+    }
+
+    return { enabled: true, explicit: false };
+}
+
+async function resolveManyToOneDispatchGroups(service, task, files, isSearchOutput) {
+    const orderedFiles = sortFilesByFilename(files);
+    const inputFileRidSet = new Set(
+        orderedFiles
+            .map((file) => file?.['@rid'])
+            .filter(Boolean)
+            .map((rid) => Graph.sanitizeRID(rid))
+    );
+    const groupingDecision = shouldUseRootSourceGrouping({ service, task, isSearchOutput });
+
+    if(!groupingDecision.enabled) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const resolvedGroups = await Graph.groupFilesByRootSource(orderedFiles, {
+        boundary: 'pdf',
+        excludeRootTypes: ['zip'],
+    });
+
+    if(!Array.isArray(resolvedGroups) || resolvedGroups.length === 0) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const groupsWithSourceInInputSet = resolvedGroups.filter((group) => {
+        if(!group?.source_rid) return false;
+        const cleanSourceRid = Graph.sanitizeRID(group.source_rid);
+        return inputFileRidSet.has(cleanSourceRid);
+    });
+
+    if(groupsWithSourceInInputSet.length === 0) {
+        // Only enable grouped outputs when grouping source files exist in the input set.
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const groupedFileRidSet = new Set();
+    for(const group of groupsWithSourceInInputSet) {
+        for(const file of group?.files || []) {
+            if(file?.['@rid']) groupedFileRidSet.add(Graph.sanitizeRID(file['@rid']));
+        }
+    }
+
+    const ungroupedFiles = orderedFiles.filter((file) => {
+        if(!file?.['@rid']) return true;
+        return !groupedFileRidSet.has(Graph.sanitizeRID(file['@rid']));
+    });
+
+    if(groupingDecision.explicit) {
+        const normalizedGroups = groupsWithSourceInInputSet.map((group) => ({
+            ...group,
+            files: sortFilesByFilename(group.files),
+        }));
+        if(ungroupedFiles.length > 0) {
+            normalizedGroups.push({ source_rid: null, label: null, type: null, path: null, files: ungroupedFiles });
+        }
+        return normalizedGroups;
+    }
+
+    // Auto mode: only enable grouping when traversal finds PDF roots.
+    const hasPdfRoots = groupsWithSourceInInputSet.some((group) => String(group?.type || '').toLowerCase() === 'pdf');
+    if(!hasPdfRoots) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const normalizedGroups = groupsWithSourceInInputSet.map((group) => ({
+        ...group,
+        files: sortFilesByFilename(group.files),
+    }));
+    if(ungroupedFiles.length > 0) {
+        normalizedGroups.push({ source_rid: null, label: null, type: null, path: null, files: ungroupedFiles });
+    }
+    return normalizedGroups;
 }
 
 
@@ -439,6 +553,7 @@ export default [
                 // in many-to-one outputs we do not create process nodes for each file 
                 if(!service.external_tasks && behaviour === 'many-to-one') {
                     const isSearchOutput = Graph.isSearchOutputTask(service, task)
+                    const dispatchGroups = await resolveManyToOneDispatchGroups(service, task, set_files.files, isSearchOutput);
                     var processNode = await Graph.createManyToOneProcessNode(task_name, service, task, set_metadata)
                     const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
                         input_set: set_rid,
@@ -450,7 +565,7 @@ export default [
                         topic: topic,
                         task_id: task.id,
                         input_set: set_rid,
-                        output_set: outputSetNode['@rid'],
+                        output_set: outputSetNode?.['@rid'] || null,
                         total_files: set_files.files.length,
                         search_output: isSearchOutput,
                     });
@@ -465,38 +580,66 @@ export default [
                     console.log('many-to-one batch dispatch');
                     await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
 
-                    const orderedFiles = sortFilesByFilename(set_files.files);
+                    const batchTotalFiles = set_files.files.length;
                     let batchIndex = 1;
-                    for(const file of orderedFiles) {
-                        const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
 
-                        msg.process = processNode;
-                        msg.project_rid = set_metadata.project_rid;
-                        msg.set_rid = set_rid;
-                        msg.input_set = set_rid;
-                        msg.output_set = outputSetNode['@rid'];
-                        msg.behaviour = behaviour;
-                        msg.set_process = processNode['@rid'];
-                        // Use full batch counters so consumer emits a single final output file.
-                        msg.total_files = set_files.files.length;
-                        msg.current_file = batchIndex;
-                        msg.userId = request.auth.credentials.user.rid;
-                        msg.file = fileMetadata;
-                        if(isSearchOutput) {
-                            msg.search_output = true;
-                            msg.search_source_set = set_rid;
-                        }
+                    for(const group of dispatchGroups) {
+                        const groupFiles = Array.isArray(group?.files) ? group.files : [];
+                        const groupSize = groupFiles.length;
+                        let groupIndex = 1;
 
-                        if(service.tasks[task.id]?.source == 'source_file') {
-                            delete msg.source;
-                            const source = await Graph.getFileSource(file['@rid']);
-                            if(source) {
-                                msg.source = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                        for(const file of groupFiles) {
+                            const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+
+                            msg.process = processNode;
+                            msg.project_rid = set_metadata.project_rid;
+                            msg.set_rid = set_rid;
+                            msg.input_set = set_rid;
+                            msg.output_set = outputSetNode['@rid'];
+                            msg.behaviour = behaviour;
+                            msg.set_process = processNode['@rid'];
+                            // Group counters are per combine run; batch counters track overall progress.
+                            msg.total_files = groupSize;
+                            msg.current_file = groupIndex;
+                            msg.batch_total_files = batchTotalFiles;
+                            msg.batch_current_file = batchIndex;
+                            msg.userId = request.auth.credentials.user.rid;
+                            msg.file = fileMetadata;
+
+                            if(group?.source_rid) {
+                                msg.root_source = {
+                                    '@rid': group.source_rid,
+                                    label: group.label || null,
+                                    type: group.type || null,
+                                    path: group.path || null,
+                                };
+                                msg.root_source_rid = group.source_rid;
+                                msg.root_source_label = group.label || null;
+                                msg.group_size = groupSize;
+                            } else {
+                                delete msg.root_source;
+                                delete msg.root_source_rid;
+                                delete msg.root_source_label;
+                                delete msg.group_size;
                             }
-                        }
 
-                        nats.publish(topic + '_batch', JSON.stringify(msg));
-                        batchIndex += 1;
+                            if(isSearchOutput) {
+                                msg.search_output = true;
+                                msg.search_source_set = set_rid;
+                            }
+
+                            if(service.tasks[task.id]?.source == 'source_file') {
+                                delete msg.source;
+                                const source = await Graph.getFileSource(file['@rid']);
+                                if(source) {
+                                    msg.source = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
+                                }
+                            }
+
+                            nats.publish(topic + '_batch', JSON.stringify(msg));
+                            groupIndex += 1;
+                            batchIndex += 1;
+                        }
                     }
 
                 // normal "set to set" output

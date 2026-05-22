@@ -203,6 +203,54 @@ nats.connect = async function() {
   this.js = jetstream(this.nc);
 }
 
+nats.ensureProcessConsumersForService = async function(serviceId) {
+  if(!serviceId) {
+    throw new Error('Missing service id for PROCESS consumer ensure')
+  }
+
+  const consumerExists = async (durableName) => {
+    try {
+      await this.jsm.consumers.info('PROCESS', durableName)
+      return true
+    } catch(error) {
+      const msg = String(error?.message || '').toLowerCase()
+      if(msg.includes('not found') || msg.includes('404')) {
+        return false
+      }
+      throw error
+    }
+  }
+
+  const createIfMissing = async (durableName, filterSubject, maxDeliveries = 1) => {
+    if(await consumerExists(durableName)) {
+      return
+    }
+
+    try {
+      await this.jsm.consumers.add('PROCESS', {
+        durable_name: durableName,
+        ack_policy: AckPolicy.Explicit,
+        ack_wait: 2 * 60 * 1e9,
+        max_deliver: 1,
+        redeliver_policy: {
+          max_deliveries: maxDeliveries,
+          interval: 1000,
+        },
+        filter_subject: filterSubject,
+      })
+      console.log('NATS: created consumer', durableName)
+    } catch(error) {
+      if(String(error?.message || '').includes('already exists')) {
+        return
+      }
+      throw error
+    }
+  }
+
+  await createIfMissing(serviceId, `process.${serviceId}`, 1)
+  await createIfMissing(`${serviceId}_batch`, `process.${serviceId}_batch`, 2)
+}
+
 nats.close = async function() {
   await this.nc.close()
 }

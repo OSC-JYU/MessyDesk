@@ -10,6 +10,9 @@ const SOURCE_DIR = path.resolve(__dirname, '../docs/help');
 const OUTPUT_DIR = path.resolve(__dirname, '../public/help');
 const IMAGE_SOURCE_DIR = path.resolve(__dirname, '../docs/images');
 const IMAGE_OUTPUT_DIR = path.resolve(__dirname, '../public/help/images');
+const HELP_STYLE_SOURCE = path.resolve(__dirname, '../docs/help/help.css');
+const HELP_STYLE_OUTPUT_DIR = path.resolve(__dirname, '../public/help/styles');
+const HELP_STYLE_OUTPUT_FILE = path.join(HELP_STYLE_OUTPUT_DIR, 'help.css');
 
 marked.setOptions({
     gfm: true,
@@ -116,71 +119,7 @@ function wrapHtmlDocument({ title, nav, content }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MessyDesk Help - ${title}</title>
-  <style>
-    :root {
-      --bg: #f2f7f8;
-      --panel: #ffffff;
-      --line: #d6e4e8;
-      --text: #21313b;
-      --accent: #0f8a8f;
-      --accent-soft: #e6f6f7;
-    }
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      background: radial-gradient(circle at 15% 10%, #e0f3f4 0%, #f7fbfc 35%, #eef3f6 100%);
-      color: var(--text);
-      font-family: "Segoe UI", "Noto Sans", sans-serif;
-      line-height: 1.6;
-    }
-    .page {
-      max-width: 1060px;
-      padding: 24px 18px 48px;
-    }
-    .help-nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-bottom: 18px;
-      margin-top: 18px;
-    }
-    .help-nav a {
-      text-decoration: none;
-      color: #0f5d61;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 7px 14px;
-      font-size: 14px;
-    }
-    .help-nav a.active {
-      background: var(--accent-soft);
-      border-color: #7fc8cb;
-      color: #0a4c50;
-      font-weight: 600;
-    }
-    .content {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      padding: 24px;
-      box-shadow: 0 10px 25px rgba(12, 44, 56, 0.08);
-    }
-    h1, h2, h3 { color: #113944; }
-    pre {
-      background: #1e2c34;
-      color: #eaf4f7;
-      border-radius: 8px;
-      padding: 14px;
-      overflow-x: auto;
-    }
-    code {
-      font-family: "Fira Mono", "Consolas", monospace;
-      font-size: 0.92em;
-    }
-    a { color: #0f6f75; }
-  </style>
+  <link rel="stylesheet" href="/api/help/styles/help.css" />
 </head>
 <body>
   <main class="page">
@@ -191,6 +130,16 @@ function wrapHtmlDocument({ title, nav, content }) {
   </main>
 </body>
 </html>`;
+}
+
+async function copyHelpStyles() {
+  const stylesExist = await fse.pathExists(HELP_STYLE_SOURCE);
+  if (!stylesExist) {
+    throw new Error(`Help style file not found: ${HELP_STYLE_SOURCE}`);
+  }
+
+  await fse.ensureDir(HELP_STYLE_OUTPUT_DIR);
+  await fse.copyFile(HELP_STYLE_SOURCE, HELP_STYLE_OUTPUT_FILE);
 }
 
 async function buildHelp() {
@@ -239,6 +188,7 @@ async function buildHelp() {
     await fse.ensureDir(OUTPUT_DIR);
     await fse.emptyDir(OUTPUT_DIR);
     const copiedImageCount = await copyHelpImages();
+    await copyHelpStyles();
 
     for (const page of pageData) {
       const rewritten = rewriteMarkdownImageLinks(rewriteMarkdownLinks(page.markdown, linkMap));
