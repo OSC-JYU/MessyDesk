@@ -10,7 +10,13 @@ import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
 
 const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
-const MAX_VERSION_TEXT_BYTES = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
+const MAX_VERSION_TEXT_BYTES = (() => {
+    const parsed = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 10 * 1024 * 1024;
+    }
+    return parsed;
+})();
 
 function getTmpDir() {
     return path.resolve(DATA_DIR, 'tmp');
@@ -125,6 +131,32 @@ async function saveUploadStreamToPath(fileStream, targetPath) {
     });
 }
 
+async function readStreamToString(stream) {
+    const chunks = [];
+    for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString('utf8');
+}
+
+async function normalizeVersionPayload(rawPayload) {
+    const payload = rawPayload || {};
+    if (payload && typeof payload.pipe === 'function') {
+        const text = await readStreamToString(payload);
+        if (!text || !text.trim()) return {};
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+            return {};
+        } catch {
+            return {};
+        }
+    }
+    return payload;
+}
+
 function queueThumbnailRefresh(file, userId) {
     if (!file || !file.type) return false;
 
@@ -190,12 +222,13 @@ async function updateFileMetadata(file, userRid) {
     }
 }
 
-function sendFileUpdate(userRid, fileRid, edited) {
+function sendFileUpdate(userRid, fileRid, edited, extraNodeFields = {}) {
     userManager.sendToUser(userRid, {
         command: 'update',
         target: fileRid,
         node: {
             edited,
+            ...extraNodeFields,
         },
     });
 }
@@ -520,36 +553,51 @@ console.log('filetype', file_type);
             }
 
             const backupPath = getBackupPath(managedPath);
-            const payload = request.payload || {};
+            const payload = await normalizeVersionPayload(request.payload);
             const upload = payload.file;
             const hasUpload = upload && typeof upload.pipe === 'function';
             const hasTextContent = typeof payload.content === 'string';
+            const hasContentField = Object.prototype.hasOwnProperty.call(payload, 'content');
+            const fileType = String(file.type || '').toLowerCase();
+            const isTextLike = ['text', 'html', 'json', 'csv'].includes(fileType) || fileType.endsWith('.json');
+            const textContent = hasTextContent ? payload.content : null;
+
+            if (hasUpload && hasContentField) {
+                throw Boom.badRequest('Provide either file upload or content payload, not both');
+            }
 
             if (!hasUpload && !hasTextContent) {
                 throw Boom.badRequest('Missing edited file upload or content payload');
             }
 
-            if (hasTextContent && Buffer.byteLength(payload.content, 'utf8') > MAX_VERSION_TEXT_BYTES) {
+            if (!hasUpload && !isTextLike) {
+                throw Boom.badRequest('Content payload is only supported for text-like files');
+            }
+
+            if (!hasUpload && Buffer.byteLength(textContent, 'utf8') > MAX_VERSION_TEXT_BYTES) {
                 throw Boom.badRequest('Text payload exceeds size limit');
             }
 
-            if (await fse.pathExists(backupPath)) {
-                await fse.remove(backupPath);
+            if (!(await fse.pathExists(backupPath))) {
+                await fse.copy(managedPath, backupPath, { overwrite: false, errorOnExist: true });
             }
-            await fse.move(managedPath, backupPath, { overwrite: true });
+
+            const stagingPath = `${managedPath}.editing.${randomUUID()}`;
 
             try {
                 if (hasUpload) {
-                    await saveUploadStreamToPath(upload, managedPath);
+                    await saveUploadStreamToPath(upload, stagingPath);
                 } else {
-                    if (!['text', 'html', 'json', 'csv'].includes(file.type)) {
-                        throw Boom.badRequest('Content payload is only supported for text-like files');
-                    }
-                    await fse.writeFile(managedPath, payload.content, 'utf8');
+                    await fse.outputFile(stagingPath, textContent, 'utf8');
                 }
+
+                await fse.move(stagingPath, managedPath, { overwrite: true });
             } catch (error) {
+                if (await fse.pathExists(stagingPath)) {
+                    await fse.remove(stagingPath);
+                }
                 if (!(await fse.pathExists(managedPath)) && (await fse.pathExists(backupPath))) {
-                    await fse.move(backupPath, managedPath, { overwrite: true });
+                    await fse.copy(backupPath, managedPath, { overwrite: true });
                 }
                 throw error;
             }
@@ -563,7 +611,7 @@ console.log('filetype', file_type);
             await Graph.setNodeAttribute(fileRid, { key: 'edited', value: edited }, userRid);
             await updateFileMetadata(file, userRid);
             queueThumbnailRefresh(file, userId);
-            sendFileUpdate(userRid, fileRid, edited);
+            sendFileUpdate(userRid, fileRid, edited, { thumbnail_version: Date.now() });
 
             const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
             updatedFile.edited = edited;
@@ -598,7 +646,7 @@ console.log('filetype', file_type);
             await Graph.setNodeAttribute(fileRid, { key: 'edited', value: null }, userRid);
             await updateFileMetadata(file, userRid);
             queueThumbnailRefresh(file, userId);
-            sendFileUpdate(userRid, fileRid, null);
+            sendFileUpdate(userRid, fileRid, null, { thumbnail_version: Date.now() });
 
             const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
             return h.response(updatedFile).code(200);

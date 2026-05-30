@@ -91,14 +91,14 @@ Open again another terminal:
 
 Now we should have our adapters ready. Let's start adapter for thumnbnailer:
 
-	TOPIC=md-thumbnailer node src/index.mjs 
+	TOPIC=md-thumbnailer DEV_URL=http://localhost:9000 node src/index.mjs 
 
 Now, when you upload an image to MessyDesk, you should have thumbnail.
 
 
 Let's use same imaginary container for image processing (rotate, flip, resize, blur):
 
-	TOPIC=md-imaginary node src/index.mjs 
+	TOPIC=md-imaginary DEV_URL=http://localhost:9000 node src/index.mjs 
 
 If all went well, you can now flip and rotate images in MessyDesk in address: http://localhost:3000
 

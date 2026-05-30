@@ -744,6 +744,12 @@ function doesFilterMatchNode(filter, node) {
     const nodeType = String(node['@type'] || '').toLowerCase();
     const fileType = String(node.type || '').toLowerCase();
     const extension = String(node.extension || '').toLowerCase();
+    const nodeTypes = Array.isArray(node.types)
+        ? node.types.map((t) => String(t || '').toLowerCase()).filter(Boolean)
+        : [];
+    const nodeExtensions = Array.isArray(node.extensions)
+        ? node.extensions.map((f) => String(f || '').toLowerCase()).filter(Boolean)
+        : [];
 
     if (Number(filter.set_only || 0) === 1 && nodeType !== 'set') {
         return false;
@@ -753,7 +759,7 @@ function doesFilterMatchNode(filter, node) {
         ? filter.supported_types.map((t) => String(t).toLowerCase())
         : [];
     if (supportedTypes.length > 0) {
-        const typeCandidates = [fileType, nodeType];
+        const typeCandidates = Array.from(new Set([fileType, nodeType, ...nodeTypes].filter(Boolean)));
         const hasTypeMatch = supportedTypes.some((type) => typeCandidates.includes(type));
         if (!hasTypeMatch) return false;
     }
@@ -761,7 +767,8 @@ function doesFilterMatchNode(filter, node) {
     const supportedFormats = Array.isArray(filter.supported_formats)
         ? filter.supported_formats.map((f) => String(f).toLowerCase())
         : [];
-    if (supportedFormats.length > 0 && !supportedFormats.includes(extension)) {
+    const formatCandidates = Array.from(new Set([extension, ...nodeExtensions].filter(Boolean)));
+    if (supportedFormats.length > 0 && !supportedFormats.some((format) => formatCandidates.includes(format))) {
         return false;
     }
 

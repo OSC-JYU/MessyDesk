@@ -1,3 +1,4 @@
+
 import got from 'got';
 import path from 'path';
 import {  DB_NAME,DB_URL, DB_USER, DB_PASSWORD } from './env.mjs';
@@ -107,9 +108,48 @@ db.createDB = async function() {
 		for(var query of commands) {
 			await this.sql(query, 'sql')
 		}
+		await this.ensureIndexes()
 	} catch(e) {
 		console.log('Database init failed', e.message)
 		throw(e)
+	}
+}
+
+db.ensureIndexes = async function() {
+	const propertyCommands = [
+		'CREATE PROPERTY File.project_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY File.set IF NOT EXISTS STRING',
+		'CREATE PROPERTY Set.project_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY Entity.owner IF NOT EXISTS STRING',
+		'CREATE PROPERTY Project.label IF NOT EXISTS STRING'
+	]
+
+	for(const query of propertyCommands) {
+		try {
+			await this.sql(query)
+		} catch (error) {
+			console.log('Property ensure failed:', query, error?.message || error)
+		}
+	}
+
+	const indexCommands = [
+		'CREATE INDEX IF NOT EXISTS ON File (project_rid) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON File (set) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Set (project_rid) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Entity (owner) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Project (label) NOTUNIQUE'
+	]
+
+	for(const query of indexCommands) {
+		try {
+			await this.sql(query, {}, 1)
+		} catch (error) {
+			const msg = String(error?.message || error || '')
+			if(msg.toLowerCase().includes('already exists')) {
+				continue
+			}
+			console.log('Index ensure failed:', query, msg)
+		}
 	}
 }
 

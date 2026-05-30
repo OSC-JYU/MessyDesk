@@ -606,7 +606,7 @@ nats.listenDBQueue = async function(topic) {
           try {
             var msg_data = m.json()
             var msg = msg_data.value
-            //console.log(data)
+            console.log(msg)
 
             // CREATE AND PUBLISH
             if(msg_data.topic == 'create_and_publish') {

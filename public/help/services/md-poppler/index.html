@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - Poppler Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-poppler</div>
+                        <h1>Poppler Service</h1>
+<p>The <strong>Poppler</strong> service allows you to extract textual data and image assets directly from PDF files. 
+<a href="https://en.wikipedia.org/wiki/Poppler_(software)">Poppler</a> is open source software. </p>
+<p>For a broader overview of how the platform interacts with document formats, please refer to the <strong>PDF Handling</strong> help section.
+<img src="/api/services/md-poppler/help/assets/images/extract.jpg" alt="extract"></p>
+<h2>Available Crunchers</h2>
+<h3><code>Extract text from PDF</code></h3>
+<p>Extracts structural text layers from PDF pages.</p>
+<ul>
+<li><strong>How it works:</strong> This utility pulls the underlying &quot;raw&quot; text data directly embedded within the document.</li>
+<li><strong>Limitations:</strong> If the PDF consists entirely of scanned document images, the resulting output will be completely empty. </li>
+<li><blockquote>
+<p>⚠️ <strong>Note:</strong> This cruncher does <em>not</em> perform Optical Character Recognition (OCR). To convert scanned text images into editable text, use an OCR services (such as <strong>Tesseract</strong>, <strong>PaddleOCR</strong>) instead.</p>
+</blockquote>
+</li>
+</ul>
+<h3><code>Extract images from PDF</code></h3>
+<p>Extracts raw, embedded image files from within the PDF wrapper.</p>
+<ul>
+<li><strong>How it works:</strong> Instead of rendering the whole page layout, this tool extracts the actual standalone graphic assets embedded inside the file structure in their native, original resolution. Also the hidden ones.</li>
+<li><blockquote>
+<p>💡 <strong>Core Distinction:</strong> A historical graphic that appears stamp-sized on the rendered PDF page layout might actually be a massive, uncompressed archive image. While <code>pdf2images</code> will capture it at page-scale resolution, <code>pdfimages</code> will pull out the original high-resolution file asset, which could potentially be hundreds of megabytes in size.</p>
+</blockquote>
+</li>
+</ul>
+<h3><code>Render PDF as images</code></h3>
+<p>Renders entire PDF pages into static images.</p>
+<ul>
+<li><strong>How it works:</strong> Think of this as taking a high-fidelity snapshot or screenshot of every individual page. </li>
+<li><strong>Output:</strong> The resulting image captures exactly what is visible to the human eye, including layout, fonts, and embedded graphics, making it ideal for visual inspection or OCR or document understanding tasks.</li>
+</ul>
+<h2>Digging Deeper</h2>
+<p>Because the MD-Poppler service is built directly on top of the open-source <strong><code>poppler-utils</code></strong> library, you can easily replicate and expand these workflows locally on your own machine. </p>
+<h3>Command-Line Reference</h3>
+<ul>
+<li><strong><code>pdfattach</code></strong> – Embeds a new external file or attachment directly into an existing PDF.</li>
+<li><strong><code>pdfdetach</code></strong> – Extracts embedded document attachments out of a PDF file.</li>
+<li><strong><code>pdffonts</code></strong> – Lists and analyzes all fonts utilized within the document structure.</li>
+<li><strong><code>pdfimages</code></strong> – Saves all embedded image assets at their native archiving resolution (the engine behind our <code>pdfimages</code> cruncher).</li>
+<li><strong><code>pdfinfo</code></strong> – Dumps the document&#39;s metadata, including page counts, encryption status, and creation dates.</li>
+<li><strong><code>pdfseparate</code></strong> – Extracts designated individual pages from a multi-page PDF document.</li>
+<li><strong><code>pdftocairo</code></strong> – Converts PDF pages into high-fidelity vector (SVG, PDF, EPS) or bitmap (PNG, JPEG) formats using the Cairo graphics engine.</li>
+<li><strong><code>pdftohtml</code></strong> – Converts PDF content into a structured HTML format while attempting to retain the original layout and formatting.</li>
+<li><strong><code>pdftoppm</code></strong> – Converts PDF pages into portable pixmap (PPM), PNG, or JPEG bitmaps (the engine driving our <code>pdf2images</code> cruncher).</li>
+<li><strong><code>pdftops</code></strong> – Converts a PDF document into a printable PostScript (PS) format.</li>
+<li><strong><code>pdftotext</code></strong> – Extracts the raw structural text layer from the PDF (the engine driving our <code>pdf2text</code> cruncher).</li>
+<li><strong><code>pdfunite</code></strong> – Merges multiple separate PDF files together into a single, unified document.</li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>

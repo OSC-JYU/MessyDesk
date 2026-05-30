@@ -1653,22 +1653,37 @@ graph.createImageROIs = async function(image_rid, set_rid, data, user_rid) {
 
 	if (!image_rid.match(/^#/)) image_rid = '#' + image_rid
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
-	const set_node = await this.getNodeAttributes(image_rid, user_rid)
-	if(!set_node) {
-		throw new Error('Set not found: '+ image_rid
+	const image_node = await this.getNodeAttributes(image_rid, user_rid)
+	if(!image_node) {
+		throw new Error('Image not found: '+ image_rid
 		)
 	}
 	// find out images path by stripping filename from file path
-	var image_path = set_node.path
+	var image_path = image_node.path
 	if(image_path) image_path = image_path.split('/').slice(0, -1).join('/')
 	else {
-		console.log('Image path not found for node: ', set_node)
+		console.log('Image path not found for node: ', image_node)
 		throw new Error('Image path not found for node: '+ image_rid )
+	}
+
+	// Keep exactly one ROI JSON file per image in a ROI set. POST acts as upsert.
+	const existingRoiQuery = `MATCH {type:File, as:roi, where:(set = "${set_rid}" AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${image_rid})} RETURN roi ORDER BY roi.created DESC LIMIT 1`
+	let existingRoiResponse = await db.sql(existingRoiQuery)
+	if(!existingRoiResponse.result[0] || !existingRoiResponse.result[0].roi) {
+		const fallbackExistingQuery = `MATCH {type:Set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:roi, where:(@type = 'File' AND type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = ${image_rid})} RETURN roi ORDER BY roi.created DESC LIMIT 1`
+		existingRoiResponse = await db.sql(fallbackExistingQuery)
+	}
+	if(existingRoiResponse.result[0] && existingRoiResponse.result[0].roi) {
+		const existingRoi = existingRoiResponse.result[0].roi
+		if(existingRoi.path) {
+			media.writeJSON(data, path.basename(existingRoi.path), path.dirname(existingRoi.path))
+			return existingRoi
+		}
+		throw new Error('ROI path not found for node: ' + existingRoi['@rid'])
 	}
 	// create ROI as a normal File node.
 	let roi = null
 	try {
-		const image_node = await this.getNodeAttributes(image_rid, user_rid)
 		const roi_data = {
 			type: 'roi.json',
 			extension: 'json',
@@ -1712,6 +1727,26 @@ graph.editImageROIs = async function(roi_rid, data, user_rid) {
 		console.log('ROI path not found for node: ', roi_node)
 		throw new Error('ROI path not found for node: '+ roi_rid )
 	}
+}
+
+graph.deleteImageROIs = async function(rid, set_rid, roi_rid, user_rid) {
+	if (!rid.match(/^#/)) rid = '#' + rid.replace('_', ':')
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid.replace('_', ':')
+	if (!roi_rid.match(/^#/)) roi_rid = '#' + roi_rid.replace('_', ':')
+
+	const query = `MATCH {type:File, as:roi, where:(@rid = ${roi_rid} AND set = "${set_rid}" AND type = "roi.json")}-DERIVED_FROM->{type:File, as:image, where:(@rid = ${rid})} RETURN roi.@rid AS rid`
+	let response = await db.sql(query)
+	if(!response.result.length) {
+		const fallback = `MATCH {type:Set, where:(@rid = ${set_rid})}-HAS_ITEM->{as:roi, where:(@type = 'File' AND @rid = ${roi_rid} AND type = "roi.json")}-DERIVED_FROM->{type:File, as:image, where:(@rid = ${rid})} RETURN roi.@rid AS rid`
+		response = await db.sql(fallback)
+	}
+
+	if(!response.result.length) {
+		throw new Error('ROI not found for delete')
+	}
+
+	await this.deleteNode(roi_rid, user_rid)
+	return { message: 'ROI deleted successfully', deleted: true }
 }
 
 graph.getImageROIs = async function(rid, set_rid, user_rid) {
@@ -2002,6 +2037,22 @@ graph.getFileSource = async function (file_rid, file_type) {
 
 
 	return null
+}
+
+graph.hasDerivedOutputs = async function (file_rid) {
+	const clean_file_rid = this.sanitizeRID(file_rid)
+
+	const derivedQuery = `SELECT count(*) AS count FROM DERIVED_FROM WHERE @in = ${clean_file_rid} AND (task IS NULL OR task NOT IN ['thumbnail'])`
+	const derivedResponse = await db.sql(derivedQuery)
+	const derivedCount = Number(derivedResponse?.result?.[0]?.count || 0)
+	if (derivedCount > 0) return true
+
+	// Legacy fallback for graphs that still use PROCESSED_BY/PRODUCED edges.
+	const legacyQuery = `MATCH {type:File, as:source, where:(@rid = ${clean_file_rid})}-PROCESSED_BY->{type:Process, as:process, where:(task IS NULL OR task <> 'thumbnail')}-PRODUCED->{type:File, as:target} RETURN count(target) AS count`
+	const legacyResponse = await db.sql(legacyQuery)
+	const legacyCount = Number(legacyResponse?.result?.[0]?.count || 0)
+
+	return legacyCount > 0
 }
 
 graph.getFileAncestors = async function (file_rid, userRID, maxDepth = 40) {

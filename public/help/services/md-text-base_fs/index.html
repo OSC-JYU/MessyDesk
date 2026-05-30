@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-Text-Base Help</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-text-base_fs</div>
+                        <h1>MD-Text-Base Help</h1>
+<p>The <strong>MD-Text-Base</strong> service provides essential utilities for manipulating raw text documents and JSON files within your MessyDesk workspace.</p>
+<hr>
+<h2>Split Tasks</h2>
+<p>Split crunchers are one-to-many operations that break a single long text file down into a structured set of smaller, more manageable text nodes. This is highly useful for tools like the <strong>Search</strong> service, which query and index data on a per-document level.</p>
+<h3>Split Text (<code>split_text</code>)</h3>
+<p>Breaks a text document into uniform chunks based on a maximum character threshold.</p>
+<ul>
+<li><strong>Parameters:</strong><ul>
+<li><code>character_count</code> <em>(integer, default: <code>1000</code>)</em>: The maximum number of characters allowed in each chunk (including spaces).</li>
+<li><code>trim</code> <em>(boolean, default: <code>false</code>)</em>: When enabled, collapses repeated whitespaces, tabs, and consecutive newlines before measuring the character count.</li>
+</ul>
+</li>
+</ul>
+<h3>Split by Character Sequence (<code>split_by_character_sequence</code>)</h3>
+<p>Allows you to define exact structural boundaries or anchor markers where a text document should be cut into separate chunks. This is ideal for dividing a single file containing a collection of letters, ledger entries, or survey responses.</p>
+<ul>
+<li><strong>Parameters:</strong><ul>
+<li><code>split_sequence</code> <em>(string, required)</em>: The specific text token or delimiter string that marks the beginning of a new document chunk (e.g., <code>### NEW CHAPTER</code> or <code>[PAGE BREAK]</code>).</li>
+<li><code>remove_sequence</code> <em>(boolean, default: <code>false</code>)</em>: Strips the matching delimiter token away from the beginning of the newly generated chunks.</li>
+<li><code>sequence_at_line_start</code> <em>(boolean, default: <code>false</code>)</em>: Restricts matches to instances where the sequence appears strictly at the start of a line (ignoring leading whitespace).</li>
+</ul>
+</li>
+</ul>
+<hr>
+<h2>Join Tasks</h2>
+<p>Join crunchers are many-to-one or complex grouping utilities designed to merge multiple independent text files into consolidated output documents.</p>
+<h3>Clever Join Texts (<code>clever_join_texts</code>)</h3>
+<p>Combines multiple files within a set back into unified documents by automatically reading their historical lineage. </p>
+<p>Instead of merging everything into a single massive file, MessyDesk traces the graph&#39;s history to locate the original multi-page sources or archives from which the text segments were derived. It then groups and joins the segments accordingly.</p>
+<blockquote>
+<p>💡 <strong>How it works:</strong> Imagine you have two distinct multi-page files: <code>DocumentA.pdf</code> and <code>DocumentB.pdf</code>. You split them into individual pages, run an OCR text extraction cruncher on the pages, and feed all the resulting text segments into a single set. </p>
+<p>Applying a <strong>Clever Join</strong> to that set evaluates the origin tree: it identifies which segments belong to <code>DocumentA</code> and which belong to <code>DocumentB</code>, outputting exactly <strong>two</strong> compiled text documents—one matching the complete text of <code>DocumentA</code> and one for <code>DocumentB</code>.</p>
+</blockquote>
+<h3>Raw Join Texts (<code>raw_join_texts</code>)</h3>
+<p>A straightforward consolidation utility. It ignores file lineage entirely, takes every text file present in the connected input set, and dumps their contents back-to-back into a single, unified text node.</p>
+
+                </article>
+        </main>
+</body>
+</html>

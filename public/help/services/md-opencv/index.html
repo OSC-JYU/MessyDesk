@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-OpenCV Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-opencv</div>
+                        <h1>MD-OpenCV Service</h1>
+<p>The <strong>MD-OpenCV</strong> service utilizes Python-based OpenCV scripts to manipulate, transform, and extract visual data from images using <strong>Regions of Interest (ROIs)</strong>. </p>
+<p>This service primarily operates on <code>roi.json</code> metadata layers linked to your image nodes. It allows you to modify specific areas of an image or extract them for separate downstream pipelines.</p>
+<hr>
+<h2>Available Crunchers</h2>
+<h3><code>extract</code> (Extract ROI)</h3>
+<p>Cuts out the designated Regions of Interest from a single image and saves them as separate, standalone image nodes.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-Many (outputs a new set containing each extracted ROI fragment).</li>
+</ul>
+<h3><code>isolate</code> (Isolate ROI)</h3>
+<p>Isolates the targeted ROIs by keeping them perfectly intact while completely masking or blacking out the rest of the image canvas. This is highly useful when you want to eliminate background noise or irrelevant page artifacts before running machine learning models.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-Many</li>
+<li><strong>Parameters:</strong><ul>
+<li><code>labels</code> <em>(boolean, default: <code>false</code>)</em>: When checked, prints the ROI metadata names directly onto the isolated image segments.</li>
+</ul>
+</li>
+</ul>
+<h3><code>fill</code> (Fill ROI)</h3>
+<p>Overlays a solid color block directly on top of the designated image ROIs. You can use this to permanently censor or redact sensitive visual elements, face detections, or text blocks.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-Many</li>
+<li><strong>Parameters:</strong><ul>
+<li><code>color</code> <em>(string, default: <code>&quot;ffffff&quot;</code>)</em>: Accepts a hex code defining the fill color (defaults to solid white).</li>
+</ul>
+</li>
+</ul>
+<h3><code>border</code> (Border ROI)</h3>
+<p>Draws sharp, visible bounding boxes around your mapped image ROIs. This is ideal for validating AI-assisted detections or creating clear figures for your research publications.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-One (modifies a copy of the single image canvas).</li>
+<li><strong>Parameters:</strong><ul>
+<li><code>labels</code> <em>(boolean, default: <code>false</code>)</em>: Draws text labels above the borders to display individual ROI metadata notes.</li>
+</ul>
+</li>
+</ul>
+<h3><code>blur</code> (Blur ROI)</h3>
+<p>Applies a blurring filter strictly within the boundaries of the selected ROIs, leaving the rest of the image in sharp focus. This is a common alternative to <code>fill</code> for anonymizing personal identifiers or faces while maintaining page context.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-One</li>
+<li><strong>Parameters:</strong><ul>
+<li><code>labels</code> <em>(boolean, default: <code>false</code>)</em>: Overlays identifying text labels over the blurred regions.</li>
+</ul>
+</li>
+</ul>
+<h3><code>binary</code> (Binary ROI)</h3>
+<p>Applies a sharp binary threshold (converting the area to high-contrast pure black and white pixels) strictly <em>inside</em> the designated ROIs. This can dramatically improve accuracy before sending low-quality or aged document snippets into text recognition (OCR) tools.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-One</li>
+</ul>
+<h3><code>binary_invert</code> (Binary Invert ROI)</h3>
+<p>Applies an inverted binary threshold exclusively inside the ROIs, flipping the black and white pixel values.</p>
+<ul>
+<li><strong>Graph Behavior:</strong> One-to-One</li>
+</ul>
+<hr>
+<h2>Technical Details &amp; Status</h2>
+<ul>
+<li><strong>Service ID:</strong> <code>md-opencv</code></li>
+<li><strong>Status:</strong> ⚠️ <em>Experimental</em> — Features and parameter options may change in upcoming iterations.</li>
+<li><strong>Source Repository:</strong> For custom adjustments or local script testing, you can review the codebase directly at <a href="https://github.com/MD-opencv">GitHub - MD-opencv</a>.</li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>

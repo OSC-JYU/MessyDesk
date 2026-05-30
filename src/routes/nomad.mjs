@@ -28,13 +28,26 @@ export default [
         handler: async (request, h) => {
             console.log('POST /api/nomad/service/{name}');
             console.log(request.params.name);
-            const adapter = await services.getServiceAdapterByName(request.params.name);
             const hclOverride = request.payload?.nomad_hcl;
 
-            const serviceConfig = { ...adapter };
+            let adapter = null;
+            try {
+                adapter = await services.getServiceAdapterByName(request.params.name);
+            } catch (e) {
+                adapter = null;
+            }
+
+            const serviceConfig = adapter ? { ...adapter } : { id: request.params.name };
             if (typeof hclOverride === 'string' && hclOverride.trim().length > 0) {
                 serviceConfig.nomad_hcl = hclOverride;
                 serviceConfig.nomad = true;
+            }
+
+            if (!serviceConfig.nomad_hcl) {
+                return h.response({
+                    error: `No Nomad spec found for service "${request.params.name}"`,
+                    message: 'Provide request payload field "nomad_hcl" or register service adapter with nomad_hcl.'
+                }).code(400);
             }
             try {
                 const service = await nomad.createService(serviceConfig);

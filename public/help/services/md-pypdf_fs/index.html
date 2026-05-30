@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-pyPDF_FS Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-pypdf_fs</div>
+                        <h1>MD-pyPDF_FS Service</h1>
+<p>The <strong>MD-pypdf_fs</strong> service is a PDF service backed by the Python open-source library <strong><code>pypdf</code></strong>. It provides lightweight, memory-efficient operations for slicing and extracting data from PDF documents page by page.</p>
+<p>For advanced text extraction or native-resolution image parsing, see the <strong>MD-Poppler Service</strong> help file.</p>
+<hr>
+<h2>Available Crunchers</h2>
+<h3><code>split</code></h3>
+<p>Splits a single multi-page PDF document into a set of individual, one-page PDF nodes.</p>
+<ul>
+<li><strong>Why this is important:</strong> Large, hundred-megabyte PDF files can be incredibly resource-heavy and memory-hungry to process. Breaking a document into a flat set of single pages ensures you can run downstream analysis (like OCR or classification) efficiently without running into out-of-memory errors or system slowdowns.</li>
+</ul>
+<h3><code>extract_text</code></h3>
+<p>Extracts the embedded, structural text layers from a PDF, generating exactly <strong>one text file (<code>.txt</code>) per page</strong>.</p>
+<ul>
+<li><blockquote>
+<p>⚠️ <strong>Note:</strong> Like other native PDF text-extraction utilities, this cruncher reads digital text strings embedded in the file structure. It does not perform Optical Character Recognition (OCR) on flat, scanned images.</p>
+</blockquote>
+</li>
+</ul>
+<h3><code>extract_images</code></h3>
+<p>Extracts inline, embedded image assets out of each individual page file.</p>
+<hr>
+<h2>External Resources</h2>
+<p>For developers or advanced users wishing to dig deeper into the underlying processing engine&#39;s architecture and capabilities, consult the official documentation:</p>
+<ul>
+<li><a href="https://pypdf.readthedocs.io/en/stable/">pypdf Documentation</a></li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>
