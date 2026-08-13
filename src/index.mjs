@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import Boom from '@hapi/boom';
 import Susie from 'susie';
 
-import nats from './queue.mjs';
+import queue from './queue.mjs';
 import Graph from './graph.mjs';
 import media from './media.mjs';
 import services from './services.mjs';
@@ -49,9 +49,8 @@ const init = async () => {
 		await nomad.getStatus();
 	}
 	await services.loadServiceAdapters('services', NOMAD);
-	await nats.init(services.getServices());
+	await queue.init();
 	await Graph.initDB();
-	nats.listenDBQueue('arcadedb');
 
 	// Create server instance
 	const server = Hapi.server({

@@ -1,667 +1,442 @@
-
-
 import path from 'path';
-import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
+import { DatabaseSync } from 'node:sqlite';
 
 import Graph from './graph.mjs';
-import nomad from './nomad.mjs';
 import media from './media.mjs';
 import { createProcessQueueMessage } from './messageFactory.mjs';
+import { DATA_DIR } from './env.mjs';
 
-import { connect } from "@nats-io/transport-node";
-import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-io/jetstream";
+const LOG_QUEUE_CONTEXT = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.LOG_QUEUE_CONTEXT || '').trim().toLowerCase()
+);
+const QUEUE_DB_PATH = process.env.QUEUE_DB_PATH || path.join(DATA_DIR, 'queue.sqlite');
 
+const queueDb = {};
 
-const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
-const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
-const LOG_QUEUE_CONTEXT = ['1', 'true', 'yes', 'on'].includes(String(process.env.LOG_QUEUE_CONTEXT || '').trim().toLowerCase())
-const NATS_PRUNE_STALE_CONSUMERS = ['1', 'true', 'yes', 'on'].includes(String(process.env.NATS_PRUNE_STALE_CONSUMERS || '').trim().toLowerCase())
-const NATS_STALE_CONSUMER_IDLE_MS = Number(process.env.NATS_STALE_CONSUMER_IDLE_MS || 24 * 60 * 60 * 1000)
+queueDb.pausedBatches = new Set();
+queueDb.cancelledBatches = new Set();
+queueDb._queueContextSampledTopics = new Set();
 
-const nats = {}
+queueDb._openDb = function() {
+  if (this.db) return this.db;
 
-nats.pausedBatches = new Set()
-nats.cancelledBatches = new Set()
-nats._queueContextSampledTopics = new Set()
+  fs.ensureDirSync(path.dirname(QUEUE_DB_PATH));
+  const db = new DatabaseSync(QUEUE_DB_PATH);
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA synchronous = NORMAL;');
 
-function readCounter(info, key) {
-  const top = Number(info?.[key])
-  if(Number.isFinite(top)) return top
-  const fromState = Number(info?.state?.[key])
-  if(Number.isFinite(fromState)) return fromState
-  return 0
-}
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS queue_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      queue TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      process_rid TEXT,
+      set_process_rid TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      claimed_by TEXT,
+      claimed_at TEXT,
+      lease_until TEXT,
+      next_retry_at TEXT NOT NULL,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
 
-function getConsumerName(info) {
-  return info?.name || info?.config?.durable_name || ''
-}
+    CREATE INDEX IF NOT EXISTS idx_queue_claim
+      ON queue_jobs(queue, status, next_retry_at, created_at);
 
-function getConsumerTimestamp(info) {
-  const ts = info?.ts || info?.created || info?.state?.ts
-  if(!ts) return null
-  const parsed = Date.parse(ts)
-  if(Number.isNaN(parsed)) return null
-  return parsed
-}
+    CREATE INDEX IF NOT EXISTS idx_queue_process
+      ON queue_jobs(process_rid, set_process_rid, status);
 
-function isSafeToPruneConsumer(info, idleMsThreshold) {
-  const pending = readCounter(info, 'num_pending')
-  const ackPending = readCounter(info, 'num_ack_pending')
-  if(pending > 0 || ackPending > 0) {
-    return false
+    CREATE INDEX IF NOT EXISTS idx_queue_cleanup
+      ON queue_jobs(status, updated_at);
+  `);
+
+  this.db = db;
+  return db;
+};
+
+queueDb.init = async function() {
+  this._openDb();
+  console.log('QUEUE-DB: sqlite queue ready at', QUEUE_DB_PATH);
+};
+
+queueDb.connect = async function() {
+  this._openDb();
+};
+
+queueDb.close = async function() {
+  if (this.db) {
+    this.db.close();
+    this.db = null;
   }
+};
 
-  const ts = getConsumerTimestamp(info)
-  if(ts === null) {
-    return false
-  }
+queueDb._toRidString = function(value) {
+  if (!value) return null;
+  return String(value);
+};
 
-  const idleMs = Date.now() - ts
-  return idleMs >= idleMsThreshold
-}
+queueDb._extractProcessRid = function(message) {
+  return this._toRidString(message?.process?.['@rid']);
+};
 
-nats.reconcileProcessConsumers = async function(expectedConsumers = new Set()) {
-  if(!NATS_PRUNE_STALE_CONSUMERS) {
-    return { scanned: 0, removed: 0, skipped: 0 }
-  }
+queueDb._extractSetProcessRid = function(message) {
+  return this._toRidString(message?.set_process || message?.set_process_rid);
+};
 
-  let scanned = 0
-  let removed = 0
-  let skipped = 0
-
-  const lister = await this.jsm.consumers.list('PROCESS')
-  for await (const info of lister) {
-    scanned += 1
-    const consumerName = getConsumerName(info)
-    if(!consumerName || expectedConsumers.has(consumerName)) {
-      skipped += 1
-      continue
-    }
-
-    if(!isSafeToPruneConsumer(info, NATS_STALE_CONSUMER_IDLE_MS)) {
-      skipped += 1
-      continue
-    }
-
-    try {
-      await this.jsm.consumers.delete('PROCESS', consumerName)
-      removed += 1
-      console.log('NATS: pruned stale consumer', consumerName)
-    } catch(error) {
-      skipped += 1
-      console.log('NATS: failed to prune consumer', consumerName, error.message)
-    }
-  }
-
-  return { scanned, removed, skipped }
-}
-
-
-nats.init = async function(services) {
-  console.log('NATS: connecting...', NATS_URL)
-  this.nc = await connect({
-    servers: NATS_URL,
-  });
-  this.js = jetstream(this.nc);
-  this.jsm = await jetstreamManager(this.nc);
-  await this.jsm.streams.add({
-    name: "PROCESS",
-    retention: RetentionPolicy.Workqueue,
-    subjects: ["process.>"],
-  });
-  console.log("NATS: created the 'PROCESS' stream");
-
-
-  // create consumers for all services
-  console.log("NATS: creating consumers...")
-  const expectedConsumers = new Set()
-  for(const key in services) {
-    expectedConsumers.add(key)
-    expectedConsumers.add(key + '_batch')
-  }
-
-  const reconcileSummary = await this.reconcileProcessConsumers(expectedConsumers)
-  if(NATS_PRUNE_STALE_CONSUMERS) {
-    console.log('NATS: stale consumer reconciliation', reconcileSummary)
-  }
-
-  for(var key in services) {
-    try {
-      await this.jsm.consumers.add("PROCESS", {
-        durable_name: key,
-        ack_policy: AckPolicy.Explicit,
-        ack_wait: 2 * 60 * 1e9, // 2 minutes
-        max_deliver: 1, 
-        redeliver_policy: {
-          max_deliveries: 1,
-          interval: 100000,
-        },
-        filter_subject: `process.${key}`,
-    
-      });
-     // console.log('NATS: created consumer', key, services[key].nomad_hcl)
-      if(services[key].nomad_hcl) {
-        console.log('NATS: created consumer', key, ' NOMAD=true')
-      } else {
-        console.log('NATS: created consumer', key, ' NOMAD=false')
-      }
-
-      var batch = key + '_batch'
-      await this.jsm.consumers.add("PROCESS", {
-        durable_name: batch,
-        ack_wait: 2 * 60 * 1e9,
-        max_deliver: 1, 
-        ack_policy: AckPolicy.Explicit,
-        redeliver_policy: {
-          max_deliveries: 2,
-          interval: 1000,
-        },
-        filter_subject: `process.${batch}`,
-    
-      });
-      console.log('NATS: created batch consumer', batch)
-
-
-    } catch(e) {
-      if(e.message.includes('already exists')) {
-        console.log('NATS: consumer already exists', key)
-      } else {
-        console.log('NATS ERROR: could not create consumer', key)
-        console.log(e.message)
-        console.log('HINT: remove all consumers from NATS and try again.')
-        process.exit(1)
-      }
-    }
-  }
-
-  // SYSTEM QUEUES
-  await this.jsm.streams.add({
-    name: "SYSTEM",
-    retention: RetentionPolicy.Workqueue,
-    subjects: ["system.>"],
-  });
-  console.log("NATS: created the 'SYSTEM' stream");
-
-  await this.jsm.consumers.add("SYSTEM", {
-    durable_name: 'arcadedb',
-    ack_policy: AckPolicy.Explicit,
-    redeliver_policy: {
-      max_deliveries: 2,
-      interval: 1000,
-    },
-    filter_subject: `system.arcadedb`,
-
-  });
-  console.log('NATS: created system.arcadedb consumer')
-}
-
-nats.connect = async function() {
-  this.nc = await connect({
-    servers: NATS_URL,
-  });
-  this.js = jetstream(this.nc);
-}
-
-nats.ensureProcessConsumersForService = async function(serviceId) {
-  if(!serviceId) {
-    throw new Error('Missing service id for PROCESS consumer ensure')
-  }
-
-  const consumerExists = async (durableName) => {
-    try {
-      await this.jsm.consumers.info('PROCESS', durableName)
-      return true
-    } catch(error) {
-      const msg = String(error?.message || '').toLowerCase()
-      if(msg.includes('not found') || msg.includes('404')) {
-        return false
-      }
-      throw error
-    }
-  }
-
-  const createIfMissing = async (durableName, filterSubject, maxDeliveries = 1) => {
-    if(await consumerExists(durableName)) {
-      return
-    }
-
-    try {
-      await this.jsm.consumers.add('PROCESS', {
-        durable_name: durableName,
-        ack_policy: AckPolicy.Explicit,
-        ack_wait: 2 * 60 * 1e9,
-        max_deliver: 1,
-        redeliver_policy: {
-          max_deliveries: maxDeliveries,
-          interval: 1000,
-        },
-        filter_subject: filterSubject,
-      })
-      console.log('NATS: created consumer', durableName)
-    } catch(error) {
-      if(String(error?.message || '').includes('already exists')) {
-        return
-      }
-      throw error
-    }
-  }
-
-  await createIfMissing(serviceId, `process.${serviceId}`, 1)
-  await createIfMissing(`${serviceId}_batch`, `process.${serviceId}_batch`, 2)
-}
-
-nats.close = async function() {
-  await this.nc.close()
-}
-
-nats.checkService = async function(data) {
-  // get service url from nomad
-  const service = await nomad.getServiceURL(data)
-  return service
-}
-
-
-nats.publish = async function(topic, data) {
-  console.log(topic)
-  //var service = await services.getServiceAdapterByName(topic)
+queueDb.publish = async function(topic, data) {
   try {
-    //var s = await this.checkService(topic)
-    //if(!s) {
-      //await nomad.createService(service)
-    //}
-    //const service_url = await nomad.getServiceURL(topic)
-    //service.url = service_url
-    //service.queue.add(service, data, filenode)
     const enriched = await createProcessQueueMessage(data, {
       resolveProjectRidForNode: (rid) => Graph.getProjectRidForNode(rid)
-    })
-    if(LOG_QUEUE_CONTEXT && enriched && typeof enriched === 'object' && !Array.isArray(enriched) && !this._queueContextSampledTopics.has(topic)) {
-      this._queueContextSampledTopics.add(topic)
+    });
+
+    if (
+      LOG_QUEUE_CONTEXT &&
+      enriched &&
+      typeof enriched === 'object' &&
+      !Array.isArray(enriched) &&
+      !this._queueContextSampledTopics.has(topic)
+    ) {
+      this._queueContextSampledTopics.add(topic);
       console.log('queue_context_sample', {
         topic,
         project_rid: enriched.project_rid || null,
         set_rid: enriched.set_rid || null,
         set_process: enriched.set_process || null,
         file_rid: enriched.file?.['@rid'] || null,
-      })
+      });
     }
 
-    const payload = typeof enriched === 'string' ? enriched : JSON.stringify(enriched);
-    await this.js.publish(`process.${topic}`, payload)
-  } catch(e) {
-    console.log(`ERROR: Could not add topic ${topic} to queue!\n`, e)
-  }
-}
+    const payloadJson = typeof enriched === 'string' ? enriched : JSON.stringify(enriched);
+    const parsed = typeof enriched === 'string' ? JSON.parse(enriched) : enriched;
 
-
-nats.listConsumers = async function() {
-  var consumers = []
-  var lister = await this.jsm.consumers.list("PROCESS")
-  for await (const item of lister) {
-      consumers.push(item);
-  }
-  return consumers
-}
-
-
-nats.getFilesFromStore = async function(response, message, service) {
-
-  if(response.uri) {
- 
-    // download array of files
-    if(Array.isArray(response.uri)) {
-      for(var uri of response.uri) {
-        await this.downLoadFile(message, uri, service)
-      }
-    // download single file
-    } else {
-      // first, create file object to graph
-      // process_rid, file_type, extension, label
-      await this.downLoadFile(message, response.uri, service)
-    }
-  } else {
-    console.log('File download not found!')
-  }
-}
-
-
-
-nats.downLoadFile = async function(message, uri, service) {
-  // get file type from extension
-  var ext = path.extname(uri).replace('.', '')
-  var filename = uri.split('/').pop()
-  var type = 'text'
-  if(['png','jpg','jpeg'].includes(ext)) type = 'image'
-  if(['pdf'].includes(ext)) type = 'pdf'
-
-
-  const fileNode = await Graph.createProcessFileNode(message.process['@rid'], type, ext, filename)
-  console.log(fileNode)
-  var filepath = ''
-
-  try {
-    filepath = fileNode.result[0].path
-    await fs.ensureDir(path.dirname(filepath))
-  } catch(e) {
-    throw('Could not create file directory!' + e.message)
-  }
-
-  // Add node to UI via websocket
-  if(message.userId) {
-    console.log('sending "add node" WS')
-    const ws = this.connections.get(message.userId)
-    if(ws) {
-      var wsdata = {target: message.process['@rid'], node:{rid: fileNode.result[0]['@rid'], label: filename, type: type}}
-      ws.send(JSON.stringify(wsdata))
-    }
-  }
-
-  const url = service.url + uri
-  console.log(url)
-  const downloadStream = this.got.stream(url);
-  const fileWriterStream = fs.createWriteStream(filepath);
-
-  try {
-    await pipeline(downloadStream, fileWriterStream)
-
-    const topic = 'md-thumbnailer' 
-    const k_message = {
-      key: "md",
-      value: JSON.stringify({
-        file: fileNode.result[0],
-        userId: message.userId
-      })
-    };
-  
-    await this.producer.send({
+    const now = new Date().toISOString();
+    const db = this._openDb();
+    db.prepare(`
+      INSERT INTO queue_jobs (
+        queue,
+        payload_json,
+        process_rid,
+        set_process_rid,
+        status,
+        attempts,
+        max_attempts,
+        next_retry_at,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?)
+    `).run(
       topic,
-      messages: [k_message],
-    });
-
-  } catch(e) {
-    console.log(e)
-    console.log('File download failed!')
-  }
-}
-
-nats.getQueueStatus = async function(topic) {
-  try {
-    const url = NATS_URL_STATUS + '/jsz?consumers=true'
-    const queues = {}
-  
-    const response = await fetch(url)
-    const data = await response.json()
-    for(var stream of data.account_details[0].stream_detail[0].consumer_detail) {
-      if(stream.name == topic || stream.name == topic + '_batch') {
-        queues[stream.name] = stream
-      }
-    }
-
-    return queues
-    
-  } catch(e) {
-    console.log(e)
-    console.log('Queue status failed!')
-  }
-}
-
-
-
-nats.drainQueue = async function (topic, process_rid) {
-  console.log('draining topic: ', topic)
-  console.log('  process_rid: ', process_rid)
-  let count = 0;
-  try {
-    // Find the stream for this topic
-    const streamName = await this.jsm.streams.find(`process.${topic}`);
-    const info = await this.jsm.streams.info(streamName);
-    const { first_seq, last_seq } = info.state;
-
-
-    for (let seq = last_seq; seq >= first_seq; seq--) {
-      let msg;
-      try {
-        msg = await this.jsm.streams.getMessage(streamName, { seq });
-        //await this.jsm.streams.deleteMessage(streamName, seq);
-      } catch (err) {
-        // if (!/message not found/i.test(err.message)) {
-        //   console.warn(`Skipping seq=${seq}: ${err.message}`);
-        // }
-        // stop after first already deleted
-        console.log('message not found!')
-         continue;
-      }
-
-      // Parse JSON payload
-      let message;
-      try {
-        message = msg.json();
-        console.log(message)
-        // Match and delete
-        if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
-          await this.jsm.streams.deleteMessage(streamName, seq);
-          count++;
-        }
-      } catch {
-        console.warn(`Invalid JSON seq=${seq}`);
-        continue;
-      }
-
-
-    }
-    console.log('deleted messages: ', count)
-    return count;
-  } catch (err) {
-    console.error("drainQueue error:", err);
-    return 0;
+      payloadJson,
+      this._extractProcessRid(parsed),
+      this._extractSetProcessRid(parsed),
+      Number(process.env.QUEUE_DB_MAX_ATTEMPTS || 3),
+      now,
+      now,
+      now
+    );
+  } catch (e) {
+    console.log(`ERROR: Could not add topic ${topic} to db queue!\n`, e);
   }
 };
 
+queueDb.getQueueStatus = async function(topic) {
+  const db = this._openDb();
+  const rows = db.prepare(`
+    SELECT queue, status, COUNT(*) AS count
+    FROM queue_jobs
+    WHERE queue = ? OR queue = ?
+    GROUP BY queue, status
+  `).all(topic, `${topic}_batch`);
 
-nats.drainQueueByProcess = async function(process_rid) {
-  console.log('draining by process_rid: ', process_rid)
-  let count = 0;
-  try {
-    const info = await this.jsm.streams.info('PROCESS');
-    const { first_seq, last_seq } = info.state;
+  const status = {};
+  for (const row of rows) {
+    if (!status[row.queue]) {
+      status[row.queue] = { queue: row.queue, queued: 0, running: 0, done: 0, failed: 0, cancelled: 0 };
+    }
+    status[row.queue][row.status] = Number(row.count || 0);
+  }
+  return status;
+};
 
-    for (let seq = last_seq; seq >= first_seq; seq--) {
-      let msg;
-      try {
-        msg = await this.jsm.streams.getMessage('PROCESS', { seq });
-      } catch {
+queueDb.drainQueue = async function(topic, process_rid) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE (queue = ? OR queue = ?)
+      AND status = 'queued'
+      AND (? IS NULL OR process_rid = ? OR set_process_rid = ?)
+  `).run(topic, `${topic}_batch`, process_rid || null, process_rid || null, process_rid || null);
+
+  return Number(result.changes || 0);
+};
+
+queueDb.drainQueueByProcess = async function(process_rid) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE status = 'queued'
+      AND (process_rid = ? OR set_process_rid = ?)
+  `).run(process_rid, process_rid);
+
+  return Number(result.changes || 0);
+};
+
+queueDb.flushQueue = async function(topic) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE queue = ? OR queue = ?
+  `).run(topic, `${topic}_batch`);
+
+  return { deleted: Number(result.changes || 0) };
+};
+
+queueDb.writeToDB = async function() {
+  return true;
+};
+
+queueDb.createSetProcessNodesAndPublish = async function(msg) {
+  const batchRid = msg?.set_process || msg?.set_process_rid;
+
+  if (batchRid) {
+    const batchNode = await Graph.getBatchProcess(batchRid);
+    const batchStatus = batchNode?.status || batchNode?.state || 'running';
+
+    if (batchStatus === 'paused' || batchStatus === 'cancelling' || batchStatus === 'cancelled' || batchStatus === 'done') {
+      return;
+    }
+
+    if (!msg.process || !msg.process['@rid']) {
+      msg.process = { '@rid': batchRid };
+    }
+
+    await this.publish(`${msg.service.id}_batch`, JSON.stringify(msg));
+    return;
+  }
+
+  const processNode = await Graph.createProcessNode_queue(msg);
+  await media.createProcessDir(processNode.path);
+  await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
+  msg.process = processNode;
+
+  await this.publish(`${msg.service.id}_batch`, JSON.stringify(msg));
+};
+
+queueDb.cancelBatch = async function(process_rid) {
+  this.cancelledBatches.add(process_rid);
+  this.pausedBatches.delete(process_rid);
+  const deleted = await this.drainQueueByProcess(process_rid);
+  return { status: 'cancelled', process_rid, deleted };
+};
+
+queueDb.pauseBatch = async function(process_rid) {
+  this.pausedBatches.add(process_rid);
+  const deleted = await this.drainQueueByProcess(process_rid);
+  return { status: 'paused', process_rid, deleted };
+};
+
+queueDb.resumeBatch = async function(process_rid) {
+  this.pausedBatches.delete(process_rid);
+  this.cancelledBatches.delete(process_rid);
+  return { status: 'running', process_rid };
+};
+
+// --- Consumer-facing operations ---
+
+const DEFAULT_LEASE_SECONDS = Number(process.env.QUEUE_DB_LEASE_SECONDS || 120);
+
+queueDb.claim = function(topic, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+  const leaseUntil = new Date(Date.now() + DEFAULT_LEASE_SECONDS * 1000).toISOString();
+
+  // Claim from both <topic> and <topic>_batch queues
+  const queues = [topic, `${topic}_batch`];
+
+  for (const queueName of queues) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = db.prepare(`
+        SELECT id, payload_json, attempts, max_attempts, queue
+        FROM queue_jobs
+        WHERE queue = ?
+          AND (
+            (status = 'queued' AND next_retry_at <= ?)
+            OR (status = 'running' AND lease_until < ?)
+          )
+        ORDER BY created_at ASC
+        LIMIT 1
+      `).get(queueName, now, now);
+
+      if (!row) {
+        db.exec('COMMIT');
         continue;
       }
 
-      let message;
-      try {
-        message = msg.json();
-      } catch {
-        continue;
-      }
+      db.prepare(`
+        UPDATE queue_jobs
+        SET status = 'running',
+            claimed_by = ?,
+            claimed_at = ?,
+            lease_until = ?,
+            attempts = attempts + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(adapterId, now, leaseUntil, now, row.id);
 
-      if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
-        await this.jsm.streams.deleteMessage('PROCESS', seq);
-        count++;
-      }
+      db.exec('COMMIT');
+
+      return {
+        id: row.id,
+        queue: row.queue,
+        payload: JSON.parse(row.payload_json),
+        attempts: Number(row.attempts || 0) + 1,
+        max_attempts: Number(row.max_attempts || 3),
+      };
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* ignore */ }
+      throw error;
     }
-
-    console.log('deleted messages by process: ', count)
-    return count;
-  } catch (err) {
-    console.error('drainQueueByProcess error:', err);
-    return 0;
   }
-}
 
+  return null; // no work available
+};
 
-// Queue draining
-nats.drainQueue_old = async function(topic, process_rid) {
+queueDb.heartbeat = function(jobId, adapterId) {
+  const db = this._openDb();
+  const leaseUntil = new Date(Date.now() + DEFAULT_LEASE_SECONDS * 1000).toISOString();
+  const now = new Date().toISOString();
 
-  // find a stream that stores a specific subject:
-  const name = await this.jsm.streams.find("process." + topic);
-  console.log(name)
-  // retrieve info about the stream by its name
-  const si = await this.jsm.streams.info(name);
-  console.log(si)
-  const seq = si.state.first_seq
-  var last_seq = si.state.last_seq
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET lease_until = ?, updated_at = ?
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).run(leaseUntil, now, jobId, adapterId);
 
-  try {
-    for(var i = last_seq; i >= seq; i--) {
-      let payload, data
-      const message = await this.jsm.streams.getMessage(name, { seq: i });
+  return Number(result.changes || 0) > 0;
+};
 
-      try {
-        data = message.json()
-        console.log(data)
-      } catch (e) {
-        console.log('invalid message payload!', e.message)
-      }
+queueDb.complete = function(jobId, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
 
-      await this.jsm.streams.deleteMessage(name, i);
-      //console.log(sm);
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET status = 'done',
+        lease_until = NULL,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).run(now, now, jobId, adapterId);
+
+  return Number(result.changes || 0) > 0;
+};
+
+queueDb.fail = function(jobId, errorMessage, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+
+  // Get current state
+  const row = db.prepare(`
+    SELECT attempts, max_attempts FROM queue_jobs
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).get(jobId, adapterId);
+
+  if (!row) return false;
+
+  const attempts = Number(row.attempts || 0);
+  const maxAttempts = Number(row.max_attempts || 3);
+
+  if (attempts >= maxAttempts) {
+    // Permanently failed
+    db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'failed',
+          lease_until = NULL,
+          claimed_by = NULL,
+          claimed_at = NULL,
+          last_error = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(String(errorMessage || 'processing failed'), now, jobId);
+  } else {
+    // Requeue with backoff
+    const backoffMs = Math.min(500 * Math.pow(2, Math.max(0, attempts - 1)), 30000);
+    const retryAt = new Date(Date.now() + backoffMs).toISOString();
+
+    db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'queued',
+          lease_until = NULL,
+          claimed_by = NULL,
+          claimed_at = NULL,
+          next_retry_at = ?,
+          last_error = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(retryAt, String(errorMessage || 'processing failed'), now, jobId);
+  }
+
+  return true;
+};
+
+queueDb.getActiveJobs = function() {
+  const db = this._openDb();
+  const rows = db.prepare(`
+    SELECT id, queue, payload_json, process_rid, set_process_rid, status,
+           attempts, claimed_by, created_at, updated_at
+    FROM queue_jobs
+    WHERE status IN ('queued', 'running')
+    ORDER BY created_at ASC
+    LIMIT 200
+  `).all();
+
+  // Group by set_process_rid to return batch-level summaries
+  const batches = {};
+  for (const row of rows) {
+    const key = row.set_process_rid || row.process_rid || `job_${row.id}`;
+    if (!batches[key]) {
+      batches[key] = {
+        rid: key,
+        set_process: row.set_process_rid,
+        process_rid: row.process_rid,
+        queue: row.queue,
+        status: 'running',
+        total_files: 0,
+        processed_files: 0,
+        queued_files: 0,
+        running_files: 0,
+      };
     }
-
-  } catch(e) {
-    console.log(e.message)
+    batches[key].total_files += 1;
+    if (row.status === 'queued') batches[key].queued_files += 1;
+    if (row.status === 'running') batches[key].running_files += 1;
   }
 
-  //  await this.jsm.streams.purge("SYSTEM");
-  return true
- 
+  return Object.values(batches);
+};
 
+queueDb.listConsumers = async function() {
+  return [];
+};
 
-  // const co = await js.consumers.get("SYSTEM", "arcadedb");
-  // if (co) {
-  //   let messages = await co.fetch({ max_messages: 4, expires: 2000 });
-  //   for await (const m of messages) {
-  //     m.ack();
-  //   }
-  //   //co.stop();
-  //   await nc.close();
-  //   console.log(`batch completed: ${messages.getProcessed()} msgs processed`);
-  //   return true
-    
-  // }
-}
+queueDb.listenDBQueue = async function() {
+  return;
+};
 
+queueDb.ensureProcessConsumersForService = async function() {
+  return;
+};
 
+queueDb.reconcileProcessConsumers = async function() {
+  return { scanned: 0, removed: 0, skipped: 0 };
+};
 
-// Database writing queue
-
-
-nats.writeToDB = async function(query, params) {
-  try {
-    const json = JSON.stringify({query: query, params: params})
-    await this.js.publish("system.arcadedb", json)
-  } catch(e) {
-    console.log('ERROR:', e.message)
-  }
-}
-
-nats.createSetProcessNodesAndPublish = async function(msg) {
-  console.log('creating set process nodes and publishing...')
-
-  try {
-    const json = JSON.stringify({topic: 'create_and_publish', value: msg})
-    await this.js.publish("system.arcadedb", json)
-  } catch(e) {
-    console.log('ERROR:', e.message)
-  }
-}
-
-nats.cancelBatch = async function(process_rid) {
-  this.cancelledBatches.add(process_rid)
-  this.pausedBatches.delete(process_rid)
-  const deleted = await this.drainQueueByProcess(process_rid)
-  return {status: 'cancelled', process_rid, deleted}
-}
-
-nats.pauseBatch = async function(process_rid) {
-  this.pausedBatches.add(process_rid)
-  const deleted = await this.drainQueueByProcess(process_rid)
-  return {status: 'paused', process_rid, deleted}
-}
-
-nats.resumeBatch = async function(process_rid) {
-  this.pausedBatches.delete(process_rid)
-  this.cancelledBatches.delete(process_rid)
-  return {status: 'running', process_rid}
-}
-
-nats.listenDBQueue = async function(topic) {
-  console.log('connecting to DB queue...')
-  const nc = await connect({servers: NATS_URL});
-  const js = jetstream(nc);  
-  console.log('connected to DB queue!')
- 
-
-
-  const co = await js.consumers.get("SYSTEM", "arcadedb");
-  if (co) {
-      const messages = await co.consume({ max_messages: 1 });
-      for await (const m of messages) {
-          try {
-            var msg_data = m.json()
-            var msg = msg_data.value
-            console.log(msg)
-
-            // CREATE AND PUBLISH
-            if(msg_data.topic == 'create_and_publish') {
-              const batchRid = msg?.set_process || msg?.set_process_rid
-              if(batchRid) {
-                const batchNode = await Graph.getBatchProcess(batchRid)
-                const batchStatus = batchNode?.status || batchNode?.state || 'running'
-
-                if(batchStatus === 'paused') {
-                  // Drop queued create_and_publish tasks while paused; resume will rebuild pending files from graph.
-                  m.ack();
-                  continue;
-                }
-
-                if(batchStatus === 'cancelling' || batchStatus === 'cancelled' || batchStatus === 'done') {
-                  m.ack();
-                  continue;
-                }
-
-                // Set batches use one SetProcess node; do not create per-file Process nodes.
-                if(!msg.process || !msg.process['@rid']) {
-                  msg.process = {'@rid': batchRid}
-                }
-                nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
-                m.ack();
-                continue;
-              }
-
-              //console.log('creating and publishing received...', msg.current_file)
-              // Add 500ms delay
-             // await new Promise(resolve => setTimeout(resolve, 500));
-             //var msg_copy = structuredClone(msg)
-             //if(msg_copy.system_params) delete msg_copy.system_params.json_schema
-             //if(msg_copy?.params?.json_schema) delete msg_copy.params.json_schema
-              var processNode = await Graph.createProcessNode_queue(msg);
-              await media.createProcessDir(processNode.path);
-              //delete data.service.tasks
-              await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
-              //console.log(data)
-              msg.process = processNode
-              
-              //console.log('message', msg)
-              nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
-              // we call database writes here and then we publish the message to actual processing queue
-            } else {
-              console.log('no topic defined!')
-            }
-            m.ack();
-          } catch(e) {
-              console.log('ERROR:', e.message)
-              // we do not retry, so we ack
-              m.ack();
-          }
-      } 
-  }
-}
-
-export default nats
+export default queueDb;

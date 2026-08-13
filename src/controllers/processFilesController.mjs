@@ -3,7 +3,7 @@ import path from 'path';
 import fse from 'fs-extra';
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import services from '../services.mjs';
 import Boom from '@hapi/boom';
@@ -204,7 +204,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             process: {kind: 'internal_versioning'}
         };
         
-        nats.publish(data.topic.id, JSON.stringify(data));
+        queue.publish(data.topic.id, JSON.stringify(data));
 
         var wsdata = {
             command: 'update',
@@ -418,7 +418,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 output_set: message.output_set,
                 
             };
-            nats.publish(th.service.id, JSON.stringify(th));
+            queue.publish(th.service.id, JSON.stringify(th));
         }
 
         // Only split-task PDFs get automatic poppler thumbnails.
@@ -443,7 +443,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 total_files: message.total_files,
                 current_file: message.current_file,
             };
-            nats.publish('md-poppler', JSON.stringify(thumbMsg));
+            queue.publish('md-poppler', JSON.stringify(thumbMsg));
         }
 
         // update set file count or add file to visual graph
@@ -553,7 +553,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                             image: API_URL + 'icons/wait.gif'
                         };
                         userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
-                        nats.publish(line.params.topic, JSON.stringify(msg));
+                        queue.publish(line.params.topic, JSON.stringify(msg));
                     }
                 }
             }

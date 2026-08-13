@@ -1,5 +1,4 @@
 import Graph from '../graph.mjs';
-import nats from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import Boom from '@hapi/boom';
 export default [
@@ -64,10 +63,24 @@ export default [
         path: '/api/graph/vertices/{rid}',
         handler: async (request) => {
             try {
+                const rid = Graph.sanitizeRID(request.params.rid);
+
+                // Deletion guard: prevent deleting nodes with active queue jobs
+                const queue = (await import('../queue.mjs')).default;
+                const db = queue._openDb();
+                const activeJob = db.prepare(`
+                    SELECT id FROM queue_jobs
+                    WHERE (process_rid = ? OR set_process_rid = ?)
+                      AND status IN ('queued', 'running')
+                    LIMIT 1
+                `).get(rid, rid);
+                if (activeJob) {
+                    throw Boom.conflict('Cannot delete a node with active queue jobs. Pause or cancel the batch first.');
+                }
+
                 const result = await Graph.deleteNode(
-                    Graph.sanitizeRID(request.params.rid),
-                    request.auth.credentials.user.rid,
-                    nats
+                    rid,
+                    request.auth.credentials.user.rid
                 );
                 return result;
             } catch (error) {

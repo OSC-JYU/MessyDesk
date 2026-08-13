@@ -3,54 +3,15 @@
 <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>MessyDesk Help - MD-zip_fs Service</title>
+        <title>MessyDesk Help - Zip</title>
     <link rel="stylesheet" href="/api/help/styles/help.css" />
 </head>
 <body>
         <main class="page">
                 <article class="content">
                         <div class="service-meta">Service: md-zip_fs</div>
-                        <h1>MD-zip_fs Service</h1>
-<p>Zip file utility service for MessyDesk.</p>
-<h2>Endpoints</h2>
-<ul>
-<li><code>GET /health</code> is not implemented.</li>
-<li><code>GET /config</code> returns service descriptor JSON from <code>service.json</code>.</li>
-<li><code>GET /help</code> returns this markdown help page.</li>
-<li><code>POST /process</code> handles zip tasks.</li>
-</ul>
-<h2>Supported tasks</h2>
-<h3><code>unzip</code></h3>
-<p>Extracts files from an input zip file into MessyDesk temporary storage.</p>
-<p>Optional task param:</p>
-<ul>
-<li><code>allowed_extensions</code>: comma-separated extension list (for example <code>pdf,txt,png</code>).</li>
-</ul>
-<p>Output:</p>
-<ul>
-<li>Disk response (<code>response.type = &quot;disk&quot;</code>) with extracted file descriptors.</li>
-</ul>
-<h3><code>zip</code></h3>
-<p>Creates one zip file from <code>set_files</code> input and stores it in MessyDesk temporary storage.</p>
-<p>Output:</p>
-<ul>
-<li>Disk response with one generated zip file descriptor.</li>
-</ul>
-<h2>Environment variables</h2>
-<p>Required in disk mode:</p>
-<ul>
-<li><code>MD_PATH</code>: MessyDesk root path (directory containing <code>data/</code>).</li>
-</ul>
-<p>Optional:</p>
-<ul>
-<li><code>MD_URL</code> (default <code>http://localhost:8200</code>)</li>
-<li><code>CONTAINER</code> (<code>true/false</code>)</li>
-<li><code>ZIP_ALLOWED_EXTENSIONS</code></li>
-<li><code>SERVICE_DESCRIPTOR_PATH</code> (default <code>./service.json</code>)</li>
-<li><code>SERVICE_HELP_PATH</code> (default <code>./index.md</code>)</li>
-<li><code>SERVICE_HELP_FALLBACK_PATH</code> (default <code>./README.md</code>)</li>
-<li><code>SERVICE_ID</code>, <code>SERVICE_NAME</code>, <code>SERVICE_ADAPTER</code>, <code>SERVICE_LOCAL_URL</code></li>
-</ul>
+                        <h1>Zip</h1>
+<p>Zip and unzip files.</p>
 
                 </article>
         </main>

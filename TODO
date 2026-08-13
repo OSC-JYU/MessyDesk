@@ -83,6 +83,67 @@ For many-to-one processing, backend will group input files by their root non-ZIP
 
 3. # Versioning of file
 
+Status: implemented (single-version backup model).
+
+Implemented:
+- `POST /api/files/{file_rid}/version` and `POST /api/files/{file_rid}/revert`.
+- `edited` metadata persisted on `File` node and cleared on revert.
+- Text edits via content payload for text-like files, image rotate edits via upload payload.
+- Backup/restore with `.original` suffix.
+- Thumbnail refresh and websocket update after save/revert.
+- UI version tools for image rotate save/revert and text start-edit/save/cancel/revert.
+
+Remaining:
+- Expand UI automated tests beyond VersionTools coverage to include TextDisplay save/revert integration and image regression coverage.
+- Consider future multi-version history if required (current model keeps one backup).
+
+Planned restriction: block manual edits for files that already have cruncher outputs.
+
+Goal:
+- Prevent user from starting/saving manual edit when file has been processed by cruncher tasks, because edited input would invalidate workflow status.
+
+Scope:
+- UI-enforced restriction in MessyDesk-UI version tools and edit actions.
+- Backend endpoint only for status lookup convenience (no edit behavior changes in this task).
+
+Plan:
+1. Define processed-status contract for UI
+- Add a file-level boolean concept `isWorkflowLocked` (true when file has non-internal derived processing outputs).
+- Exclude internal/system tasks (for example thumbnail generation) from lock status.
+
+2. Add backend helper endpoint for reliable check (recommended)
+- Add `GET /api/files/{file_rid}/editable-status` in `src/routes/files.mjs`.
+- Response shape:
+    - `editable: boolean`
+    - `locked: boolean`
+    - `reason: string | null` (example: `processed_by_cruncher`)
+    - `blocking_processes: [{ process_rid, task, cruncher }]` (optional debug metadata for UI/tooltips)
+- Reuse graph lineage/derived-edge queries so UI does not replicate complex graph logic.
+
+3. UI integration
+- Add `web.getFileEditableStatus(rid)` to `MessyDesk-UI/src/web.js`.
+- In file display wrapper/tools, fetch status when current file changes and store it in local state.
+- Disable/hide text/image edit controls when `locked === true`.
+- Show clear explanation in VersionTools (for example: "Editing disabled: file already processed by cruncher").
+
+4. Guard edit actions in UI handlers
+- In `start-edit`, `save-edit`, and rotate save handlers, short-circuit when file is locked.
+- Keep revert visibility behavior as-is unless business rule requires revert to be blocked too (decide explicitly).
+
+5. Tests
+- Backend tests for `editable-status` endpoint:
+    - file with no cruncher outputs => editable true
+    - file with thumbnail/internal output only => editable true
+    - file with real cruncher-derived outputs => editable false
+- UI tests:
+    - locked file hides/disables edit actions
+    - unlocked file allows start/save edit
+    - lock reason message is shown.
+
+Decision notes:
+- This is primarily UI policy to avoid workflow-invalid edits.
+- Endpoint is recommended to avoid duplicating graph traversal logic in UI and to keep lock semantics centralized.
+
 Add endpoint /files/version that uploads file and replaces the original file while saving the original file with .original suffix.
 Endpoint also writes "edited" property (task, time and user) to File node. This also calls thumbnail generation.
 
@@ -119,6 +180,9 @@ Plan:
 - Reuse existing thumbnail queue path in `src/routes/files.mjs` (`md-thumbnailer` for images, `md-poppler` for pdf if needed).
 - Trigger thumbnail generation after both version and revert operations.
 - Emit websocket update to refresh current file card/view for the active user.
+
+
+----
 
 5. Graph attribute support and safety
 - Extend editable node attribute allowlist in `src/graph.mjs` to include `edited` (or add dedicated helper for this field).
@@ -189,9 +253,9 @@ User can choose what file formats to extract (or extract each file type to diffe
 10. # Tutorials *partly* DONE
 
 - Copy project feature (user can copy demo project for himself)
-- self-contained help files
+- self-contained help files OK
 
-11. Replace NATS-jetstreams?
+11. Replace NATS-jetstreams? LATER
 - might be overkill
 - simple db-based solution might be better -> messages are written to db and consumed from there. SQLite?
 
@@ -199,3 +263,60 @@ User can choose what file formats to extract (or extract each file type to diffe
 - how much data is shown. Could per node/generic setting.
 
 13. PDF size and page count.
+
+14. Tags from NER data
+- AI tagger (https://github.com/fastino-ai/GLiNER2)
+
+15. Allow remove of original ZIP and PDF files
+- after data or pages are extracted, we could save a lot of space by removing original files
+
+16. Quick edits DONE
+- Image quick crop OK
+- Text edit OK
+
+GOING ON
+
+base-text: search and replace UI
+base-text: join raw is broken
+
+containers of base services:
+- md-pypdf_fs OK
+- md-thumbnailer OK
+- md-imaginary OK
+- md-poppler OK
+- md-base-text PROGRESS...
+- md-zip_fs OK
+- md-tesseract OK
+- md-solr
+
+museota varten
+- md-rf-detr segmentointi OK 
+- kansalliskirjaston HTR (trocr) OK
+- md-opencv OK
+- ruotsin kansallisarkiston HTR (trocr)
+- azure-AI
+- OSGuli?
+- finbert-ner OK
+
+
+TOPIC=md-osguli SERVICE_JSON_PATH=descriptors/md-ollama/service.json node src/index.mjs 
+
+TOPIC=md-solr SERVICE_JSON_PATH=descriptors/md-solr/service.json MD_PATH=/home/arihayri/Projects/MessyDesk node src/index.mjs 
+
+TOPIC=md-rfdetr DEV_URL=localhost:9011 node src/index.mjs 
+
+TOPIC=md-trocr DEV_URL=localhost:9012 node src/index.mjs 
+
+TOPIC=md-azure-ai AZURE_OPENAI_API_KEY=API-AVAIN DEV_URL=https://osc-gpt.openai.azure.com/  SERVICE_JSON_PATH=descriptors/md-azure-ai/service.json node src/index.mjs 
+
+TOPIC=md-finbert-ner DEV_URL=localhost:8600 node src/index.mjs 
+
+TOPIC=md-tesseract DEV_URL=localhost:8400  node src/index.mjs
+
+ TOPIC=md-imaginary NOMAD=true node src/index.mjs 
+
+ TOPIC=md-zip_fs DEV_URL=localhost:9004 node src/index.mjs 
+
+ TOPIC=md-thumbnailer NOMAD=true  node src/index.mjs 
+
+TOPIC=md-opencv DEV_URL=localhost:9009 node src/index.mjs 

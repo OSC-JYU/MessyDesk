@@ -1,7 +1,7 @@
 import services from '../services.mjs';
 import nomad from '../nomad.mjs';
 import Graph from '../graph.mjs';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import filters from '../filters.mjs';
 import path from 'path';
 import os from 'os';
@@ -812,7 +812,7 @@ export default [
                 return h.response(response).code(404);
             }
 
-            await nats.ensureProcessConsumersForService(request.params.service);
+            await queue.ensureProcessConsumersForService(request.params.service);
             return response;
         }
     },

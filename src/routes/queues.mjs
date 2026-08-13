@@ -2,7 +2,7 @@ import Boom from '@hapi/boom';
 
 import Graph from '../graph.mjs';
 import services from '../services.mjs';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import media from '../media.mjs';
 import path from 'path';
@@ -39,7 +39,7 @@ async function dispatchSetFilesForBatch({service, task, files, setProcessRid, in
             }
         }
 
-        await nats.createSetProcessNodesAndPublish(msg);
+        await queue.createSetProcessNodesAndPublish(msg);
         fileCount += 1;
     }
 
@@ -178,6 +178,69 @@ async function resolveManyToOneDispatchGroups(service, task, files, isSearchOutp
 
 
 export default [
+
+    // --- Consumer queue API ---
+
+    {
+        method: 'POST',
+        path: '/api/queue/claim',
+        handler: async (request) => {
+            const { topic, adapter_id } = request.payload || {};
+            if (!topic || !adapter_id) {
+                throw Boom.badRequest('topic and adapter_id are required');
+            }
+            const job = queue.claim(topic, adapter_id);
+            return { job }; // null if no work available
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/heartbeat',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const ok = queue.heartbeat(jobId, adapter_id);
+            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
+            return { ok: true };
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/complete',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const ok = queue.complete(jobId, adapter_id);
+            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
+            return { ok: true };
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/fail',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id, error } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const ok = queue.fail(jobId, error || 'unknown error', adapter_id);
+            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
+            return { ok: true };
+        }
+    },
+
+    {
+        method: 'GET',
+        path: '/api/queue/jobs/active',
+        handler: async () => {
+            return queue.getActiveJobs();
+        }
+    },
+
     // pipeline
     {
         method: 'POST',
@@ -194,7 +257,7 @@ export default [
                 var service = services.getServiceAdapterByName(line.params.topic);
                 messages = await Graph.createQueueMessages(service, line.payload, request.params.file_rid, request.auth.credentials.user.rid );
                 for(var msg of messages) {
-                    nats.publish(line.params.topic, JSON.stringify(msg));
+                    queue.publish(line.params.topic, JSON.stringify(msg));
                 }
             }
             return messages;
@@ -208,7 +271,7 @@ export default [
             const topic = request.params.topic;
             const process_rid = Graph.sanitizeRID(request.params.process_rid);
             console.log('process_rid: ', process_rid);
-            const status = await nats.drainQueue(topic, process_rid);
+            const status = await queue.drainQueue(topic, process_rid);
             var wsdata = {
                 command: 'process_finished',
                 process: { '@rid': process_rid, status: 'finished'}
@@ -238,7 +301,7 @@ export default [
                 updated_at: new Date().toISOString(),
             });
 
-            const queueStatus = await nats.pauseBatch(process_rid);
+            const queueStatus = await queue.pauseBatch(process_rid);
 
             userManager.sendToUser(request.auth.credentials.user.rid, {
                 command: 'process_update',
@@ -276,7 +339,7 @@ export default [
                 throw Boom.conflict(`Batch is not paused (status: ${batchStatus || 'unknown'})`);
             }
 
-            await nats.resumeBatch(process_rid);
+            await queue.resumeBatch(process_rid);
 
             await Graph.updateBatchProcess(process_rid, {
                 status: 'resuming',
@@ -379,7 +442,7 @@ export default [
                 status: 'cancelling',
                 updated_at: new Date().toISOString(),
             });
-            const queueStatus = await nats.cancelBatch(process_rid);
+            const queueStatus = await queue.cancelBatch(process_rid);
             const batch = await Graph.updateBatchProcess(process_rid, {
                 status: 'cancelled',
                 finished_at: new Date().toISOString(),
@@ -410,7 +473,7 @@ export default [
         path: '/api/queue/drain/{process_rid}',
         handler: async (request) => {
             const process_rid = Graph.sanitizeRID(request.params.process_rid);
-            const status = await nats.drainQueueByProcess(process_rid);
+            const status = await queue.drainQueueByProcess(process_rid);
             var wsdata = {
                 command: 'process_finished',
                 process: { '@rid': process_rid, status: 'finished'}
@@ -426,7 +489,7 @@ export default [
         path: '/api/queue/{topic}/status',
         handler: async (request) => {
             const topic = request.params.topic;
-            const status = await nats.getQueueStatus(topic);
+            const status = await queue.getQueueStatus(topic);
             return status;
         }
     },
@@ -437,7 +500,7 @@ export default [
         path: '/api/queue/{topic}/flush',
         handler: async (request) => {
             const topic = request.params.topic;
-            const status = await nats.flushQueue(topic);
+            const status = await queue.flushQueue(topic);
             return status;
         }
     },
@@ -490,7 +553,7 @@ export default [
 
                 for(var msg of messages) {    
                     // send message to queue
-                    nats.publish(queue, JSON.stringify(msg));
+                    queue.publish(queue, JSON.stringify(msg));
                 }
 
                 return request.params.file_rid;
@@ -636,7 +699,7 @@ export default [
                                 }
                             }
 
-                            nats.publish(topic + '_batch', JSON.stringify(msg));
+                            queue.publish(topic + '_batch', JSON.stringify(msg));
                             groupIndex += 1;
                             batchIndex += 1;
                         }
@@ -748,7 +811,7 @@ export default [
                     output_set: setNode['@rid']  // link file to output Set
                 }
                 //console.log('msg: ', msg);
-                nats.publish(topic + '_batch', JSON.stringify(msg));
+                queue.publish(topic + '_batch', JSON.stringify(msg));
 
                 return source_rid;
 

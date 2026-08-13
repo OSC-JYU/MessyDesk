@@ -1,6 +1,6 @@
 import Graph from '../graph.mjs';
 import media from '../media.mjs';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import services from '../services.mjs';
 import solr from '../solr.mjs';
 import { DATA_DIR, DISK_QUOTA_GB } from '../env.mjs';
@@ -42,7 +42,7 @@ async function dispatchSetFilesForReindex({service, task, files, setProcessRid, 
             }
         }
 
-        await nats.createSetProcessNodesAndPublish(msg);
+        await queue.createSetProcessNodesAndPublish(msg);
         fileCount += 1;
     }
 
@@ -133,8 +133,7 @@ export default [
         handler: async (request) => {
             return await Graph.deleteProject(
                 Graph.sanitizeRID(request.params.rid),
-                request.auth.credentials.user.rid,
-                nats
+                request.auth.credentials.user.rid
             );
         }
     },
@@ -168,8 +167,7 @@ export default [
             const result = await Graph.createSource(
                 Graph.sanitizeRID(request.params.rid),
                 request.payload,
-                request.auth.credentials.user.rid,
-                nats
+                request.auth.credentials.user.rid
             );
             return result;
         }

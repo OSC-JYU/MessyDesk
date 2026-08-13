@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - Tesseract Service Help</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-tesseract</div>
+                        <h1>Tesseract Service Help</h1>
+<p>Service id: md-tesseract</p>
+<h2>Endpoints</h2>
+<ul>
+<li>GET /health: Returns service health status.</li>
+<li>GET /config: Returns the service descriptor from service.json.</li>
+<li>GET /help: Returns this help markdown.</li>
+<li>POST /process: Executes OCR tasks.</li>
+<li>GET /files/{dir}/{file}: Downloads generated files.</li>
+</ul>
+<h2>OCR Tasks</h2>
+<ul>
+<li>image2text: Recognize text from image and return text output.</li>
+<li>searchable_pdf: Create searchable PDF from image.</li>
+<li>image2hocr: Produce HOCR output.</li>
+<li>orientation_detection: Detect page orientation from image.</li>
+</ul>
+<p>Task parameters are defined in service.json.</p>
+
+                </article>
+        </main>
+</body>
+</html>

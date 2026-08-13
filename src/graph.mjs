@@ -124,11 +124,11 @@ graph.createProject = async function (data, me_rid) {
 
 }
 
-graph.deleteProject = async function (project_rid, user_rid, nats) {
+graph.deleteProject = async function (project_rid, user_rid) {
 	const query = `MATCH {as:project, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} return project.@rid AS rid`
 	var response = await db.sql(query)
 	if(response.result.length == 1) {
-		await this.deleteNode(response.result[0]['rid'], nats)
+		await this.deleteNode(response.result[0]['rid'])
 	}
 	return response.result[0]['rid']
 }
@@ -160,7 +160,7 @@ graph.createSet = async function (project_rid, data, me_rid) {
 	}
 }
 
-graph.createSource = async function (project_rid, data, me_rid, nats) {
+graph.createSource = async function (project_rid, data, me_rid) {
 
 	const query = `MATCH (pr:Project)-[:HAS_OWNER]->(p:User) WHERE id(p) = "${me_rid}" AND id(pr) = "${project_rid}" RETURN pr`
 
@@ -176,7 +176,8 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 		await media.createProcessDir(source.path)
 		await this.setNodeAttribute(source_rid, {key: 'path', value: source.path}, me_rid)
 
-		// send init request to service 
+		// publish init request to queue
+		const { default: queue } = await import('./queue.mjs')
 		var init_task = {
 			service: {id:"md-" + data.type.toLowerCase()},
 			task: {id:"init", params: {url:`${source.url}`},},
@@ -184,7 +185,7 @@ graph.createSource = async function (project_rid, data, me_rid, nats) {
 			process:source,
 			userId: me_rid
 		}
-		nats.publish(init_task.service.id, JSON.stringify(init_task))
+		await queue.publish(init_task.service.id, JSON.stringify(init_task))
 
 		return source
 	} else {
@@ -2335,8 +2336,6 @@ graph.connect = async function (from, relation, to, tid) {
 	if (!to.match(/^#/)) to = '#' + to
 
 	var query = `CREATE EDGE ${relation} FROM ${from} TO ${to} IF NOT EXISTS`
-	//nats.writeToDB(query)
-	//return {result: 'ok'}
 	if(tid) {
 		return await db.writeWithTransaction(query, {}, 3, 5000, tid)
 	} else {

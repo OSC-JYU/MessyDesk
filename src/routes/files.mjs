@@ -5,7 +5,7 @@ import fse from 'fs-extra';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
 
@@ -102,7 +102,7 @@ async function queueSetZipJob(request, setRid) {
         userId: request.auth.credentials.user.rid,
     };
 
-    await nats.publish('md-zip_fs', JSON.stringify(payload));
+    await queue.publish('md-zip_fs', JSON.stringify(payload));
 
     return job;
 }
@@ -170,7 +170,7 @@ function queueThumbnailRefresh(file, userId) {
             task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
             id: 'md-thumbnailer'
         };
-        nats.publish(data.id, JSON.stringify(data));
+        queue.publish(data.id, JSON.stringify(data));
         return true;
     } else if (file.type === 'pdf') {
         const data = {
@@ -189,7 +189,7 @@ function queueThumbnailRefresh(file, userId) {
             role: 'thumbnail',
             id: 'md-poppler'
         };
-        nats.publish(data.id, JSON.stringify(data));
+        queue.publish(data.id, JSON.stringify(data));
         return true;
     }
 
@@ -387,7 +387,7 @@ console.log('filetype', file_type);
                                     process: {kind: 'internal_versioning'}
                             
                                 }
-                                nats.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
+                                queue.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
 
                             // ************** EXIF FIX ENDS **************
                             } else {
@@ -399,7 +399,7 @@ console.log('filetype', file_type);
                                     userId: request.auth.credentials.user.rid
                                 };
                                 
-                                nats.publish(data.topic.id, JSON.stringify(data));
+                                queue.publish(data.topic.id, JSON.stringify(data));
                             }
                             }
                         } 
@@ -498,7 +498,7 @@ console.log('filetype', file_type);
                         task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
                         id: 'md-thumbnailer'
                     };
-                    nats.publish(data.id, JSON.stringify(data));
+                    queue.publish(data.id, JSON.stringify(data));
 
                 // PDF thumbnail is made by poppler
                 } else if (file.type === 'pdf') {
@@ -517,7 +517,7 @@ console.log('filetype', file_type);
                         role: 'thumbnail',
                         id: 'md-poppler'
                     };
-                    nats.publish(data.id, JSON.stringify(data));
+                    queue.publish(data.id, JSON.stringify(data));
                 }
                 return file
             } catch (e) {

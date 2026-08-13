@@ -3,7 +3,6 @@ import Graph from '../graph.mjs';
 import nomad from '../nomad.mjs';
 import services from '../services.mjs';
 import db from '../db.mjs';
-import nats from '../queue.mjs';
 import logger from '../logger.mjs';
 import media from '../media.mjs';
 
