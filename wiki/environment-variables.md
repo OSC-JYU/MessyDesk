@@ -51,7 +51,7 @@ All configuration across the MessyDesk platform, organized by repository.
 
 | Variable | Default | Required | Notes |
 |----------|---------|----------|-------|
-| `TOPIC` | — | **Yes** | Service topic name (e.g., `md-imaginary`) |
+| `TOPIC` | — | **Yes** | Registry/queue identity to attach to (throws immediately at startup if unset — no hidden/derived ids). Overrides the service's own descriptor `id` (lets one physical service listen on multiple topics, e.g. `md-sharp` + `md-thumbnailer`, and lets multiple physical instances share one topic for parallel processing). |
 | `NATS_URL` | `nats://localhost:4222` | No | NATS server |
 | `MD_URL` | `http://localhost:8200` | No | MessyDesk backend URL |
 
@@ -61,6 +61,7 @@ All configuration across the MessyDesk platform, organized by repository.
 |----------|---------|-------|
 | `DEV_URL` | — | Override service URL for local development |
 | `NOMAD_URL` | `http://localhost:4646/v1` | Nomad cluster API |
+| `NOMAD_INSTANCE_ID` | `TOPIC` | Nomad job/service identity (defaults to `TOPIC`). Each consumer owns exactly one Nomad job — set this to a unique value per consumer to run several dedicated instances behind one shared `TOPIC` (e.g. `TOPIC=md-sharp` with `NOMAD_INSTANCE_ID=md-sharp-1`/`md-sharp-2`), rather than a single job shared/load-balanced across consumers. |
 | `SERVICE_JSON_PATH` | — | Explicit descriptor file path |
 | `ADAPTER` | — | Override adapter name (bypasses descriptor) |
 | `HELP_URL` | — | Override help documentation URL |
@@ -77,7 +78,6 @@ All configuration across the MessyDesk platform, organized by repository.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `NOMAD` | — | Enable Nomad service management (`1`, `true`, `yes`, `on`) |
-| `USE_LEGACY_NOMAD_METADATA` | — | Use `MessyDesk/services/` for metadata |
 
 ### SQLite Queue (index-db.mjs)
 
@@ -88,6 +88,8 @@ All configuration across the MessyDesk platform, organized by repository.
 | `QUEUE_DB_POLL_MAX_MS` | `2000` | Max poll interval |
 | `QUEUE_DB_LEASE_SECONDS` | `120` | Lease duration |
 | `QUEUE_DB_MAX_ATTEMPTS` | `3` | Max retry attempts |
+| `QUEUE_BATCH_ABORT_CONSECUTIVE` | `5` | Max consecutive permanent failures before batch auto-abort |
+| `QUEUE_BATCH_ABORT_PERCENT` | `50` | Max failure percentage before batch auto-abort |
 
 ### Storage
 

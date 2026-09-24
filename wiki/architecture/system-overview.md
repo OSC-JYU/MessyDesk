@@ -69,7 +69,7 @@ The backend (`src/index.mjs`) initializes in this order:
 
 1. `media.createDataDir(DATA_DIR)` — ensure data directory exists
 2. `nomad.getStatus()` — check Nomad if enabled
-3. `services.loadServiceAdapters('services', NOMAD)` — load service descriptors from `services/` directory
+3. `services.loadServiceAdapters(null, NOMAD)` — load service descriptors from the persisted registry (`service-registry.json`) and runtime registrations; the legacy on-disk `services/` directory is no longer read
 4. `queue.init()` — initialize SQLite queue (creates DB file and schema if needed)
 5. `Graph.initDB()` — connect to ArcadeDB, create schema (vertex/edge types and indexes)
 6. Hapi server starts on port 8200

@@ -7,6 +7,11 @@ const URL = process.env.NOMAD_URL || 'http://localhost:4646/v1'
 
 let nomad = {}
 
+// Nomad service-catalog names must be RFC 1123 (alphanumeric + dashes only)
+function toNomadServiceName(name) {
+	return String(name).replace(/_/g, '-')
+}
+
 
 
 nomad.getStatus = async function() {
@@ -41,13 +46,12 @@ nomad.createService = async function(service) {
 	if(service && service.nomad_hcl) {
 		console.log(`NOMAD: creating service: ${service.id}`)
 		try {
+			let hcl = service.nomad_hcl
 			if(process.env.PODMAN) {
-				service.nomad_hcl = service.nomad_hcl.replace('driver = "docker"','driver = "podman"')
+				hcl = hcl.replace('driver = "docker"','driver = "podman"')
 			}
-			console.log(service.nomad_hcl)
-			var c = service.nomad_hcl.replace(/"/g, '\\"').replace(/\n/g, '\\n')
-			var js = `{"JobHCL":"${c}","Canonicalize":true}'`
-			var response = await axios.post(URL + `/jobs/parse`, js)
+			console.log(hcl)
+			var response = await axios.post(URL + `/jobs/parse`, { JobHCL: hcl, Canonicalize: true })
 			var response_create = await axios.post(URL + '/jobs', {Job:response.data})
 			return response_create.data
 		} catch (e) {
@@ -72,14 +76,14 @@ nomad.stopService = async function(service) {
 }
 
 nomad.getService = async function(service) {
-	const url = URL + `/service/${service}`
+	const url = URL + `/service/${toNomadServiceName(service)}`
 	var response = await axios.get(url)
 	if(response.data.length > 0) return response.data
 }
 
 nomad.getServiceURL = async function(service) {
 	// NOTE: this gives only the first address
-	const url = URL + `/service/${service}`
+	const url = URL + `/service/${toNomadServiceName(service)}`
 	console.log(url)
 	var service_url = ''
 	var response = await axios.get(url)

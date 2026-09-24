@@ -21,6 +21,83 @@ const MAX_HELP_BUNDLE_FILES = Number(process.env.SERVICE_HELP_BUNDLE_MAX_FILES |
 const MAX_HELP_ARCHIVE_BYTES = Number(process.env.SERVICE_HELP_ARCHIVE_MAX_BYTES || 25 * 1024 * 1024);
 const MAX_HELP_ARCHIVE_ENTRIES = Number(process.env.SERVICE_HELP_ARCHIVE_MAX_ENTRIES || 500);
 
+function isNomadEnabled() {
+    return ['1', 'true', 'yes', 'on'].includes(String(process.env.NOMAD || '').toLowerCase());
+}
+
+function shouldAttemptNomadStop(serviceConfig) {
+    if (!serviceConfig || typeof serviceConfig !== 'object') return false;
+    return isNomadEnabled() || serviceConfig.nomad === true;
+}
+
+function requireAdmin(request) {
+    if (request.auth?.credentials?.user?.access !== 'admin') {
+        throw Boom.forbidden('Admin access required');
+    }
+}
+
+const INSTALL_KINDS = ['nomad', 'external', 'local'];
+
+function parseDescriptorInput(rawDescriptor) {
+    if (rawDescriptor === undefined || rawDescriptor === null) return {};
+    if (typeof rawDescriptor === 'string') {
+        const trimmed = rawDescriptor.trim();
+        if (!trimmed) return {};
+        try {
+            return JSON.parse(trimmed);
+        } catch (error) {
+            throw Boom.badRequest(`Invalid service.json: ${error.message}`);
+        }
+    }
+    if (typeof rawDescriptor === 'object' && !Array.isArray(rawDescriptor)) {
+        return rawDescriptor;
+    }
+    throw Boom.badRequest('service descriptor must be a JSON object or string');
+}
+
+function buildInstallDescriptor(payload) {
+    const kind = String(payload?.kind || '').trim().toLowerCase();
+    if (!INSTALL_KINDS.includes(kind)) {
+        throw Boom.badRequest(`kind must be one of: ${INSTALL_KINDS.join(', ')}`);
+    }
+
+    const descriptor = { ...parseDescriptorInput(payload?.service || payload?.descriptor) };
+
+    const explicitId = payload?.id ? String(payload.id).trim() : '';
+    if (explicitId) descriptor.id = explicitId;
+    if (!descriptor.id) {
+        throw Boom.badRequest('service id is required (in payload.id or descriptor.id)');
+    }
+    descriptor.id = normalizeServiceId(descriptor.id);
+
+    if (payload?.name) descriptor.name = String(payload.name);
+    if (payload?.description) descriptor.description = String(payload.description);
+
+    descriptor.kind = kind;
+
+    if (kind === 'nomad') {
+        const hcl = String(payload?.nomad_hcl || '').trim();
+        if (!hcl) throw Boom.badRequest('nomad_hcl is required for kind "nomad"');
+        descriptor.nomad_hcl = hcl;
+        descriptor.nomad = true;
+        descriptor.location = descriptor.location || 'on-premise';
+    } else if (kind === 'external') {
+        const url = String(payload?.url || descriptor.url || descriptor.local_url || '').trim();
+        if (!url) throw Boom.badRequest('url is required for kind "external"');
+        descriptor.local_url = url;
+        descriptor.nomad = false;
+        descriptor.location = descriptor.location || 'external';
+    } else if (kind === 'local') {
+        const devUrl = String(payload?.dev_url || payload?.url || descriptor.local_url || '').trim();
+        if (!devUrl) throw Boom.badRequest('dev_url is required for kind "local"');
+        descriptor.local_url = devUrl;
+        descriptor.nomad = false;
+        descriptor.location = descriptor.location || 'on-premise';
+    }
+
+    return descriptor;
+}
+
 function normalizeServiceId(rawServiceId) {
         const serviceId = String(rawServiceId || '').trim();
         if (!serviceId) {
@@ -794,6 +871,7 @@ export default [
         method: 'POST',
         path: '/api/services/reload',
         handler: async (request, h) => {
+            requireAdmin(request);
             try {
                 await services.loadServiceAdapters();
                 return { status: 'ok', service: services };
@@ -801,6 +879,30 @@ export default [
                 console.log(e);
                 return h.response({ error: e }).code(500);
             }
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/services/install',
+        handler: async (request, h) => {
+            requireAdmin(request);
+            try {
+                const descriptor = buildInstallDescriptor(request.payload || {});
+                return await services.registerServiceDescriptorAndPersist(descriptor, { source: 'admin' });
+            } catch (error) {
+                if (Boom.isBoom(error)) throw error;
+                const code = error.statusCode || 400;
+                return h.response({ error: error.message }).code(code);
+            }
+        }
+    },
+    {
+        method: 'DELETE',
+        path: '/api/services/{service}',
+        handler: async (request) => {
+            requireAdmin(request);
+            const serviceId = normalizeServiceId(request.params.service);
+            return await services.forgetService(serviceId);
         }
     },
     {
@@ -961,7 +1063,18 @@ export default [
         handler: async (request) => {
             const adapter = await services.getServiceAdapterByName(request.params.service);
             const response = await services.removeServiceAdapter(request.params.service, request.params.id);
-            await nomad.stopService(adapter);
+            const hasActiveConsumers = Array.isArray(response?.consumers) && response.consumers.length > 0;
+
+            if (!hasActiveConsumers && shouldAttemptNomadStop(adapter)) {
+                try {
+                    await nomad.stopService(adapter);
+                } catch (error) {
+                    const code = error?.code || error?.cause?.code || null;
+                    const message = error?.message || String(error);
+                    console.log(`WARN: Nomad stop failed for ${request.params.service}${code ? ` (${code})` : ''}: ${message}`);
+                }
+            }
+
             return response;
         }
     },
@@ -975,7 +1088,8 @@ export default [
             );
             const prompts = await Graph.getPrompts(request.auth.credentials.user.rid);
             const filterList = await filters.loadFilters();
-            const allFilters = Object.values(filterList);
+            // System filters are internal-only and must never be offered in the crunchers UI.
+            const allFilters = Object.values(filterList).filter((filter) => filter.category !== 'system');
             const filtersArray = file
                 ? allFilters.filter((filter) => doesFilterMatchNode(filter, file))
                 : allFilters;

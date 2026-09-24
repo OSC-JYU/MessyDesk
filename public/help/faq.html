@@ -8,22 +8,26 @@
 </head>
 <body>
   <main class="page">
-    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/search">Search</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a class="active" href="/help/faq">Faq</a></nav>
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a class="active" href="/help/faq">Faq</a></nav>
     <article class="content">
       <h1>FAQ</h1>
 <h4>What core services are available?</h4>
 <p>MessyDesk relies on several built-in, foundational services to handle standard file workflows. These are always available in your workspace:</p>
+<p>system services:</p>
 <ul>
 <li><strong>Thumbnailer Service (<em>Imaginary</em>):</strong> Automatically generates visual preview cards for your files in the graph.</li>
-<li><strong>PDF Analysis Service (<em>Poppler</em>):</strong> Extracts text and embedded images from documents, and renders page previews.</li>
+<li><strong>PDF Splitter Service (<em>PyPDF</em>):</strong> Drives a cruncher that breaks multi-page documents into individual page nodes.</li>
+</ul>
+<p>user services:</p>
+<ul>
+<li><strong>PDF extract Service (<em>Poppler</em>):</strong> Extracts text and embedded images from documents, and renders page previews.</li>
 <li><strong>ZIP Service:</strong> Handles the background archiving, extraction, and downloading of sets.</li>
-<li><strong>PDF Splitter Service (<em>PyPDF</em>):</strong> Drives the one-to-many cruncher that breaks multi-page documents into individual page nodes.</li>
 <li><strong>Search Service (<em>Solr</em>):</strong> Powers the project-scoped search indexing and query functionalities.</li>
 <li><strong>Base Text Utilities (<em>Python</em>):</strong> Handles foundational string operations like splitting or joining text files.</li>
 <li><strong>Base Image Utilities (<em>Imaginary</em>):</strong> Handles foundational image operations like rotate, flip and scale.</li>
+<li><strong>Simple OCR (<em>Tesseract</em>):</strong> Simple and fast optical character recognition cruncher.</li>
 </ul>
-<p><em>Note: Access to advanced processing engines or specialized machine learning crunchers depends on your specific user permissions and the services enabled for your workspace.</em></p>
-<h4>Can I run MessyDesk locally on my own computer?</h4>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>Access to advanced processing engines or specialized machine learning crunchers depends on your specific user permissions and the services enabled for your workspace.</p></div><h4>Can I run MessyDesk locally on my own computer?</h4>
 <p>Yes, but with some caveats. MessyDesk is architected from the ground up as a multi-user web application. Because it relies on a distributed cluster of microservices (like Solr and Poppler) to handle heavy data processing, setting it up on a local machine is more complex than installing a typical desktop application.</p>
 <ul>
 <li><strong>Operating System Support:</strong> The ideal and primary deployment environment for MessyDesk is <strong>Linux</strong>. </li>

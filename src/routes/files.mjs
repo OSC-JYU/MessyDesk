@@ -6,8 +6,10 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
 import queue from '../queue.mjs';
+import services from '../services.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
+import { afterFileCreated } from '../controllers/importPipeline.mjs';
 
 const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
 const MAX_VERSION_TEXT_BYTES = (() => {
@@ -295,6 +297,13 @@ export default [
                     throw Boom.badRequest('Could not determine file type');
                 }
 
+                // PDF import gating: splitter must be active
+                if (file_type === 'pdf' && !services.hasActiveConsumer('md-pypdf_fs')) {
+                    throw Boom.serverUnavailable('PDF import requires the md-pypdf_fs splitter service to be running');
+                }
+
+                const deleteOriginal = request.query.delete_original !== 'false';
+
                 if (request.params.set) {
                     const setRid = Graph.sanitizeRID(request.params.set);
                     const setMetadata = await Graph.getUserFileMetadata(setRid, request.auth.credentials.user.rid);
@@ -393,7 +402,7 @@ console.log('filetype', file_type);
                             } else {
                                 const data = {
                                     topic: {id: 'md-thumbnailer'},
-                                    service: {id: 'md-imaginary'},
+                                    service: {id: 'md-thumbnailer'},
                                     task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
                                     file: filegraph,
                                     userId: request.auth.credentials.user.rid
@@ -431,6 +440,15 @@ console.log('filetype', file_type);
                             };
                             userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                         }
+
+                        // PDF auto-import: trigger split pipeline
+                        if (file_type === 'pdf') {
+                            await afterFileCreated(filegraph, {
+                                userId: request.auth.credentials.user.rid,
+                                delete_original: deleteOriginal
+                            });
+                        }
+
                         resolve(filegraph);
                     });
                 });
@@ -491,17 +509,26 @@ console.log('filetype', file_type);
                 );
 
                 if (file.type === 'image') {
+                    const service = services.service_list['md-thumbnailer'];
+                    if (!service || !service.consumers || service.consumers.length === 0) {
+                        throw Boom.serverUnavailable('Thumbnailer service is not running. Start the md-thumbnailer consumer first.');
+                    }
                     const data = {
                         file: file,
                         userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
                         task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
+                        service: { id: 'md-thumbnailer' },
                         id: 'md-thumbnailer'
                     };
                     queue.publish(data.id, JSON.stringify(data));
 
                 // PDF thumbnail is made by poppler
                 } else if (file.type === 'pdf') {
+                    const service = services.service_list['md-poppler'];
+                    if (!service || !service.consumers || service.consumers.length === 0) {
+                        throw Boom.serverUnavailable('Poppler service is not running. Start the md-poppler consumer first.');
+                    }
                     const data = {
                         file: file,
                         userId: request.auth.credentials.user.rid,
@@ -515,12 +542,14 @@ console.log('filetype', file_type);
                             }
                         },
                         role: 'thumbnail',
+                        service: { id: 'md-poppler' },
                         id: 'md-poppler'
                     };
                     queue.publish(data.id, JSON.stringify(data));
                 }
                 return file
             } catch (e) {
+                if (Boom.isBoom(e)) throw e;
                 return h.response().code(403);
             }
         }

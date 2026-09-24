@@ -5,11 +5,11 @@ This document describes how a file processing job flows from user action to resu
 ## Overview
 
 ```
-User triggers pipeline
+User triggers pipeline (or auto-import triggers for PDFs)
     ↓
 Backend creates Process node in graph
     ↓
-Backend publishes message to NATS JetStream (stream: PROCESS)
+Backend publishes message to SQLite queue
     ↓
 MD-consumers adapter picks up message
     ↓
@@ -21,8 +21,17 @@ Adapter POSTs result to backend callback endpoint
     ↓
 Backend materializes output files in graph + filesystem
     ↓
-Backend sends SSE/WebSocket update to UI
+Backend sends SSE update to UI
 ```
+
+### Auto-Import (PDF)
+
+PDF files bypass the manual trigger step. On upload, `afterFileCreated()` in `src/controllers/importPipeline.mjs` automatically:
+1. Creates a Process node with `role: 'import'`
+2. Creates an output Set for pages
+3. Publishes a split job to `md-pypdf_fs`
+
+The file shows "Importing…" in the UI. On completion, the original file is deleted from disk (if `delete_original` is true) and `_file_removed: true` is set on the node.
 
 ## Step 1: Pipeline Trigger
 
@@ -100,7 +109,7 @@ If processing a Region of Interest, `media.ROIPercentagesToPixels()` converts pe
 
 **[verified]** from `src/queue.mjs`:
 
-Message published to NATS subject `process.{service_id}`. Stream is `PROCESS` with Workqueue retention policy.
+Message published to SQLite queue with topic = service ID (e.g., `md-pypdf_fs`). Jobs have status tracking, retry logic (max 3 attempts), and lease-based claiming.
 
 For batch processing (`dispatchSetFilesForBatch`): one message per file, each with its own Process node. All share a parent `SetProcess` node.
 
@@ -109,11 +118,11 @@ For batch processing (`dispatchSetFilesForBatch`): one message per file, each wi
 **[verified]** from `MD-consumers/src/index.mjs`:
 
 Each consumer process:
-1. Listens on two NATS consumers: `{TOPIC}` and `{TOPIC}_batch`
-2. Processes one message at a time (`max_messages: 1`)
+1. Polls the SQLite queue via `POST /api/queue/claim`
+2. Processes one message at a time
 3. Dynamically loads adapter: `import('./adapters/{adapter_name}.mjs')`
 4. Calls `process_msg(service_url, message)`
-5. ACKs message after processing (even on error in NATS mode)
+5. Posts result back to backend callback endpoint
 
 ## Step 6: Adapter Calls Service
 

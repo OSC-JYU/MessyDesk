@@ -93,7 +93,7 @@ graph.initDB = async function () {
 
 graph.hasAccess = async function (item_rid, user_rid) {
 	if (!item_rid.match(/^#/)) item_rid = '#' + item_rid
-	const query = `TRAVERSE out() FROM ${item_rid}`
+	const query = `TRAVERSE out("DERIVED_FROM", "BELONGS_TO", "HAS_OWNER") FROM ${item_rid}`
 	var response = await db.sql(query)
 	var user = response.result.filter(function (x) { return x['@rid'] == user_rid })
 	if (!user.length) {
@@ -1022,6 +1022,11 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 	var node_metadata = await this.getUserFileMetadata(node_rid, user_rid)
 	if(!node_metadata) {
 		throw new Error('Target file not found: '+ node_rid )
+	}
+
+	// Guard: reject processing on files that are being imported
+	if(node_metadata._status === 'importing') {
+		throw new Error('File is being imported and cannot be processed')
 	}
 
 	var msg = {
@@ -2761,7 +2766,7 @@ graph.traverse = async function (rid, direction, userRID) {
 	if(access == false) return
 
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `TRAVERSE ${direction}() FROM ${rid}`
+	var query = `TRAVERSE ${direction}("DERIVED_FROM") FROM ${rid}`
 	var response = await db.sql(query)
 	return response.result
 }
@@ -3129,6 +3134,12 @@ async function getSetFileTypes(set_rid) {
 function roundTo(value, decimals = 2) {
 	const factor = Math.pow(10, decimals)
 	return Math.round(value * factor) / factor
+}
+
+graph.getNodeByRid = async function(rid) {
+	const clean = this.sanitizeRID(rid)
+	const response = await db.sql(`SELECT FROM ${clean} LIMIT 1`)
+	return response.result[0] || null
 }
 
 graph.getBatchProcess = async function(process_rid) {

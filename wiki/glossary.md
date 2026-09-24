@@ -23,3 +23,6 @@
 | **Descriptor** | `service.json` file describing a service's capabilities, supported types, tasks, and parameters. |
 | **Nomad** | HashiCorp Nomad. Optional service orchestrator for production deployments. |
 | **DERIVED_FROM** | Graph edge linking output files to their source files. Carries process context (process_rid, task, cruncher) as edge attributes. |
+| **Import** | Automatic processing that occurs when a PDF file is uploaded. The file is split into single-page PDFs via `md-pypdf_fs`. The Process node has `role: 'import'`. Original file is deleted by default. |
+| **processable** | Boolean field on File nodes. When `false`, only the PDF split service is offered. Absence of the field means the file is processable by all matching services. Set on non-splitter/non-zip PDF outputs. |
+| **_file_removed** | Boolean field on File nodes. When `true`, the file data has been deleted from disk but the graph node is preserved as provenance (e.g., original PDF after import split). |

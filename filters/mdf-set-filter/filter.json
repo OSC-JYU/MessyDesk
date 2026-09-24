@@ -2,6 +2,7 @@
     "id": "mdf-set-filter",
     "type": "filter",
     "name" :"Tag Filter",
+    "category": "preparation",
     "set_only": 1,
 
     "supported_types": [],

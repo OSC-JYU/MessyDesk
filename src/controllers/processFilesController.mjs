@@ -8,6 +8,7 @@ import userManager from '../userManager.mjs';
 import services from '../services.mjs';
 import Boom from '@hapi/boom';
 import { DATA_DIR, API_URL } from '../env.mjs';
+import { afterFileCreated } from './importPipeline.mjs';
 
 function parseMessagePayload(payloadMessage) {
     if (!payloadMessage) {
@@ -26,8 +27,8 @@ function parseMessagePayload(payloadMessage) {
 }
 
 function resolveTmpFilePath(payload, message) {
-    console.log('Resolving tmp file path...');
-    console.log('message:', message);
+    //console.log('Resolving tmp file path...');
+    //console.log('message:', message);
     const dataRoot = path.resolve(DATA_DIR, '..');
     const sourcePath = message?.file?.path;
     let tmpRoot = path.resolve(dataRoot, 'tmp');
@@ -92,7 +93,40 @@ function shouldCreateSplitPdfThumbnail(message, fileNode) {
 
     // Support both current and legacy splitter service ids.
     const splitterServices = new Set(['md-pdf-splitter_fs', 'md-pypdf_fs']);
-    return splitterServices.has(serviceId) && taskId === 'split';
+    if (!splitterServices.has(serviceId) || taskId !== 'split') {
+        return false;
+    }
+
+    // Only create thumbnail for the first page (cover)
+    // const currentFile = Number(message?.current_file || 0);
+    // return currentFile === 1 || currentFile === 0;
+    return true;
+}
+
+async function handleImportCompletion(message) {
+    const sourceFileRid = message.process?.file_rid || message.file?.['@rid'];
+    if (!sourceFileRid) return;
+
+    // Check if delete_original was requested (stored on Process node)
+    const processNode = await Graph.getNodeByRid(message.process['@rid']);
+    const shouldDelete = processNode?.delete_original !== false;
+
+    if (shouldDelete) {
+        // Get the original file node to find its path
+        const originalNode = await Graph.getNodeByRid(sourceFileRid);
+        if (originalNode?.path) {
+            try {
+                await fse.remove(originalNode.path);
+                console.log('Import complete: deleted original PDF', originalNode.path);
+            } catch (err) {
+                console.error('Failed to delete original PDF after import:', err.message);
+            }
+        }
+        await Graph.setNodeAttribute_old(sourceFileRid, { key: '_file_removed', value: true }, 'File');
+    }
+
+    // Clear the importing status
+    await Graph.setNodeAttribute_old(sourceFileRid, { key: '_status', value: 'split' }, 'File');
 }
 
 function isThumbnailRole(message) {
@@ -101,6 +135,7 @@ function isThumbnailRole(message) {
 }
 
 function isThumbnailMessage(message) {
+     console.log('-----------THUMBNAIL MESSAGE ROLE: ', message?.role);
     if (isThumbnailRole(message)) return true;
 
     const topicId = String(message?.topic?.id || '').toLowerCase();
@@ -114,6 +149,22 @@ function isThumbnailMessage(message) {
     if (taskId === 'thumbnail') return true;
 
     return false;
+}
+
+function resolveThumbnailFilename(message) {
+    const explicit = String(message?.thumb_name || '').trim();
+    if (explicit) {
+        return path.basename(explicit);
+    }
+
+    const label = String(message?.file?.label || '').trim().toLowerCase();
+    const extension = String(message?.file?.extension || '').trim().toLowerCase();
+    if ((label === 'preview' || label === 'thumbnail') && extension) {
+        const normalizedExt = extension === 'jpeg' ? 'jpg' : extension;
+        return `${label}.${normalizedExt}`;
+    }
+
+    return 'preview.jpg';
 }
 
 function shouldNotifyThumbnailUpdate(message, filename) {
@@ -132,6 +183,67 @@ function shouldNotifyThumbnailUpdate(message, filename) {
     if (isLastBatchFile) return true;
 
     return false;
+}
+
+async function mirrorSplitCoverThumbnailToSource(message, savedThumbnailPath, filename, cacheBuster) {
+    console.log('*****************copying thumb*************')
+    const thumbFile = String(filename || '').toLowerCase();
+    if (thumbFile !== 'preview.jpg' && thumbFile !== 'thumbnail.jpg') {
+        return;
+    }
+    const serviceId = String(message?.service?.id || '').toLowerCase();
+    const taskId = String(message?.task?.id || '').toLowerCase();
+    if (!['md-poppler', 'md-poppler_fs'].includes(serviceId) || taskId !== 'thumbnail') {
+        return;
+    }
+
+    const currentFile = Number(message?.current_file || 0);
+    const pageNumber = Number(message?.file?.page_number || 0);
+    if (!((currentFile === 0 || currentFile === 1) && (pageNumber === 0 || pageNumber === 1))) {
+        return;
+    }
+
+    let sourceFileRid = normalizeRid(message?.process?.file_rid);
+    if (!sourceFileRid && message?.process?.['@rid']) {
+        const processNode = await Graph.getNodeByRid(message.process['@rid']);
+        sourceFileRid = normalizeRid(processNode?.file_rid);
+    }
+    if (!sourceFileRid) {
+        return;
+    }
+
+    const sourceFileNode = await Graph.getNodeByRid(sourceFileRid);
+    const sourcePath = sourceFileNode?.path;
+    if (typeof sourcePath !== 'string' || !sourcePath) {
+        return;
+    }
+
+    const sourceBasePath = path.dirname(sourcePath);
+    const sourceThumbnailPath = path.resolve(savedThumbnailPath);
+    const targetPath = path.resolve(path.join(sourceBasePath, thumbFile));
+    if (sourceThumbnailPath === targetPath) {
+        return;
+    }
+    console.log('Mirroring split cover thumbnail to source file', {
+        sourceFileRid,  
+        sourcePath, 
+        targetPath,
+        savedThumbnailPath,
+        cacheBuster
+    });
+    await fse.copy(sourceThumbnailPath, targetPath, { overwrite: true });
+
+    if (message?.userId) {
+        userManager.sendToUser(message.userId, {
+            command: 'update',
+            target: sourceFileRid,
+            node: {
+                image: API_URL + 'api/thumbnails/' + sourceBasePath,
+                thumb: API_URL + 'api/thumbnails/' + sourceBasePath,
+                thumbnail_version: cacheBuster,
+            }
+        });
+    }
 }
 
 function normalizeRid(value) {
@@ -177,6 +289,8 @@ function shouldApplyGroupedManyToOneLabel(message) {
 }
 
 async function processFilesCore(request, infoFilepath, contentFilepath, message) {
+    console.log('**processFilesCore', { infoFilepath, contentFilepath});
+    console.log('**processFilesCore message', message?.task);
     const isRotateTask = String(message?.task?.id || '').toLowerCase() === 'rotate';
     const isInternalRotate = message?.role === 'exif_rotate'
         || message?.role === 'internal_versioning'
@@ -218,16 +332,26 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
     } else if (isThumbnailMessage(message)) {
         const filepath = message.file.path;
         const base_path = path.dirname(filepath);
-        const filename = message.thumb_name || 'preview.jpg';
+        const filename = resolveThumbnailFilename(message);
         const cacheBuster = Date.now();
         const isInternalVersioning = String(message?.role || '').toLowerCase() === 'internal_versioning'
             || String(message?.process?.kind || '').toLowerCase() === 'internal_versioning';
-        //console.log('THUMBNAIL MESSAGE: ', message);
+       
 
         try {
-            //console.log('saving thumbnail to', base_path, filename);
+            console.log('saving thumbnail to', base_path, filename);
             let wsdata = {};
             await media.saveThumbnail(contentFilepath, base_path, filename);
+            const savedThumbnailPath = path.join(base_path, filename);
+            try {
+                await mirrorSplitCoverThumbnailToSource(message, savedThumbnailPath, filename, cacheBuster);
+            } catch (mirrorErr) {
+                console.warn('Failed to mirror split cover thumbnail to source PDF', {
+                    message: mirrorErr?.message || String(mirrorErr),
+                    fileRid: message?.file?.['@rid'],
+                    processRid: message?.process?.['@rid'],
+                });
+            }
             if (shouldNotifyThumbnailUpdate(message, filename)) {
                 console.log('sending thumbnail WS', filename);
                 wsdata = {
@@ -407,43 +531,68 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 
         // for image files we create normal thumbnails
         if (!isReferenceOutput && message.file.type == 'image') {
-            const th = {
-                topic: {id: 'md-thumbnailer'},
-                service: {id: 'md-thumbnailer'},
-                task: {id: 'thumbnail', params: {width: 800, type: 'jpeg'}},
-                file: fileNode,
-                userId: message.userId,
-                total_files: message.total_files,
-                current_file: message.current_file,
-                output_set: message.output_set,
-                
-            };
-            queue.publish(th.service.id, JSON.stringify(th));
+            const thumbService = services.service_list?.['md-thumbnailer'];
+            if (thumbService?.consumers?.length > 0) {
+                const th = {
+                    topic: {id: 'md-thumbnailer'},
+                    service: {id: 'md-thumbnailer'},
+                    task: {id: 'thumbnail', params: {width: 800, type: 'jpeg'}},
+                    file: fileNode,
+                    userId: message.userId,
+                    total_files: message.total_files,
+                    current_file: message.current_file,
+                    output_set: message.output_set,
+                    process: message.process,
+                    set_process: message.set_process,
+                    role: 'thumbnail',
+                };
+                queue.publish(th.service.id, JSON.stringify(th));
+            }
         }
 
         // Only split-task PDFs get automatic poppler thumbnails.
         if (!isReferenceOutput && shouldCreateSplitPdfThumbnail(message, fileNode)) {
-            console.log('Scheduling thumbnail creation for split PDF file', fileNode['@rid']);
-            const thumbMsg = {
-                service: { id: 'md-poppler' },
-                task: {
-                    id: 'thumbnail',
-                    params: {
-                        page: 1,
-                        previewResolution: 150,
-                        thumbnailResolution: 80,
-                        task: 'thumbnail'
-                    }
-                },
-                file: fileNode,
-                process: message.process,
-                output_set: message.output_set,
-                userId: message.userId,
-                role: 'thumbnail',
-                total_files: message.total_files,
-                current_file: message.current_file,
-            };
-            queue.publish('md-poppler', JSON.stringify(thumbMsg));
+            const popplerService = services.service_list?.['md-poppler_fs'];
+            if (popplerService?.consumers?.length > 0) {
+                console.log('Scheduling thumbnail creation for split PDF file', fileNode['@rid']);
+                const thumbMsg = {
+                    service: { id: 'md-poppler_fs' },
+                    task: {
+                        id: 'thumbnail',
+                        params: {
+                            page: 1,
+                            previewResolution: 150,
+                            thumbnailResolution: 80,
+                            task: 'thumbnail'
+                        }
+                    },
+                    file: fileNode,
+                    process: message.process,
+                    output_set: message.output_set,
+                    userId: message.userId,
+                    role: 'thumbnail',
+                    total_files: message.total_files,
+                    current_file: message.current_file,
+                };
+                console.log('Scheduling thumbnail creation for split PDF file', thumbMsg.task );
+                queue.publish('md-poppler_fs', JSON.stringify(thumbMsg));
+            }
+        }
+
+        // Mark non-splitter/non-zip PDF outputs as unprocessable
+        if (!isReferenceOutput && fileNode?.type === 'pdf' && !shouldCreateSplitPdfThumbnail(message, fileNode)) {
+            const serviceId = message?.service?.id || message?.process?.service_id || '';
+            const exemptServices = new Set(['md-pdf-splitter_fs', 'md-pypdf_fs', 'md-zip_fs']);
+            if (serviceId && !exemptServices.has(serviceId)) {
+                await Graph.setNodeAttribute_old(fileNode['@rid'], { key: 'processable', value: false }, 'File');
+            }
+            // ZIP-extracted PDFs: trigger auto-import if splitter is active
+            if (serviceId === 'md-zip_fs') {
+                await afterFileCreated(fileNode, {
+                    userId: message.userId,
+                    delete_original: true
+                });
+            }
         }
 
         // update set file count or add file to visual graph
@@ -457,7 +606,8 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 const setProcessRid = message.set_process || message.process['@rid'];
                 const outputFileTotal = Number(message.file_total || 0);
                 const outputFileIndex = Number(message.file_count || 0);
-                const shouldAdvanceBatchCounter = !(outputFileTotal > 1) || outputFileIndex >= outputFileTotal;
+                const isImport = message.role === 'import' || message.process?.role === 'import';
+                const shouldAdvanceBatchCounter = isImport || !(outputFileTotal > 1) || outputFileIndex >= outputFileTotal;
                 const currentBatch = await Graph.getBatchProcess(setProcessRid);
                 const currentBatchStatus = currentBatch?.status || currentBatch?.state || 'running';
                 if(['paused', 'cancelling', 'cancelled', 'done'].includes(currentBatchStatus)) {
@@ -478,6 +628,11 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 const isGroupedManyToOne = message.behaviour === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
                 // check if current file is the last file -> we are done!
                 if(isBatchFinished) {
+
+                    // PDF import completion: delete original file and update node
+                    if (message.role === 'import' || message.process?.role === 'import') {
+                        await handleImportCompletion(message);
+                    }
                     
                     wsdata = {
                         command: 'process_finished',
@@ -520,7 +675,8 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
                 }
                 }
             } else {
-                // single file processing
+                // single file processing - mark process node as finished in DB
+                await Graph.setNodeAttribute_old(process_rid, {key: 'status', value: 'finished'}, 'Process');
                 wsdata = {
                     command: 'add',
                     type: message.file.type,  // node type
@@ -569,7 +725,7 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
 }
 
 export async function processFilesHandler(request, h) {
-    console.log('save process file call...');
+    console.log('-- save process file call...');
     let infoFilepath = null;
     let contentFilepath = null;
     let message = {};

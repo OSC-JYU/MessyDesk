@@ -2,7 +2,7 @@
 
 This document explains the key consumer options and why you would use each one.
 
-Consumers are implemented in the sibling repository `MD-consumers` and connect MessyDesk queue messages to service APIs.
+Consumers are implemented in the sibling repository `MD-consumers` and connect MessyDesk queue messages to services via rest api.
 
 ## Repositories and paths
 
@@ -77,6 +77,13 @@ Why needed:
 
 - Fast local development against manually started service.
 - Bypasses service discovery issues.
+
+Preflight behavior:
+
+- When `DEV_URL` is set and `NOMAD` is not enabled, consumer requires service reachability before startup.
+- Reachability check accepts runtime `/config` or healthy `/health`.
+- If service is down, consumer exits early instead of running adapter against unavailable service.
+- Temporary bypass: `REQUIRE_DEV_URL_UP=false`.
 
 Example:
 
@@ -187,6 +194,12 @@ Variables:
 
 - `REGISTRATION_MAX_ATTEMPTS`
 - `REGISTRATION_INITIAL_DELAY_MS`
+- `TOPIC` (optional) always wins as the registry/queue identity: the descriptor's own `id` is force-overridden with `TOPIC` before registration. This lets one physical service attach to multiple topics (e.g. md-sharp attaching to both `md-sharp` and `md-thumbnailer`) and lets multiple physical instances share one topic for parallel processing (queue claims are atomic per-row, see [architecture/queue-system.md](../queue-system.md)). If `TOPIC` is unset, it's derived from the descriptor's own `id` (via `SERVICE_JSON_PATH` or `DEV_URL`'s `/config`); required explicitly in Nomad mode since no descriptor is reachable before service discovery.
+- `REQUIRE_DEV_URL_UP` (default: `true` when `DEV_URL` is set and `NOMAD` is disabled)
+  - Requires service reachability before adapter startup in direct dev mode.
+- `DEV_URL_WAIT_MAX_MS` (default: `10000`)
+- `DEV_URL_WAIT_STEP_MS` (default: `1000`)
+- `DEV_URL_PROBE_TIMEOUT_MS` (default: `3000`)
 
 ## Containerized run
 

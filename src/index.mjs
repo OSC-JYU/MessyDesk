@@ -48,7 +48,7 @@ const init = async () => {
 	if(NOMAD) {
 		await nomad.getStatus();
 	}
-	await services.loadServiceAdapters('services', NOMAD);
+	await services.loadServiceAdapters(null, NOMAD);
 	await queue.init();
 	await Graph.initDB();
 

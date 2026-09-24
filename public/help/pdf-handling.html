@@ -8,21 +8,16 @@
 </head>
 <body>
   <main class="page">
-    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/search">Search</a><a href="/help/tags">Tags</a><a class="active" href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a class="active" href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
     <article class="content">
       <h1>PDF Handling</h1>
-<p>PDF files are common, but the format is quite old. They are not particularly convenient for mobile use, and they become especially inconvenient when automated processing is needed.</p>
-<p>MessyDesk treats PDF files somewhat like ZIP archives. A PDF is seen as a container that often needs to be extracted before meaningful processing can happen.</p>
-<h2>Pages or files?</h2>
-<p>In many fields that work with digitized information, a PDF file is often used as a package that bundles multiple documents together. Because of this, it makes more sense to treat individual pages as the basic processing unit rather than the entire file, while still preserving the connection to the original document.</p>
+<p>MessyDesk treats PDF as a container of pages.</p>
+<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> When PDF is imported to MessyDesk, it is automatically splitted to one-page PDF files and original file is REMOVED.</p>
+</blockquote>
+<p>There are couple of reasons for this. First reason is technical. PDF files can be very large, especially when it includes digitised content. Processing large files requires lot of memory and may lead corrupted results in some cases. Splitting file to smaller units resolves this problem.</p>
+<p>Second reason is semantic. In many fields that work with digitized information, a PDF file is often used as a package that bundles multiple documents together. The reason them being in same file might be that they located in paper folder. Because of this, it makes more sense to treat individual pages as the basic processing unit rather than the entire file, while still preserving the connection to the original document.</p>
 <p>MessyDesk does exactly this. When working with PDF files that contain hundreds of pages, splitting the file into separate single-page PDFs allows processing and classification to happen at the page level.</p>
-<h3>Split</h3>
-<p>The cruncher called <strong>&quot;Split to pages&quot;</strong> creates one PDF file per page and links each page back to the original file.</p>
-<p><img src="/api/help/images/pdf-split.jpg" alt="PDF split"></p>
-<p>For example, if you extract text from one of these individual pages, you get a separate text file linked to that specific page, which in turn remains linked to the original PDF file.</p>
-<p>This way, you never lose the original context regardless of how extensively the content is processed.</p>
-<hr>
-<h1>What is inside a PDF file?</h1>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>Individual pages are still connected to original file name.</p></div><h1>What is inside a PDF file?</h1>
 <p>A PDF file can contain many different kinds of content, ranging from images and forms to interactive elements and even games.</p>
 <p>A PDF may contain:</p>
 <ul>

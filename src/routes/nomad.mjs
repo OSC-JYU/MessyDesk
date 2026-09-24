@@ -7,6 +7,7 @@ import logger from '../logger.mjs';
 import media from '../media.mjs';
 
 import path from 'path';
+import Boom from '@hapi/boom';
 
 import { processFilesHandler, processFilesFromTmpHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
@@ -25,6 +26,9 @@ export default [
         method: 'POST', 
         path: '/api/nomad/service/{name}',
         handler: async (request, h) => {
+            if (request.auth?.credentials?.user?.access !== 'admin') {
+                throw Boom.forbidden('Admin access required');
+            }
             console.log('POST /api/nomad/service/{name}');
             console.log(request.params.name);
             const hclOverride = request.payload?.nomad_hcl;
@@ -61,6 +65,9 @@ export default [
         method: 'DELETE',
         path: '/api/nomad/service/{name}',
         handler: async (request, h) => {
+            if (request.auth?.credentials?.user?.access !== 'admin') {
+                throw Boom.forbidden('Admin access required');
+            }
             const adapter = await services.getServiceAdapterByName(request.params.name);
             try {
                 const service = await nomad.stopService(adapter);

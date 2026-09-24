@@ -6,6 +6,37 @@ import {  DB_NAME,DB_URL, DB_USER, DB_PASSWORD } from './env.mjs';
 const username = DB_USER
 const password = DB_PASSWORD
 
+// Write-retry tuning for transient ArcadeDB failures (MVCC conflicts, timeouts).
+const DB_WRITE_RETRIES = Math.max(1, Number(process.env.DB_WRITE_RETRIES || 5))
+const DB_WRITE_BACKOFF_BASE_MS = Number(process.env.DB_WRITE_BACKOFF_BASE_MS || 200)
+const DB_WRITE_BACKOFF_MAX_MS = Number(process.env.DB_WRITE_BACKOFF_MAX_MS || 5000)
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Full-jitter exponential backoff to avoid retry thundering-herd on conflicts.
+function dbBackoffDelay(attempt) {
+	const ceiling = Math.min(DB_WRITE_BACKOFF_MAX_MS, DB_WRITE_BACKOFF_BASE_MS * Math.pow(2, attempt - 1))
+	return Math.floor(Math.random() * ceiling)
+}
+
+// Only transient errors are worth retrying; permanent errors should fail fast.
+function isTransientDbError(error) {
+	if (!error) return false
+	const code = error.code || error.cause?.code
+	if (['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN'].includes(code)) return true
+	if (error.name === 'TimeoutError' || error.name === 'RequestError') return true
+	const status = error.response?.statusCode
+	if (status === 409 || status === 503) return true
+	const body = typeof error.response?.body === 'string' ? error.response.body : ''
+	const msg = `${error.message || ''} ${body}`.toLowerCase()
+	return msg.includes('concurrentmodification')
+		|| msg.includes('mvcc')
+		|| msg.includes('cannot update record')
+		|| msg.includes('modified by')
+		|| msg.includes('is different')
+		|| msg.includes('deadlock')
+		|| msg.includes('timeout')
+}
 
 console.log(DB_URL)
 
@@ -185,7 +216,7 @@ db.createEdgeType = async function(type) {
 }
 
 
-db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
+db.deleteMany = async function(rids, retries = DB_WRITE_RETRIES, timeout = 5000) {
 
 	let response
 	try {
@@ -207,16 +238,16 @@ db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
 					break // Success, exit retry loop
 				} catch (error) {
 					lastError = error
-					console.log(`Write attempt ${attempt} failed:`, error.message)
+					const transient = isTransientDbError(error)
+					console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
 					console.log(gotOptions.json)
-					
-					if (attempt < retries) {
-						// Wait before retrying (exponential backoff)
-						const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+
+					if (attempt < retries && transient) {
+						const delay = dbBackoffDelay(attempt)
 						console.log(`Retrying write in ${delay}ms...`)
-						await new Promise(resolve => setTimeout(resolve, delay))
+						await sleep(delay)
 					} else {
-						throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+						throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
 					}
 				}
 			}
@@ -233,7 +264,7 @@ db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
 
 
 
-db.sql = async function(query, options, retries = 3) {
+db.sql = async function(query, options, retries = DB_WRITE_RETRIES) {
 	let response
 	let lastError
 	if(!options) var options = {}
@@ -263,16 +294,16 @@ db.sql = async function(query, options, retries = 3) {
 			break // Success, exit retry loop
 		} catch (error) {
 			lastError = error
-			console.log(`Write attempt ${attempt} failed:`, error.message)
+			const transient = isTransientDbError(error)
+			console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
 			console.log(gotOptions.json)
-			
-			if (attempt < retries) {
-				// Wait before retrying (exponential backoff)
-				const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+
+			if (attempt < retries && transient) {
+				const delay = dbBackoffDelay(attempt)
 				console.log(`Retrying write in ${delay}ms...`)
-				await new Promise(resolve => setTimeout(resolve, delay))
+				await sleep(delay)
 			} else {
-				throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+				throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
 			}
 		}
 	}
@@ -306,14 +337,21 @@ db.sql_params = async function(query, params, raw, transactionId) {
 		}
 	}
 
-	try {
-		var response = await got.post(DB_URL, gotOptions).json()
-		if(raw) return response
-		return convert2VueFlow(response)
-
-	} catch(e) {
-		console.log(e.message)
-		throw({msg: 'error in query', query: query, error: e})
+	let lastError
+	for (let attempt = 1; attempt <= DB_WRITE_RETRIES; attempt++) {
+		try {
+			var response = await got.post(DB_URL, gotOptions).json()
+			if(raw) return response
+			return convert2VueFlow(response)
+		} catch(e) {
+			lastError = e
+			if (attempt < DB_WRITE_RETRIES && isTransientDbError(e)) {
+				await sleep(dbBackoffDelay(attempt))
+				continue
+			}
+			console.log(e.message)
+			throw({msg: 'error in query', query: query, error: e})
+		}
 	}
 	//var response = await axios.post(URL, query_data, config)
 

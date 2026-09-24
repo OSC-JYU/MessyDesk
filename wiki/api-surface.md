@@ -67,10 +67,13 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 |--------|------|---------|
 | GET | `/api/services` | List registered services |
 | GET | `/api/services/{service}` | Get service descriptor |
-| POST | `/api/services/register` | Register service descriptor |
+| POST | `/api/services/register` | Register service descriptor (used by consumers; open) |
+| POST | `/api/services/install` | **admin** Install a service (kind: `nomad`\|`external`\|`local`) and persist to registry |
+| DELETE | `/api/services/{service}` | **admin** Forget service (remove from registry) |
+| POST | `/api/services/reload` | **admin** Reload service descriptors from disk |
 | POST | `/api/services/refresh` | Refresh service registry |
-| POST | `/api/services/{service}/adapter/{id}` | Register adapter heartbeat |
-| DELETE | `/api/services/{service}/adapter/{id}` | Unregister adapter |
+| POST | `/api/services/{service}/adapter/{id}` | Register adapter heartbeat (consumers; open) |
+| DELETE | `/api/services/{service}/adapter/{id}` | Unregister adapter (consumers; open) |
 
 ## ROI (Region of Interest)
 
@@ -86,8 +89,8 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/nomad/status` | Check Nomad cluster status |
-| POST | `/api/nomad/service/{name}` | Deploy service |
-| DELETE | `/api/nomad/service/{name}` | Stop service |
+| POST | `/api/nomad/service/{name}` | **admin** Deploy service |
+| DELETE | `/api/nomad/service/{name}` | **admin** Stop service |
 
 ## Process Callbacks (from consumers)
 

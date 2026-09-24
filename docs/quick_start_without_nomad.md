@@ -3,11 +3,9 @@
 In order to run very *minimal* MessyDesk locally we need these:
 
 - ArcadeDB (graph database)
-- NATS Jetstream (message queue)
 - source code of Messydesk (backend)
 - source code of MessyDesk-UI (user interface)
 - source code of MD-consumers (service adapters)
-- Imaginary (image processing)
 
 Make sure that you have git, docker (or podman on RHEL linux) and NodeJS working (https://nodejs.org). 
 
@@ -29,14 +27,6 @@ password: node_master
 Note that there is no actual database yet. MessyDesk will create it on first startup.
 
 
-
-## NATS Jetstream (messaging)
-
-MessyDesk sends messages to services when something needs to be done. Let's start message queue next.
-
-	docker run -d --name nats-main -p 4222:4222 -p 6222:6222 -p 8222:8222 nats:2.11-linux -js
-
-You should see simple user interface here: http://localhost:8222/
 
 ## MessyDesk (backend)
 

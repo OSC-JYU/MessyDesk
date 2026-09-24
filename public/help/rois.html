@@ -8,12 +8,13 @@
 </head>
 <body>
   <main class="page">
-    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/search">Search</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a class="active" href="/help/rois">ROIs</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a class="active" href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
     <article class="content">
       <h1>Regions of Interest (ROIs)</h1>
 <p>As the name implies, a <strong>Region of Interest (ROI)</strong> is a specific segment of an image or text file that a researcher flags for further analysis or targeted processing.</p>
 <h2>Image ROIs (Polygons)</h2>
 <p>Image ROIs allow you to draw shapes over specific areas of a visual node to isolate them. Instead of permanently cropping or altering your original file, MessyDesk treats these polygons as abstract layer markings. </p>
+<p>For storage, MessyDesk keeps ROI polygons in a single JSON file per image file (inside the active ROI set). Editing ROIs updates that same JSON, and if all ROIs are removed, the ROI JSON file is deleted.</p>
 <p>Because ROIs exist as independent metadata layers rather than destructive edits, they can be utilized in several distinct ways:</p>
 <ul>
 <li><strong>Targeted Processing:</strong> You can instruct a cruncher to process <em>only</em> the data contained within a specific ROI (e.g., running OCR on a single column of an ancient manuscript page).</li>

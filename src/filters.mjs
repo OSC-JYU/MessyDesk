@@ -3,6 +3,10 @@ import fs from 'fs';
 
 export const filters = {filter_list: {}}
 
+// The 4 tool categories from docs/help/3.tools.md; filters without a valid value show as "Uncategorized" in the UI.
+// 'system' is a 5th category for internal-only filters that are never listed in the crunchers UI.
+const ALLOWED_CATEGORIES = ['preparation', 'linguistic', 'ml', 'generative', 'system']
+
 filters.loadFilters   = async function(filter_path = 'filters') {
 
     const directoryPath = filter_path
@@ -23,6 +27,10 @@ filters.loadFilters   = async function(filter_path = 'filters') {
 
 				// Parse the JSON content
 				const jsonData = JSON.parse(fileContent)
+				if(jsonData.category !== undefined && !ALLOWED_CATEGORIES.includes(jsonData.category)) {
+					console.error(`WARN: filter '${subdirectory}' has invalid category '${jsonData.category}', treating as uncategorized`);
+					delete jsonData.category;
+				}
 				// Add the data to the result object with the subdirectory name as the key
 				filters.filter_list[subdirectory] = jsonData;
 			} catch (error) {

@@ -19,6 +19,103 @@ marked.setOptions({
     breaks: false,
 });
 
+function renderMarkdownNotes(markdown) {
+  const lines = String(markdown).split('\n');
+
+  const transformedLines = lines.map((line) => {
+    const trimmedLine = line.trim();
+
+    const boldNoteMatch = trimmedLine.match(/^\*\*note:?\*\*\s+(.+)$/i);
+    if (boldNoteMatch && boldNoteMatch[1]) {
+      const content = marked.parseInline(boldNoteMatch[1].trim());
+      return `<div class="md-note"><p class="md-note-title">NOTE</p><p>${content}</p></div>`;
+    }
+
+    const italicNoteMatch = trimmedLine.match(/^\*note:\s+(.+)\*$/i);
+    if (italicNoteMatch && italicNoteMatch[1]) {
+      const content = marked.parseInline(italicNoteMatch[1].trim());
+      return `<div class="md-note"><p class="md-note-title">NOTE</p><p>${content}</p></div>`;
+    }
+
+    const plainNoteMatch = trimmedLine.match(/^note:\s+(.+)$/i);
+    if (plainNoteMatch && plainNoteMatch[1]) {
+      const content = marked.parseInline(plainNoteMatch[1].trim());
+      return `<div class="md-note"><p class="md-note-title">NOTE</p><p>${content}</p></div>`;
+    }
+
+    return line;
+  });
+
+  return transformedLines.join('\n');
+}
+
+function renderMarkdownColumns(markdown) {
+  const columnsBlockPattern = /:::columns(?:\s+(\d+))?\s*\n([\s\S]*?)\n:::/g;
+
+  return markdown.replace(columnsBlockPattern, (fullMatch, rawCount, body) => {
+    const sections = String(body)
+      .split(/\n\s*---\s*\n/g)
+      .map((section) => section.trim())
+      .filter(Boolean);
+
+    if (sections.length < 2) {
+      return fullMatch;
+    }
+
+    const parsedCount = Number.parseInt(rawCount, 10);
+    const desiredCount = Number.isFinite(parsedCount) ? parsedCount : sections.length;
+    const safeColumnCount = Math.max(1, Math.min(desiredCount, 6));
+    const mediumColumnCount = Math.max(1, Math.min(2, safeColumnCount));
+
+    // Render each column section with markdown support before inserting HTML wrappers.
+    const columnsHtml = sections
+      .map((section) => `<section class="md-column">${marked.parse(section)}</section>`)
+      .join('');
+
+    return `<div class="md-columns" style="--md-columns: ${safeColumnCount}; --md-columns-medium: ${mediumColumnCount};">${columnsHtml}</div>`;
+  });
+}
+
+function decorateSpecialBlockquotes(html) {
+  const withTip = String(html).replace(
+    /<blockquote>\s*<p>(?:💡\s*)?<strong>TIP:<\/strong>\s*/gi,
+    '<blockquote class="md-tip"><p><span class="md-tip-icon" aria-hidden="true">💡</span> <strong>TIP:</strong> '
+  );
+
+  const withWarning = withTip.replace(
+    /<blockquote>\s*<p>(?:⚠️?\s*)?<strong>WARNING:<\/strong>\s*/gi,
+    '<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> '
+  );
+
+  const stampColors = new Set(['orange', 'red', 'teal', 'blue', 'green']);
+
+  return withWarning.replace(
+    /<blockquote>\s*<p>(?:📌\s*)?<strong>\s*STAMP(?:\s*:\s*([a-z-]+))?\s*:??\s*<\/strong>\s*/gi,
+    (fullMatch, rawColor) => {
+      const color = String(rawColor || '').toLowerCase();
+      const colorClass = stampColors.has(color) ? ` md-stamp-${color}` : '';
+      return `<blockquote class="md-stamp${colorClass}"><p><span class="md-stamp-seal" aria-hidden="true"></span> `;
+    }
+  );
+}
+
+function decorateInlineStamps(html) {
+  const stampColors = new Set(['orange', 'red', 'teal', 'blue', 'green']);
+
+  return String(html).replace(
+    /<p>\s*<strong>\s*STAMP(?:\s*:\s*([a-z-]+))?\s*:??\s*<\/strong>\s*([\s\S]*?)<\/p>/gi,
+    (fullMatch, rawColor, content) => {
+      const color = String(rawColor || '').toLowerCase();
+      const colorClass = stampColors.has(color) ? ` md-stamp-${color}` : '';
+      const trimmedContent = String(content || '').trim();
+      if (!trimmedContent) {
+        return fullMatch;
+      }
+      return `<p class="md-stamp-inline${colorClass}"><span class="md-stamp-seal" aria-hidden="true"></span> ${trimmedContent}</p>`;
+    }
+  );
+}
+
 function humanizeSlug(slug) {
     return slug
     .split(/[-_\s]+/)
@@ -192,7 +289,11 @@ async function buildHelp() {
 
     for (const page of pageData) {
       const rewritten = rewriteMarkdownImageLinks(rewriteMarkdownLinks(page.markdown, linkMap));
-        const bodyHtml = marked.parse(rewritten);
+      const withNotes = renderMarkdownNotes(rewritten);
+      const withColumns = renderMarkdownColumns(withNotes);
+      const parsedHtml = marked.parse(withColumns);
+      const withDecoratedQuotes = decorateSpecialBlockquotes(parsedHtml);
+      const bodyHtml = decorateInlineStamps(withDecoratedQuotes);
         const navHtml = buildHelpNav(pageData, page.slug);
         const html = wrapHtmlDocument({
             title: page.title,

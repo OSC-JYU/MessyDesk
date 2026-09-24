@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-GLiNER2 Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-gliner2</div>
+                        <h1>MD-GLiNER2 Service</h1>
+<p>The <strong>MD-GLiNER2</strong> service uses the <strong><a href="https://huggingface.co/fastino/gliner2.5-multi-v1">GLiNER2</a></strong> model to find information in plain text without needing a model trained for your specific labels. You describe what you&#39;re looking for in plain words, and the model finds it.</p>
+<hr>
+<h2>Available Crunchers</h2>
+<h3><code>extract_entities</code> — Find named entities</h3>
+<p>Finds mentions of the entity types you list (e.g. <code>person, organization, location, date</code>) and returns each one with its position in the text.</p>
+<ul>
+<li><strong>Why this is useful:</strong> Instead of training or picking a model for a fixed set of entity types, you just type the types you care about.</li>
+</ul>
+<h3><code>classify_text</code> — Classify text</h3>
+<p>Assigns one or more of your categories (e.g. <code>sports, politics, finance</code>) to the whole text.</p>
+<ul>
+<li>Check <strong>Allow multiple categories</strong> if a text can reasonably belong to more than one category at once. Otherwise the single best-matching category is returned.</li>
+</ul>
+<h3><code>extract_data</code> — Extract structured data</h3>
+<p>Pulls out the specific fields you name (e.g. <code>invoice_number, date, total_amount</code>) as structured values.</p>
+<ul>
+<li><blockquote>
+<p>⚠️ <strong>Note:</strong> Fields that aren&#39;t present in the text are simply omitted from the result — this cruncher does not guess missing values.</p>
+</blockquote>
+</li>
+</ul>
+<hr>
+<h2>Tips for labels</h2>
+<ul>
+<li>Use plain, descriptive words — the model was not trained on your data, so it relies on the label wording itself (e.g. <code>location</code> works better than a project-specific code name).</li>
+<li>Keep the list short and specific to what you need; unrelated labels can dilute results.</li>
+</ul>
+<h2>External Resources</h2>
+<ul>
+<li><a href="https://huggingface.co/fastino/gliner2.5-multi-v1">GLiNER2 model card</a></li>
+<li><a href="https://github.com/fastino-ai/GLiNER2">GLiNER2 GitHub repository</a></li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>

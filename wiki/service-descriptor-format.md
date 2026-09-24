@@ -24,6 +24,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
     "description": "Image operations service",
     "location": "on-premise",
     "access": "free",
+    "category": "linguistic",
     "source_url": "https://github.com/h2non/node-imaginary",
 
     "local_url": "http://localhost:9000",
@@ -69,6 +70,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `dev_url` | string | No | Alternative dev endpoint |
 | `location` | string | No | `"on-premise"`, `"cloud"`, etc. |
 | `access` | string | No | `"free"`, `"proprietary"`, `"commercial"` |
+| `category` | string | No | One of `preparation`, `linguistic`, `ml`, `generative`, `system` (see [3.tools.md](../docs/help/3.tools.md)). Missing/invalid values show as "Uncategorized" in the UI; invalid (non-empty) values are rejected at registration. `system` services are internal-only and are filtered out of `getServicesForNode()` entirely, so they never reach the crunchers UI. |
 | `source_url` | string | No | Documentation/source URL |
 | `supported_types` | string[] | No | File types this service accepts (e.g., `["image", "text"]`) |
 | `supported_formats` | string[] | No | File extensions accepted (e.g., `["png", "jpg"]`) |

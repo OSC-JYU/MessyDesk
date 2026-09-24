@@ -227,9 +227,36 @@ export default [
             const jobId = Number(request.params.job_id);
             const { adapter_id, error } = request.payload || {};
             if (!adapter_id) throw Boom.badRequest('adapter_id is required');
-            const ok = queue.fail(jobId, error || 'unknown error', adapter_id);
-            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
-            return { ok: true };
+            const result = await queue.fail(jobId, error || 'unknown error', adapter_id);
+            if (!result) throw Boom.notFound('Job not found or not owned by this adapter');
+
+            // Auto-abort triggered: notify user and update batch status
+            if (result.batch_aborted && result.batch_rid) {
+                const batch = await Graph.getBatchProcess(result.batch_rid);
+                await Graph.updateBatchProcess(result.batch_rid, {
+                    status: 'cancelled',
+                    finished_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    eta_sec: 0,
+                });
+                if (result.userId) {
+                    userManager.sendToUser(result.userId, {
+                        command: 'process_finished',
+                        process: { '@rid': result.batch_rid, status: 'cancelled' },
+                        batch: {
+                            status: 'cancelled',
+                            state: 'cancelled',
+                            processed_files: batch?.processed_files || 0,
+                            failed_files: batch?.failed_files || 0,
+                            total_files: batch?.total_files || 0,
+                            eta_sec: 0,
+                        },
+                        abort_reason: result.abort_reason,
+                    });
+                }
+            }
+
+            return { ok: true, permanent: result.permanent || false, batch_aborted: result.batch_aborted || false };
         }
     },
 
@@ -238,6 +265,22 @@ export default [
         path: '/api/queue/jobs/active',
         handler: async () => {
             return queue.getActiveJobs();
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/jobs/{rid}/dismiss',
+        handler: async (request) => {
+            const rid = request.params.rid;
+            const ok = queue.dismissJob(rid);
+            if (ok) {
+                userManager.sendToUser(request.auth.credentials.user.rid, {
+                    command: 'process_finished',
+                    process: { '@rid': rid, status: 'cancelled' },
+                });
+            }
+            return { ok, rid };
         }
     },
 
@@ -285,7 +328,17 @@ export default [
         method: 'GET',
         path: '/api/batches/{process_rid}',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) - return queue job info directly
+            if (/^job_\d+$/.test(rawRid)) {
+                const jobId = Number(rawRid.replace('job_', ''));
+                const job = queue.getJobById(jobId);
+                if (!job) throw Boom.notFound('Job not found');
+                return job;
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             return await Graph.getBatchProcess(process_rid);
         }
     },
@@ -294,7 +347,14 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/pause',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) cannot be paused
+            if (/^job_\d+$/.test(rawRid)) {
+                throw Boom.badRequest('Individual queue jobs cannot be paused, only batch processes');
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             const batch = await Graph.updateBatchProcess(process_rid, {
                 status: 'paused',
                 paused_at: new Date().toISOString(),
@@ -325,7 +385,14 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/resume',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) cannot be resumed
+            if (/^job_\d+$/.test(rawRid)) {
+                throw Boom.badRequest('Individual queue jobs cannot be resumed, only batch processes');
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             const batch = await Graph.getBatchProcess(process_rid);
             if(!batch) {
                 throw Boom.notFound('Batch not found');
@@ -437,7 +504,20 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/cancel',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // Handle SQLite queue job IDs (job_N format)
+            if (/^job_\d+$/.test(rawRid)) {
+                const jobId = Number(rawRid.replace('job_', ''));
+                const deleted = queue.cancelJob(jobId);
+                userManager.sendToUser(request.auth.credentials.user.rid, {
+                    command: 'process_finished',
+                    process: { '@rid': rawRid, status: 'cancelled' },
+                });
+                return { status: 'cancelled', job_id: jobId, deleted };
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             await Graph.updateBatchProcess(process_rid, {
                 status: 'cancelling',
                 updated_at: new Date().toISOString(),
@@ -505,6 +585,32 @@ export default [
         }
     },
 
+    {
+        method: 'POST',
+        path: '/api/queue/cleanup',
+        handler: async (request) => {
+            try {
+                const payload = request.payload || {};
+                const status = await queue.cleanupOlderThan({
+                    olderThanMinutes: payload.older_than_minutes,
+                    statuses: payload.statuses || ['done', 'cancelled'],
+                    dryRun: Boolean(payload.dry_run),
+                });
+                return status;
+            } catch (error) {
+                throw Boom.badRequest(error.message);
+            }
+        }
+    },
+
+    {
+        method: 'GET',
+        path: '/api/queue/sweeper/summary',
+        handler: async () => {
+            return queue.getSweeperSummary();
+        }
+    },
+
 
     // single queue
     {
@@ -515,7 +621,7 @@ export default [
                 const topic = request.params.topic;
                 const service = services.getServiceAdapterByName(topic);
                 var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.rid, request.params.roi);
-                const queue = Graph.getQueueName(service, request.payload, topic);
+                const queueName = Graph.getQueueName(service, request.payload, topic);
                 //console.log('messages: ', messages);
 
                 // For search-output tasks on a single file, create a search output Set upfront
@@ -553,7 +659,7 @@ export default [
 
                 for(var msg of messages) {    
                     // send message to queue
-                    queue.publish(queue, JSON.stringify(msg));
+                    queue.publish(queueName, JSON.stringify(msg));
                 }
 
                 return request.params.file_rid;

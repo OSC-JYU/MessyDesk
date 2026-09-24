@@ -66,8 +66,8 @@ Typical minimum fields in incoming message payload:
 	"file": {
 		"@rid": "#..:..",
 		"project_rid": "#..:..",
-		"path": "data/<db>/.../source.ext",
-		"label": "source.ext",
+		"path": "data/<db>/.../source.txt",
+		"label": "source.txt",
 		"type": "text",
 		"extension": "txt"
 	},

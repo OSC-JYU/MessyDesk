@@ -63,6 +63,24 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **[verified]** — `messageFactory.mjs` enriches messages with `project_rid` from file, process, or node traversal. This ensures async processing can always check access control.
 
+### 9a. All processing must go through the queue — never inline
+
+**[verified]** — MessyDesk is a multi-user server application. CPU-intensive work (image resizing, OCR, AI inference, thumbnail generation) must be dispatched to external consumer processes via the queue, never executed inline in a request handler. Inline processing blocks the single-threaded Node.js event loop and degrades performance for all connected users. See [queue-system.md](queue-system.md).
+
+### 10. PDF upload requires active splitter service
+
+**[verified]** — Upload handler in `src/routes/files.mjs` checks `services.hasActiveConsumer('md-pypdf_fs')` before accepting PDFs. Returns HTTP 503 if unavailable. PDF files are automatically split into single-page PDFs on upload.
+
+**Consequence**: PDF upload is blocked when the splitter is down. ZIP-extracted PDFs are stored with `processable: false` when the splitter is unavailable.
+
+### 11. `processable: false` restricts service matching to split-only
+
+**[verified]** — `getServicesForNode()` in `services.mjs` returns only `md-pypdf_fs` split task for files with `processable === false`. Absence of the field means processable. ZIP service ignores this flag.
+
+### 12. Files with `_status: 'importing'` reject manual processing
+
+**[verified]** — The `_status: 'importing'` field on a File node acts as a lock during auto-split. Manual processing requests are rejected until the import completes or fails.
+
 ## File System Invariants
 
 ### 10. File paths embed date-based partitioning
