@@ -7,11 +7,11 @@ export const DB_USER = process.env.DB_USER || 'root';
 export const DB_PASSWORD = process.env.DB_PASSWORD;
 
 export const API_URL = process.env.API_URL || 'http://localhost:8200/';
-export const NATS_URL = process.env.NATS_URL || 'nats://localhost:4222';
-export const NATS_URL_STATUS = process.env.NATS_URL_STATUS || 'http://localhost:8222';
 export const DATA_DIR = 'data/' + DB_NAME;
 export const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr';
 export const SOLR_CORE = process.env.SOLR_CORE || 'messydesk';
 export const NOMAD = process.env.NOMAD || false;
+export const DISK_QUOTA_GB = Number(process.env.DISK_QUOTA) || 100;
+export const PROJECT_EXPIRATION_DAYS = Number(process.env.PROJECT_EXPIRATION_DAYS) || 180;
 
 

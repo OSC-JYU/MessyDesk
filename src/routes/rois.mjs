@@ -19,6 +19,19 @@ export default [
         }
     },
     {
+        method: 'DELETE',
+        path: '/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}',
+        handler: async (request) => {
+            const result = await Graph.deleteImageROIs(
+                request.params.rid,
+                request.params.set_rid,
+                request.params.roi_rid,
+                request.auth.credentials.user.rid
+            );
+            return result;
+        }
+    },
+    {
         method: 'GET',
         path: '/api/images/{rid}/sets/{set_rid}/rois',
         handler: async (request) => {

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import Boom from '@hapi/boom';
 import Susie from 'susie';
 
-import nats from './queue.mjs';
+import queue from './queue.mjs';
 import Graph from './graph.mjs';
 import media from './media.mjs';
 import services from './services.mjs';
@@ -30,6 +30,7 @@ import promptRoutes from './routes/prompts.mjs';
 import searchRoutes from './routes/search.mjs';
 import filterRoutes from './routes/filters.mjs';
 import roiRoutes from './routes/rois.mjs';
+import helpRoutes from './routes/help.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,10 +48,9 @@ const init = async () => {
 	if(NOMAD) {
 		await nomad.getStatus();
 	}
-	await services.loadServiceAdapters('services', NOMAD);
-	await nats.init(services.getServices());
+	await services.loadServiceAdapters(null, NOMAD);
+	await queue.init();
 	await Graph.initDB();
-	nats.listenDBQueue('arcadedb');
 
 	// Create server instance
 	const server = Hapi.server({
@@ -209,7 +209,8 @@ const init = async () => {
 		...promptRoutes,
 		...searchRoutes,
 		...filterRoutes,
-		...roiRoutes
+		...roiRoutes,
+		...helpRoutes
 	]);
 
 	// Start the server

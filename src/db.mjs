@@ -1,3 +1,4 @@
+
 import got from 'got';
 import path from 'path';
 import {  DB_NAME,DB_URL, DB_USER, DB_PASSWORD } from './env.mjs';
@@ -5,6 +6,37 @@ import {  DB_NAME,DB_URL, DB_USER, DB_PASSWORD } from './env.mjs';
 const username = DB_USER
 const password = DB_PASSWORD
 
+// Write-retry tuning for transient ArcadeDB failures (MVCC conflicts, timeouts).
+const DB_WRITE_RETRIES = Math.max(1, Number(process.env.DB_WRITE_RETRIES || 5))
+const DB_WRITE_BACKOFF_BASE_MS = Number(process.env.DB_WRITE_BACKOFF_BASE_MS || 200)
+const DB_WRITE_BACKOFF_MAX_MS = Number(process.env.DB_WRITE_BACKOFF_MAX_MS || 5000)
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Full-jitter exponential backoff to avoid retry thundering-herd on conflicts.
+function dbBackoffDelay(attempt) {
+	const ceiling = Math.min(DB_WRITE_BACKOFF_MAX_MS, DB_WRITE_BACKOFF_BASE_MS * Math.pow(2, attempt - 1))
+	return Math.floor(Math.random() * ceiling)
+}
+
+// Only transient errors are worth retrying; permanent errors should fail fast.
+function isTransientDbError(error) {
+	if (!error) return false
+	const code = error.code || error.cause?.code
+	if (['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EPIPE', 'EAI_AGAIN'].includes(code)) return true
+	if (error.name === 'TimeoutError' || error.name === 'RequestError') return true
+	const status = error.response?.statusCode
+	if (status === 409 || status === 503) return true
+	const body = typeof error.response?.body === 'string' ? error.response.body : ''
+	const msg = `${error.message || ''} ${body}`.toLowerCase()
+	return msg.includes('concurrentmodification')
+		|| msg.includes('mvcc')
+		|| msg.includes('cannot update record')
+		|| msg.includes('modified by')
+		|| msg.includes('is different')
+		|| msg.includes('deadlock')
+		|| msg.includes('timeout')
+}
 
 console.log(DB_URL)
 
@@ -107,9 +139,48 @@ db.createDB = async function() {
 		for(var query of commands) {
 			await this.sql(query, 'sql')
 		}
+		await this.ensureIndexes()
 	} catch(e) {
 		console.log('Database init failed', e.message)
 		throw(e)
+	}
+}
+
+db.ensureIndexes = async function() {
+	const propertyCommands = [
+		'CREATE PROPERTY File.project_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY File.set IF NOT EXISTS STRING',
+		'CREATE PROPERTY Set.project_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY Entity.owner IF NOT EXISTS STRING',
+		'CREATE PROPERTY Project.label IF NOT EXISTS STRING'
+	]
+
+	for(const query of propertyCommands) {
+		try {
+			await this.sql(query)
+		} catch (error) {
+			console.log('Property ensure failed:', query, error?.message || error)
+		}
+	}
+
+	const indexCommands = [
+		'CREATE INDEX IF NOT EXISTS ON File (project_rid) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON File (set) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Set (project_rid) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Entity (owner) NOTUNIQUE',
+		'CREATE INDEX IF NOT EXISTS ON Project (label) NOTUNIQUE'
+	]
+
+	for(const query of indexCommands) {
+		try {
+			await this.sql(query, {}, 1)
+		} catch (error) {
+			const msg = String(error?.message || error || '')
+			if(msg.toLowerCase().includes('already exists')) {
+				continue
+			}
+			console.log('Index ensure failed:', query, msg)
+		}
 	}
 }
 
@@ -145,7 +216,7 @@ db.createEdgeType = async function(type) {
 }
 
 
-db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
+db.deleteMany = async function(rids, retries = DB_WRITE_RETRIES, timeout = 5000) {
 
 	let response
 	try {
@@ -167,16 +238,16 @@ db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
 					break // Success, exit retry loop
 				} catch (error) {
 					lastError = error
-					console.log(`Write attempt ${attempt} failed:`, error.message)
+					const transient = isTransientDbError(error)
+					console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
 					console.log(gotOptions.json)
-					
-					if (attempt < retries) {
-						// Wait before retrying (exponential backoff)
-						const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+
+					if (attempt < retries && transient) {
+						const delay = dbBackoffDelay(attempt)
 						console.log(`Retrying write in ${delay}ms...`)
-						await new Promise(resolve => setTimeout(resolve, delay))
+						await sleep(delay)
 					} else {
-						throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+						throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
 					}
 				}
 			}
@@ -193,7 +264,7 @@ db.deleteMany = async function(rids, retries = 3, timeout = 5000) {
 
 
 
-db.sql = async function(query, options, retries = 3) {
+db.sql = async function(query, options, retries = DB_WRITE_RETRIES) {
 	let response
 	let lastError
 	if(!options) var options = {}
@@ -223,16 +294,16 @@ db.sql = async function(query, options, retries = 3) {
 			break // Success, exit retry loop
 		} catch (error) {
 			lastError = error
-			console.log(`Write attempt ${attempt} failed:`, error.message)
+			const transient = isTransientDbError(error)
+			console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
 			console.log(gotOptions.json)
-			
-			if (attempt < retries) {
-				// Wait before retrying (exponential backoff)
-				const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000)
+
+			if (attempt < retries && transient) {
+				const delay = dbBackoffDelay(attempt)
 				console.log(`Retrying write in ${delay}ms...`)
-				await new Promise(resolve => setTimeout(resolve, delay))
+				await sleep(delay)
 			} else {
-				throw new Error(`Failed to execute query after ${retries} attempts. Last error: ${lastError.message}`)
+				throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
 			}
 		}
 	}
@@ -266,14 +337,21 @@ db.sql_params = async function(query, params, raw, transactionId) {
 		}
 	}
 
-	try {
-		var response = await got.post(DB_URL, gotOptions).json()
-		if(raw) return response
-		return convert2VueFlow(response)
-
-	} catch(e) {
-		console.log(e.message)
-		throw({msg: 'error in query', query: query, error: e})
+	let lastError
+	for (let attempt = 1; attempt <= DB_WRITE_RETRIES; attempt++) {
+		try {
+			var response = await got.post(DB_URL, gotOptions).json()
+			if(raw) return response
+			return convert2VueFlow(response)
+		} catch(e) {
+			lastError = e
+			if (attempt < DB_WRITE_RETRIES && isTransientDbError(e)) {
+				await sleep(dbBackoffDelay(attempt))
+				continue
+			}
+			console.log(e.message)
+			throw({msg: 'error in query', query: query, error: e})
+		}
 	}
 	//var response = await axios.post(URL, query_data, config)
 
@@ -502,18 +580,39 @@ async function convert2VueFlow(data, options) {
 	const edges = []
 	const nodeIds = new Set()
 	const edgeIds = new Set()
+	const processMetaCache = new Map()
+
+	const resolveProcessMeta = async (processRid) => {
+		if(!processRid) return null
+		if(processMetaCache.has(processRid)) return processMetaCache.get(processRid)
+
+		let record = null
+		let response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM Process WHERE @rid = ${processRid} LIMIT 1`)
+		if(response.result[0]) {
+			record = response.result[0]
+		} else {
+			response = await db.sql(`SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM SetProcess WHERE @rid = ${processRid} LIMIT 1`)
+			if(response.result[0]) {
+				record = response.result[0]
+			}
+		}
+
+		processMetaCache.set(processRid, record)
+		return record
+	}
 
 
 	if(data?.result?.vertices) {
 		for(const v of data.result.vertices) {
 			if(!v?.r || nodeIds.has(v.r)) continue
 			const vp = v.p || {}
+			const semanticType = vp.type || v.t
 			const node = {
 				data: {
 					id: v.r,
 					name: vp.label,
 					uuid: vp.uuid,
-					type: v.t,
+					type: semanticType,
 					info: vp.info,
 					description: vp.description,
 					roi_count: vp.roi_count,
@@ -521,7 +620,7 @@ async function convert2VueFlow(data, options) {
 				}
 			}
 
-			if(vp.type) node.data._type = vp.type
+			node.data._type = v.t
 			if(vp.node_error) node.data.error = vp.node_error
 			if(vp.error_count) node.data.error_count = vp.error_count
 			if(vp.metadata) node.data.metadata = vp.metadata
@@ -550,18 +649,20 @@ async function convert2VueFlow(data, options) {
 
 			if(edgeType === 'DERIVED_FROM') {
 				const derivedNodeId = ep.process_rid
+				const processMeta = await resolveProcessMeta(derivedNodeId)
 				if(!nodeIds.has(derivedNodeId)) {
 					const derivedNode = {
 						data: {
 							id: derivedNodeId,
-							name: ep.task || edgeType,
-							type: 'Process',
+							name: processMeta?.label || ep.task || ep.process_id || ep.cruncher || edgeType,
+							type: processMeta?.node_type || 'Process',
 							edge_type: edgeType,
 							edge_rid: e.r,
 							process_rid: ep.process_rid,
 							process_id: ep.process_id,
-							service: ep.cruncher,
-							task: ep.task,
+							service: processMeta?.service_id || processMeta?.service || ep.cruncher,
+							task: processMeta?.task || ep.task,
+							info: processMeta?.info || processMeta?.description,
 						}
 					}
 					nodes.push(derivedNode)

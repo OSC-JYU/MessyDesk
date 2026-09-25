@@ -1,6 +1,5 @@
 import Graph from './graph.mjs';
 import media from './media.mjs';
-import nats from './queue.mjs';
 
 
 // Early test for creating a project and a file directly 

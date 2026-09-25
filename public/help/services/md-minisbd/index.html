@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-MiniSBD Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-minisbd</div>
+                        <h1>MD-MiniSBD Service</h1>
+<p>The <strong>MD-MiniSBD</strong> service uses <strong><a href="https://github.com/LibreTranslate/MiniSBD">MiniSBD</a></strong> (an ONNX port of Stanza&#39;s tokenizer models) to split plain text into sentences across 80+ languages.</p>
+<hr>
+<h2>Available Crunchers</h2>
+<h3><code>find_sentence_boundaries</code> — Find sentence boundaries</h3>
+<p>Detects sentence boundaries in the input text and rewrites it accordingly.</p>
+<ul>
+<li><strong>Language</strong> — pick the language of your text. Detection quality depends on having the right language model.</li>
+<li><strong>Output format</strong>:<ul>
+<li><em>Continuous text</em> (default) — each paragraph is kept as a single flowing line of text, with sentence boundaries normalized internally.</li>
+<li><em>Sentence per line</em> — every detected sentence is written on its own line, one sentence per line.</li>
+</ul>
+</li>
+<li>Both output formats preserve blank lines between paragraphs, so chapter/section breaks in the original document are not lost.</li>
+</ul>
+<hr>
+<h2>External Resources</h2>
+<ul>
+<li><a href="https://github.com/LibreTranslate/MiniSBD">MiniSBD GitHub repository</a></li>
+<li><a href="https://github.com/stanfordnlp/stanza">Stanza</a> (source of the underlying tokenizer models)</li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>

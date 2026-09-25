@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - MD-UVDoc Service</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-uvdoc</div>
+                        <h1>MD-UVDoc Service</h1>
+<p>The <strong>MD-UVDoc</strong> service dewarps photographed document images, removing the perspective and page-curl distortion typical of phone-camera captures so that downstream OCR/text-extraction tools get a flat, rectified image.</p>
+<p>It is backed by the <strong>UVDoc</strong> neural grid-based document unwarping model.</p>
+<hr>
+<h2>Available Crunchers</h2>
+<h3><code>dewarp</code></h3>
+<p>Dewarps a single document image, straightening out perspective and curl distortion.</p>
+<ul>
+<li><strong>Why this is important:</strong> OCR and layout-analysis tools generally assume a flat, top-down view of the page. Photos taken at an angle or of a curved page (e.g. a book) reduce recognition accuracy; running <code>dewarp</code> first improves results.</li>
+</ul>
+<hr>
+<h2>External Resources</h2>
+<ul>
+<li><a href="https://github.com/tanguymagne/UVDoc">UVDoc paper &amp; source</a></li>
+</ul>
+
+                </article>
+        </main>
+</body>
+</html>

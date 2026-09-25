@@ -2,3 +2,5 @@ node_modules
 styles/.current.json
 *.env
 src/logs
+docs/llm
+sqlite3

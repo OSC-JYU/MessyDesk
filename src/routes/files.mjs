@@ -5,12 +5,20 @@ import fse from 'fs-extra';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
+import services from '../services.mjs';
 import userManager from '../userManager.mjs';
 import { DATA_DIR } from '../env.mjs';
+import { afterFileCreated } from '../controllers/importPipeline.mjs';
 
 const SET_ZIP_JOB_TTL_MS = Number(process.env.SET_ZIP_JOB_TTL_MS || 30 * 60 * 1000);
-const MAX_VERSION_TEXT_BYTES = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
+const MAX_VERSION_TEXT_BYTES = (() => {
+    const parsed = Number(process.env.MAX_VERSION_TEXT_BYTES || 10 * 1024 * 1024);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 10 * 1024 * 1024;
+    }
+    return parsed;
+})();
 
 function getTmpDir() {
     return path.resolve(DATA_DIR, 'tmp');
@@ -96,7 +104,7 @@ async function queueSetZipJob(request, setRid) {
         userId: request.auth.credentials.user.rid,
     };
 
-    await nats.publish('md-zip_fs', JSON.stringify(payload));
+    await queue.publish('md-zip_fs', JSON.stringify(payload));
 
     return job;
 }
@@ -125,8 +133,34 @@ async function saveUploadStreamToPath(fileStream, targetPath) {
     });
 }
 
+async function readStreamToString(stream) {
+    const chunks = [];
+    for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString('utf8');
+}
+
+async function normalizeVersionPayload(rawPayload) {
+    const payload = rawPayload || {};
+    if (payload && typeof payload.pipe === 'function') {
+        const text = await readStreamToString(payload);
+        if (!text || !text.trim()) return {};
+        try {
+            const parsed = JSON.parse(text);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+            return {};
+        } catch {
+            return {};
+        }
+    }
+    return payload;
+}
+
 function queueThumbnailRefresh(file, userId) {
-    if (!file || !file.type) return;
+    if (!file || !file.type) return false;
 
     if (file.type === 'image') {
         const data = {
@@ -138,7 +172,8 @@ function queueThumbnailRefresh(file, userId) {
             task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
             id: 'md-thumbnailer'
         };
-        nats.publish(data.id, JSON.stringify(data));
+        queue.publish(data.id, JSON.stringify(data));
+        return true;
     } else if (file.type === 'pdf') {
         const data = {
             file,
@@ -156,8 +191,11 @@ function queueThumbnailRefresh(file, userId) {
             role: 'thumbnail',
             id: 'md-poppler'
         };
-        nats.publish(data.id, JSON.stringify(data));
+        queue.publish(data.id, JSON.stringify(data));
+        return true;
     }
+
+    return false;
 }
 
 async function updateFileMetadata(file, userRid) {
@@ -186,14 +224,34 @@ async function updateFileMetadata(file, userRid) {
     }
 }
 
-function sendFileUpdate(userRid, fileRid, edited) {
+function sendFileUpdate(userRid, fileRid, edited, extraNodeFields = {}) {
     userManager.sendToUser(userRid, {
         command: 'update',
         target: fileRid,
         node: {
             edited,
+            ...extraNodeFields,
         },
     });
+}
+
+function isTruthyOption(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value !== 'string') return false;
+    const normalized = value.trim().toLowerCase();
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+}
+
+function shouldSkipThumbnails(request) {
+    const query = request.query || {};
+    const payload = request.payload || {};
+    return isTruthyOption(query['no-thumbnails'])
+        || isTruthyOption(query.no_thumbnails)
+        || isTruthyOption(query.noThumbnails)
+        || isTruthyOption(payload['no-thumbnails'])
+        || isTruthyOption(payload.no_thumbnails)
+        || isTruthyOption(payload.noThumbnails);
 }
 
 export default [
@@ -228,11 +286,44 @@ export default [
                 // Get original filename
                 const originalFilename = file.hapi.filename;
                 console.log('Uploading file:', originalFilename);
+                const noThumbnails = shouldSkipThumbnails(request);
+                if (noThumbnails) {
+                    console.log('Upload option no-thumbnails enabled, skipping thumbnail queue actions');
+                }
 
                 // Get file type
                 const file_type = await media.detectType(file);
                 if (!file_type) {
                     throw Boom.badRequest('Could not determine file type');
+                }
+
+                // PDF import gating: splitter must be active
+                if (file_type === 'pdf' && !services.hasActiveConsumer('md-pypdf_fs')) {
+                    throw Boom.serverUnavailable('PDF import requires the md-pypdf_fs splitter service to be running');
+                }
+
+                const deleteOriginal = request.query.delete_original !== 'false';
+
+                if (request.params.set) {
+                    const setRid = Graph.sanitizeRID(request.params.set);
+                    const setMetadata = await Graph.getUserFileMetadata(setRid, request.auth.credentials.user.rid);
+                    if (!setMetadata || setMetadata['@type'] !== 'Set') {
+                        throw Boom.notFound('Set not found');
+                    }
+
+                    const existingTypes = Array.from(new Set(
+                        (Array.isArray(setMetadata.types) ? setMetadata.types : [])
+                            .map((value) => String(value || '').toLowerCase())
+                            .filter(Boolean)
+                    ));
+
+                    if (existingTypes.length > 1) {
+                        throw Boom.badRequest('Set contains mixed file types; new uploads are blocked until set type is normalized');
+                    }
+
+                    if (existingTypes.length === 1 && existingTypes[0] !== String(file_type).toLowerCase()) {
+                        throw Boom.badRequest(`Set accepts only ${existingTypes[0]} files`);
+                    }
                 }
 
                 // Create file node in graph
@@ -277,6 +368,20 @@ console.log('filetype', file_type);
                             console.log('metadata', image_metadata);
                             filegraph.metadata = {...filegraph.metadata, ...image_metadata}
 
+                            // Always store metadata for image node.
+                            try {
+                                await Graph.setNodeAttribute_old(filegraph['@rid'], {
+                                    key: 'metadata',
+                                    value: filegraph.metadata
+                                }, 'File');
+                            } catch (error) {
+                                console.log('Error setting node attribute:', error);
+                            }
+
+                            if (noThumbnails) {
+                                // Skip thumbnail/update queue actions when explicitly requested.
+                            } else {
+
 	                        // ************** EXIF FIX **************
 	                        // if file has EXIF orientation, then we need to rotate it
                             if(image_metadata.rotate) {
@@ -291,29 +396,20 @@ console.log('filetype', file_type);
                                     process: {kind: 'internal_versioning'}
                             
                                 }
-                                nats.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
+                                queue.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
 
                             // ************** EXIF FIX ENDS **************
                             } else {
-                                // we save metadata for image (resolution, etc.)
-                                try {
-                                    await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                        key: 'metadata',
-                                        value: filegraph.metadata
-                                    }, 'File');
-                                } catch (error) {
-                                    console.log('Error setting node attribute:', error);
-                                }
-    
                                 const data = {
                                     topic: {id: 'md-thumbnailer'},
-                                    service: {id: 'md-imaginary'},
+                                    service: {id: 'md-thumbnailer'},
                                     task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
                                     file: filegraph,
                                     userId: request.auth.credentials.user.rid
                                 };
                                 
-                                nats.publish(data.topic.id, JSON.stringify(data));
+                                queue.publish(data.topic.id, JSON.stringify(data));
+                            }
                             }
                         } 
 
@@ -344,6 +440,15 @@ console.log('filetype', file_type);
                             };
                             userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
                         }
+
+                        // PDF auto-import: trigger split pipeline
+                        if (file_type === 'pdf') {
+                            await afterFileCreated(filegraph, {
+                                userId: request.auth.credentials.user.rid,
+                                delete_original: deleteOriginal
+                            });
+                        }
+
                         resolve(filegraph);
                     });
                 });
@@ -404,17 +509,26 @@ console.log('filetype', file_type);
                 );
 
                 if (file.type === 'image') {
+                    const service = services.service_list['md-thumbnailer'];
+                    if (!service || !service.consumers || service.consumers.length === 0) {
+                        throw Boom.serverUnavailable('Thumbnailer service is not running. Start the md-thumbnailer consumer first.');
+                    }
                     const data = {
                         file: file,
                         userId: request.auth.credentials.user.rid,
                         target: file['@rid'],
                         task: { id: 'thumbnail', params: { width: 800, type: 'jpeg' } },
+                        service: { id: 'md-thumbnailer' },
                         id: 'md-thumbnailer'
                     };
-                    nats.publish(data.id, JSON.stringify(data));
+                    queue.publish(data.id, JSON.stringify(data));
 
                 // PDF thumbnail is made by poppler
                 } else if (file.type === 'pdf') {
+                    const service = services.service_list['md-poppler'];
+                    if (!service || !service.consumers || service.consumers.length === 0) {
+                        throw Boom.serverUnavailable('Poppler service is not running. Start the md-poppler consumer first.');
+                    }
                     const data = {
                         file: file,
                         userId: request.auth.credentials.user.rid,
@@ -428,12 +542,14 @@ console.log('filetype', file_type);
                             }
                         },
                         role: 'thumbnail',
+                        service: { id: 'md-poppler' },
                         id: 'md-poppler'
                     };
-                    nats.publish(data.id, JSON.stringify(data));
+                    queue.publish(data.id, JSON.stringify(data));
                 }
                 return file
             } catch (e) {
+                if (Boom.isBoom(e)) throw e;
                 return h.response().code(403);
             }
         }
@@ -466,36 +582,51 @@ console.log('filetype', file_type);
             }
 
             const backupPath = getBackupPath(managedPath);
-            const payload = request.payload || {};
+            const payload = await normalizeVersionPayload(request.payload);
             const upload = payload.file;
             const hasUpload = upload && typeof upload.pipe === 'function';
             const hasTextContent = typeof payload.content === 'string';
+            const hasContentField = Object.prototype.hasOwnProperty.call(payload, 'content');
+            const fileType = String(file.type || '').toLowerCase();
+            const isTextLike = ['text', 'html', 'json', 'csv'].includes(fileType) || fileType.endsWith('.json');
+            const textContent = hasTextContent ? payload.content : null;
+
+            if (hasUpload && hasContentField) {
+                throw Boom.badRequest('Provide either file upload or content payload, not both');
+            }
 
             if (!hasUpload && !hasTextContent) {
                 throw Boom.badRequest('Missing edited file upload or content payload');
             }
 
-            if (hasTextContent && Buffer.byteLength(payload.content, 'utf8') > MAX_VERSION_TEXT_BYTES) {
+            if (!hasUpload && !isTextLike) {
+                throw Boom.badRequest('Content payload is only supported for text-like files');
+            }
+
+            if (!hasUpload && Buffer.byteLength(textContent, 'utf8') > MAX_VERSION_TEXT_BYTES) {
                 throw Boom.badRequest('Text payload exceeds size limit');
             }
 
-            if (await fse.pathExists(backupPath)) {
-                await fse.remove(backupPath);
+            if (!(await fse.pathExists(backupPath))) {
+                await fse.copy(managedPath, backupPath, { overwrite: false, errorOnExist: true });
             }
-            await fse.move(managedPath, backupPath, { overwrite: true });
+
+            const stagingPath = `${managedPath}.editing.${randomUUID()}`;
 
             try {
                 if (hasUpload) {
-                    await saveUploadStreamToPath(upload, managedPath);
+                    await saveUploadStreamToPath(upload, stagingPath);
                 } else {
-                    if (!['text', 'html', 'json', 'csv'].includes(file.type)) {
-                        throw Boom.badRequest('Content payload is only supported for text-like files');
-                    }
-                    await fse.writeFile(managedPath, payload.content, 'utf8');
+                    await fse.outputFile(stagingPath, textContent, 'utf8');
                 }
+
+                await fse.move(stagingPath, managedPath, { overwrite: true });
             } catch (error) {
+                if (await fse.pathExists(stagingPath)) {
+                    await fse.remove(stagingPath);
+                }
                 if (!(await fse.pathExists(managedPath)) && (await fse.pathExists(backupPath))) {
-                    await fse.move(backupPath, managedPath, { overwrite: true });
+                    await fse.copy(backupPath, managedPath, { overwrite: true });
                 }
                 throw error;
             }
@@ -509,7 +640,7 @@ console.log('filetype', file_type);
             await Graph.setNodeAttribute(fileRid, { key: 'edited', value: edited }, userRid);
             await updateFileMetadata(file, userRid);
             queueThumbnailRefresh(file, userId);
-            sendFileUpdate(userRid, fileRid, edited);
+            sendFileUpdate(userRid, fileRid, edited, { thumbnail_version: Date.now() });
 
             const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
             updatedFile.edited = edited;
@@ -544,7 +675,7 @@ console.log('filetype', file_type);
             await Graph.setNodeAttribute(fileRid, { key: 'edited', value: null }, userRid);
             await updateFileMetadata(file, userRid);
             queueThumbnailRefresh(file, userId);
-            sendFileUpdate(userRid, fileRid, null);
+            sendFileUpdate(userRid, fileRid, null, { thumbnail_version: Date.now() });
 
             const updatedFile = await Graph.getUserFileMetadata(fileRid, userRid);
             return h.response(updatedFile).code(200);
@@ -574,15 +705,32 @@ console.log('filetype', file_type);
                 );
                 console.log(file_metadata)
 
+                if (!file_metadata || !file_metadata.path) {
+                    return h.response({ error: 'File not found' }).code(404);
+                }
+
+                if (String(file_metadata['@type'] || '').toLowerCase() !== 'file') {
+                    return h.response({ error: 'RID does not point to a file node' }).code(400);
+                }
+
+                const absolutePath = path.resolve(file_metadata.path);
+
                 // we first check if file exist
                 // if not, then we search for error.json
                 // if error.json exists, then we return it
                 // if not, then we return 404
-                if (!fse.existsSync(file_metadata.path)) {
+                if (!fse.existsSync(absolutePath)) {
                     console.log('file does not exist')
-                    const error_json_path = path.join(path.dirname(file_metadata.path), 'error.json')
+                    const error_json_path = path.join(path.dirname(absolutePath), 'error.json')
                     if (fse.existsSync(error_json_path)) {
+                        const errStat = fse.statSync(error_json_path);
+                        if (!errStat.isFile()) {
+                            return h.response({ error: 'error.json path is not a file' }).code(500);
+                        }
                         const src = fse.createReadStream(error_json_path);
+                        src.on('error', (streamError) => {
+                            console.error('Error streaming fallback error.json:', streamError);
+                        });
                         const response = h.response(src);
                         response.header('Content-Disposition', `inline; filename=${file_metadata.label}`);
                         response.type('application/json');
@@ -592,7 +740,15 @@ console.log('filetype', file_type);
                     }
                 }
 
-                const src = fse.createReadStream(file_metadata.path);
+                const fileStat = fse.statSync(absolutePath);
+                if (!fileStat.isFile()) {
+                    return h.response({ error: 'Requested RID path is not a file' }).code(400);
+                }
+
+                const src = fse.createReadStream(absolutePath);
+                src.on('error', (streamError) => {
+                    console.error('Error streaming file content:', streamError);
+                });
                 const response = h.response(src);
  
 
@@ -615,7 +771,28 @@ console.log('filetype', file_type);
 
                 return response;
             } catch (e) {
+                console.error('GET /api/files/{file_rid} failed:', e);
                 return h.response().code(403);
+            }
+        }
+    },
+    {
+        method: 'GET',
+        path: '/api/files/{file_rid}/ancestors',
+        handler: async (request, h) => {
+            try {
+                const clean_rid = Graph.sanitizeRID(request.params.file_rid);
+                const ancestors = await Graph.getFileAncestors(
+                    clean_rid,
+                    request.auth.credentials.user.rid
+                );
+                if (ancestors === null) {
+                    return h.response().code(403);
+                }
+                return ancestors;
+            } catch (e) {
+                console.error('Error fetching ancestors:', e);
+                return h.response().code(500);
             }
         }
     },
@@ -634,7 +811,20 @@ console.log('filetype', file_type);
                     request.auth.credentials.user.rid
                 );
 
-                const src = fse.createReadStream(path.join(DATA_DIR, file_metadata.path));
+                if (!file_metadata || !file_metadata.path) {
+                    return h.response().code(404);
+                }
+
+                const sourcePath = path.join(DATA_DIR, file_metadata.path);
+                const sourceStat = await fse.stat(sourcePath);
+                if (!sourceStat.isFile()) {
+                    return h.response({ error: 'Source path is not a file' }).code(400);
+                }
+
+                const src = fse.createReadStream(sourcePath);
+                src.on('error', (streamError) => {
+                    console.error('Error streaming file source:', streamError);
+                });
                 const response = h.response(src);
 
                 if (file_metadata.type === 'pdf') {
@@ -668,12 +858,83 @@ console.log('filetype', file_type);
                     thumbnails: true,
                     limit: request.query.limit,
                     skip: request.query.skip,
-                    group_by_origin: request.query.group_by_origin,
-                    group_boundary: request.query.group_boundary,
-                    source_rid: request.query.source_rid ? Graph.sanitizeRID(request.query.source_rid) : null,
                 }
             );
             return h.response(n);
+        }
+    },
+    {
+        method: 'POST',
+        path: '/api/sets/{rid}/thumbnails',
+        handler: async (request, h) => {
+            try {
+                const setRid = Graph.sanitizeRID(request.params.rid);
+                const userRid = request.auth.credentials.user.rid;
+                const limit = Math.max(1, Number(request.query.limit) || 1000);
+
+                let skip = 0;
+                let totalFiles = 0;
+                let queued = 0;
+                let skipped = 0;
+                let imageQueued = 0;
+                let pdfQueued = 0;
+                const seen = new Set();
+
+                while (true) {
+                    const page = await Graph.getSetFiles(setRid, userRid, {
+                        thumbnails: false,
+                        limit,
+                        skip,
+                    });
+
+                    const files = page?.files || [];
+                    const pageTotal = Number(page?.file_count || 0);
+                    if (totalFiles === 0 && Number.isFinite(pageTotal)) {
+                        totalFiles = pageTotal;
+                    }
+
+                    if (files.length === 0) {
+                        break;
+                    }
+
+                    for (const file of files) {
+                        const rid = file?.['@rid'];
+                        if (!rid || seen.has(rid)) continue;
+                        seen.add(rid);
+
+                        if (queueThumbnailRefresh(file, userRid)) {
+                            queued += 1;
+                            if (file.type === 'image') imageQueued += 1;
+                            if (file.type === 'pdf') pdfQueued += 1;
+                        } else {
+                            skipped += 1;
+                        }
+                    }
+
+                    skip += files.length;
+                    if (skip >= pageTotal) {
+                        break;
+                    }
+                }
+
+                return h.response({
+                    set_rid: setRid,
+                    total_files: totalFiles,
+                    scanned_files: seen.size,
+                    queued,
+                    skipped,
+                    queued_by_type: {
+                        image: imageQueued,
+                        pdf: pdfQueued,
+                    },
+                }).code(202);
+            } catch (error) {
+                if (Boom.isBoom(error)) {
+                    throw error;
+                }
+                console.error('Error recreating set thumbnails:', error);
+                throw Boom.badImplementation('Failed to queue set thumbnails');
+            }
         }
     },
     {

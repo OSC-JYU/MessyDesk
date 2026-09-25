@@ -60,4 +60,59 @@ describe('Graph.createProcessFileNode lineage source', () => {
             media.getFilePath = originalGetFilePath;
         }
     });
+
+    it('uses input_set rid as lineage source for many-to-one outputs without root_source', async () => {
+        const originalSql = db.sql;
+        const originalSetNodeAttributeOld = Graph.setNodeAttribute_old;
+        const originalConnectDerivedFrom = Graph.connectDerivedFrom;
+        const originalSyncSetManifest = Graph.syncSetManifest;
+        const originalGetFilePath = media.getFilePath;
+
+        let connectCall = null;
+
+        db.sql = async (query) => {
+            if (query.startsWith('SELECT path FROM')) {
+                return { result: [{ path: '/tmp/process/files' }] };
+            }
+            if (query.startsWith('CREATE VERTEX File CONTENT')) {
+                return { result: [{ '@rid': '#40:2', uuid: 'uuid-40-2' }] };
+            }
+            return { result: [] };
+        };
+
+        Graph.setNodeAttribute_old = async () => ({ result: 'ok' });
+        Graph.syncSetManifest = async () => null;
+        media.getFilePath = () => '/tmp/combined-no-set.txt';
+        Graph.connectDerivedFrom = async (target, source, processRid) => {
+            connectCall = { target, source, processRid };
+            return { result: 'ok' };
+        };
+
+        try {
+            const message = {
+                process: { '@rid': '#20:2' },
+                behaviour: 'many-to-one',
+                input_set: '#90:1',
+                set_rid: '#90:1',
+                file: {
+                    '@rid': '#10:99',
+                    project_rid: '#2:1',
+                    type: 'text',
+                    extension: 'txt',
+                    label: 'combined-no-set.txt',
+                },
+            };
+
+            await Graph.createProcessFileNode('#20:2', message, '', '');
+
+            assert.ok(connectCall, 'connectDerivedFrom should be called');
+            assert.equal(connectCall.source, '#90:1');
+        } finally {
+            db.sql = originalSql;
+            Graph.setNodeAttribute_old = originalSetNodeAttributeOld;
+            Graph.connectDerivedFrom = originalConnectDerivedFrom;
+            Graph.syncSetManifest = originalSyncSetManifest;
+            media.getFilePath = originalGetFilePath;
+        }
+    });
 });

@@ -1,517 +1,873 @@
-
-
 import path from 'path';
-import { pipeline } from 'stream/promises';
 import fs from 'fs-extra';
+import { DatabaseSync } from 'node:sqlite';
 
 import Graph from './graph.mjs';
-import nomad from './nomad.mjs';
 import media from './media.mjs';
+import { createProcessQueueMessage } from './messageFactory.mjs';
+import { DATA_DIR } from './env.mjs';
 
-import { connect } from "@nats-io/transport-node";
-import { jetstream, jetstreamManager, RetentionPolicy, AckPolicy } from "@nats-io/jetstream";
+const LOG_QUEUE_CONTEXT = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env.LOG_QUEUE_CONTEXT || '').trim().toLowerCase()
+);
+const QUEUE_DB_PATH = process.env.QUEUE_DB_PATH || path.join(DATA_DIR, 'queue.sqlite');
+const QUEUE_DB_KEEP_FAILED_MINUTES = Number(process.env.QUEUE_DB_KEEP_FAILED_MINUTES || 1440);
+const QUEUE_DB_SWEEPER_ENABLED = !['0', 'false', 'no', 'off'].includes(
+  String(process.env.QUEUE_DB_SWEEPER_ENABLED || 'true').trim().toLowerCase()
+);
+const QUEUE_DB_SWEEPER_INTERVAL_SECONDS = Number(process.env.QUEUE_DB_SWEEPER_INTERVAL_SECONDS || 300);
+const QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES = Number(process.env.QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES || 60);
 
-
-const NATS_URL = process.env.NATS_URL || "nats://localhost:4222";
-const NATS_URL_STATUS = process.env.NATS_URL_STATUS || "http://localhost:8222";
-
-const nats = {}
-
-nats.pausedBatches = new Set()
-nats.cancelledBatches = new Set()
-
-
-nats.init = async function(services) {
-  console.log('NATS: connecting...', NATS_URL)
-  this.nc = await connect({
-    servers: NATS_URL,
-  });
-  this.js = jetstream(this.nc);
-  this.jsm = await jetstreamManager(this.nc);
-  await this.jsm.streams.add({
-    name: "PROCESS",
-    retention: RetentionPolicy.Workqueue,
-    subjects: ["process.>"],
-  });
-  console.log("NATS: created the 'PROCESS' stream");
-
-
-  // create consumers for all services
-  console.log("NATS: creating consumers...")
-  for(var key in services) {
-    try {
-      await this.jsm.consumers.add("PROCESS", {
-        durable_name: key,
-        ack_policy: AckPolicy.Explicit,
-        ack_wait: 2 * 60 * 1e9, // 2 minutes
-        max_deliver: 1, 
-        redeliver_policy: {
-          max_deliveries: 1,
-          interval: 100000,
-        },
-        filter_subject: `process.${key}`,
-    
-      });
-     // console.log('NATS: created consumer', key, services[key].nomad_hcl)
-      if(services[key].nomad_hcl) {
-        console.log('NATS: created consumer', key, ' NOMAD=true')
-      } else {
-        console.log('NATS: created consumer', key, ' NOMAD=false')
-      }
-
-      var batch = key + '_batch'
-      await this.jsm.consumers.add("PROCESS", {
-        durable_name: batch,
-        ack_wait: 2 * 60 * 1e9,
-        max_deliver: 1, 
-        ack_policy: AckPolicy.Explicit,
-        redeliver_policy: {
-          max_deliveries: 2,
-          interval: 1000,
-        },
-        filter_subject: `process.${batch}`,
-    
-      });
-      console.log('NATS: created batch consumer', batch)
-
-
-    } catch(e) {
-      if(e.message.includes('already exists')) {
-        console.log('NATS: consumer already exists', key)
-      } else {
-        console.log('NATS ERROR: could not create consumer', key)
-        console.log(e.message)
-        console.log('HINT: remove all consumers from NATS and try again.')
-        process.exit(1)
-      }
-    }
-  }
-
-  // SYSTEM QUEUES
-  await this.jsm.streams.add({
-    name: "SYSTEM",
-    retention: RetentionPolicy.Workqueue,
-    subjects: ["system.>"],
-  });
-  console.log("NATS: created the 'SYSTEM' stream");
-
-  await this.jsm.consumers.add("SYSTEM", {
-    durable_name: 'arcadedb',
-    ack_policy: AckPolicy.Explicit,
-    redeliver_policy: {
-      max_deliveries: 2,
-      interval: 1000,
-    },
-    filter_subject: `system.arcadedb`,
-
-  });
-  console.log('NATS: created system.arcadedb consumer')
+function isThumbnailPayload(payload) {
+  const serviceId = String(payload?.service?.id || payload?.id || '').toLowerCase();
+  const topicId = String(payload?.topic?.id || '').toLowerCase();
+  const taskId = String(payload?.task?.id || '').toLowerCase();
+  const role = String(payload?.role || '').toLowerCase();
+  return serviceId === 'md-thumbnailer'
+    || topicId === 'md-thumbnailer'
+    || (serviceId === 'md-poppler' && taskId === 'thumbnail')
+    || role === 'thumbnail'
+    || role === 'thumbnails';
 }
 
-nats.connect = async function() {
-  this.nc = await connect({
-    servers: NATS_URL,
-  });
-  this.js = jetstream(this.nc);
-}
+const queueDb = {};
 
-nats.close = async function() {
-  await this.nc.close()
-}
+queueDb.pausedBatches = new Set();
+queueDb.cancelledBatches = new Set();
+queueDb._queueContextSampledTopics = new Set();
+queueDb._sweeperTimer = null;
+queueDb._sweeperRunning = false;
+queueDb._sweeperSummary = {
+  enabled: QUEUE_DB_SWEEPER_ENABLED,
+  interval_seconds: QUEUE_DB_SWEEPER_INTERVAL_SECONDS,
+  done_cancelled_minutes: QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES,
+  keep_failed_minutes: QUEUE_DB_KEEP_FAILED_MINUTES,
+  running: false,
+  started_at: null,
+  last_run_started_at: null,
+  last_run_finished_at: null,
+  last_deleted_done_cancelled: 0,
+  last_deleted_failed: 0,
+  last_deleted_total: 0,
+  last_error: null,
+  total_runs: 0,
+  total_deleted_done_cancelled: 0,
+  total_deleted_failed: 0,
+  total_deleted: 0,
+};
 
-nats.checkService = async function(data) {
-  // get service url from nomad
-  const service = await nomad.getServiceURL(data)
-  return service
-}
+queueDb._openDb = function() {
+  if (this.db) return this.db;
 
+  fs.ensureDirSync(path.dirname(QUEUE_DB_PATH));
+  const db = new DatabaseSync(QUEUE_DB_PATH);
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA synchronous = NORMAL;');
 
-nats.publish = async function(topic, data) {
-  console.log(topic)
-  //var service = await services.getServiceAdapterByName(topic)
-  try {
-    //var s = await this.checkService(topic)
-    //if(!s) {
-      //await nomad.createService(service)
-    //}
-    //const service_url = await nomad.getServiceURL(topic)
-    //service.url = service_url
-    //service.queue.add(service, data, filenode)
-    const payload = typeof data === 'string' ? data : JSON.stringify(data);
-    await this.js.publish(`process.${topic}`, payload)
-  } catch(e) {
-    console.log(`ERROR: Could not add topic ${topic} to queue!\n`, e)
-  }
-}
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS queue_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      queue TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      process_rid TEXT,
+      set_process_rid TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 3,
+      claimed_by TEXT,
+      claimed_at TEXT,
+      lease_until TEXT,
+      next_retry_at TEXT NOT NULL,
+      last_error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT
+    );
 
+    CREATE INDEX IF NOT EXISTS idx_queue_claim
+      ON queue_jobs(queue, status, next_retry_at, created_at);
 
-nats.listConsumers = async function() {
-  var consumers = []
-  var lister = await this.jsm.consumers.list("PROCESS")
-  for await (const item of lister) {
-      consumers.push(item);
-  }
-  return consumers
-}
+    CREATE INDEX IF NOT EXISTS idx_queue_process
+      ON queue_jobs(process_rid, set_process_rid, status);
 
+    CREATE INDEX IF NOT EXISTS idx_queue_cleanup
+      ON queue_jobs(status, updated_at);
+  `);
 
-nats.getFilesFromStore = async function(response, message, service) {
+  this.db = db;
+  return db;
+};
 
-  if(response.uri) {
- 
-    // download array of files
-    if(Array.isArray(response.uri)) {
-      for(var uri of response.uri) {
-        await this.downLoadFile(message, uri, service)
-      }
-    // download single file
-    } else {
-      // first, create file object to graph
-      // process_rid, file_type, extension, label
-      await this.downLoadFile(message, response.uri, service)
-    }
-  } else {
-    console.log('File download not found!')
-  }
-}
+queueDb.init = async function() {
+  this._openDb();
+  console.log('QUEUE-DB: sqlite queue ready at', QUEUE_DB_PATH);
+  this.startSweeper();
+};
 
+queueDb.connect = async function() {
+  this._openDb();
+};
 
-
-nats.downLoadFile = async function(message, uri, service) {
-  // get file type from extension
-  var ext = path.extname(uri).replace('.', '')
-  var filename = uri.split('/').pop()
-  var type = 'text'
-  if(['png','jpg','jpeg'].includes(ext)) type = 'image'
-  if(['pdf'].includes(ext)) type = 'pdf'
-
-
-  const fileNode = await Graph.createProcessFileNode(message.process['@rid'], type, ext, filename)
-  console.log(fileNode)
-  var filepath = ''
-
-  try {
-    filepath = fileNode.result[0].path
-    await fs.ensureDir(path.dirname(filepath))
-  } catch(e) {
-    throw('Could not create file directory!' + e.message)
-  }
-
-  // Add node to UI via websocket
-  if(message.userId) {
-    console.log('sending "add node" WS')
-    const ws = this.connections.get(message.userId)
-    if(ws) {
-      var wsdata = {target: message.process['@rid'], node:{rid: fileNode.result[0]['@rid'], label: filename, type: type}}
-      ws.send(JSON.stringify(wsdata))
-    }
-  }
-
-  const url = service.url + uri
-  console.log(url)
-  const downloadStream = this.got.stream(url);
-  const fileWriterStream = fs.createWriteStream(filepath);
-
-  try {
-    await pipeline(downloadStream, fileWriterStream)
-
-    const topic = 'md-thumbnailer' 
-    const k_message = {
-      key: "md",
-      value: JSON.stringify({
-        file: fileNode.result[0],
-        userId: message.userId
-      })
-    };
-  
-    await this.producer.send({
-      topic,
-      messages: [k_message],
-    });
-
-  } catch(e) {
-    console.log(e)
-    console.log('File download failed!')
-  }
-}
-
-nats.getQueueStatus = async function(topic) {
-  try {
-    const url = NATS_URL_STATUS + '/jsz?consumers=true'
-    const queues = {}
-  
-    const response = await fetch(url)
-    const data = await response.json()
-    for(var stream of data.account_details[0].stream_detail[0].consumer_detail) {
-      if(stream.name == topic || stream.name == topic + '_batch') {
-        queues[stream.name] = stream
-      }
-    }
-
-    return queues
-    
-  } catch(e) {
-    console.log(e)
-    console.log('Queue status failed!')
-  }
-}
-
-
-
-nats.drainQueue = async function (topic, process_rid) {
-  console.log('draining topic: ', topic)
-  console.log('  process_rid: ', process_rid)
-  let count = 0;
-  try {
-    // Find the stream for this topic
-    const streamName = await this.jsm.streams.find(`process.${topic}`);
-    const info = await this.jsm.streams.info(streamName);
-    const { first_seq, last_seq } = info.state;
-
-
-    for (let seq = last_seq; seq >= first_seq; seq--) {
-      let msg;
-      try {
-        msg = await this.jsm.streams.getMessage(streamName, { seq });
-        //await this.jsm.streams.deleteMessage(streamName, seq);
-      } catch (err) {
-        // if (!/message not found/i.test(err.message)) {
-        //   console.warn(`Skipping seq=${seq}: ${err.message}`);
-        // }
-        // stop after first already deleted
-        console.log('message not found!')
-         continue;
-      }
-
-      // Parse JSON payload
-      let message;
-      try {
-        message = msg.json();
-        console.log(message)
-        // Match and delete
-        if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
-          await this.jsm.streams.deleteMessage(streamName, seq);
-          count++;
-        }
-      } catch {
-        console.warn(`Invalid JSON seq=${seq}`);
-        continue;
-      }
-
-
-    }
-    console.log('deleted messages: ', count)
-    return count;
-  } catch (err) {
-    console.error("drainQueue error:", err);
-    return 0;
+queueDb.close = async function() {
+  this.stopSweeper();
+  if (this.db) {
+    this.db.close();
+    this.db = null;
   }
 };
 
+queueDb._runSweeperOnce = async function() {
+  if (this._sweeperRunning) return;
+  this._sweeperRunning = true;
+  this._sweeperSummary.running = true;
+  this._sweeperSummary.last_run_started_at = new Date().toISOString();
 
-nats.drainQueueByProcess = async function(process_rid) {
-  console.log('draining by process_rid: ', process_rid)
-  let count = 0;
   try {
-    const info = await this.jsm.streams.info('PROCESS');
-    const { first_seq, last_seq } = info.state;
+    const doneCancelledMinutes = Number(QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES);
+    let deletedDoneCancelled = 0;
+    let deletedFailed = 0;
 
-    for (let seq = last_seq; seq >= first_seq; seq--) {
-      let msg;
-      try {
-        msg = await this.jsm.streams.getMessage('PROCESS', { seq });
-      } catch {
+    if (Number.isFinite(doneCancelledMinutes) && doneCancelledMinutes > 0) {
+      const result = await this.cleanupOlderThan({
+        olderThanMinutes: doneCancelledMinutes,
+        statuses: ['done', 'cancelled'],
+      });
+      deletedDoneCancelled = Number(result?.deleted || 0);
+    }
+
+    const keepFailedMinutes = Number(QUEUE_DB_KEEP_FAILED_MINUTES);
+    if (Number.isFinite(keepFailedMinutes) && keepFailedMinutes > 0) {
+      const failedResult = await this.cleanupOlderThan({
+        olderThanMinutes: keepFailedMinutes,
+        statuses: ['failed'],
+      });
+      deletedFailed = Number(failedResult?.deleted || 0);
+    }
+
+    const totalDeleted = deletedDoneCancelled + deletedFailed;
+    this._sweeperSummary.last_deleted_done_cancelled = deletedDoneCancelled;
+    this._sweeperSummary.last_deleted_failed = deletedFailed;
+    this._sweeperSummary.last_deleted_total = totalDeleted;
+    this._sweeperSummary.total_runs += 1;
+    this._sweeperSummary.total_deleted_done_cancelled += deletedDoneCancelled;
+    this._sweeperSummary.total_deleted_failed += deletedFailed;
+    this._sweeperSummary.total_deleted += totalDeleted;
+    this._sweeperSummary.last_error = null;
+
+    if (totalDeleted > 0) {
+      console.log('QUEUE-DB sweeper cleanup', {
+        deleted_done_cancelled: deletedDoneCancelled,
+        deleted_failed: deletedFailed,
+      });
+    }
+  } catch (error) {
+    this._sweeperSummary.last_error = String(error?.message || error);
+    console.warn('QUEUE-DB sweeper failed', error?.message || error);
+  } finally {
+    this._sweeperRunning = false;
+    this._sweeperSummary.running = false;
+    this._sweeperSummary.last_run_finished_at = new Date().toISOString();
+  }
+};
+
+queueDb.startSweeper = function() {
+  this._sweeperSummary.enabled = QUEUE_DB_SWEEPER_ENABLED;
+  this._sweeperSummary.interval_seconds = QUEUE_DB_SWEEPER_INTERVAL_SECONDS;
+  this._sweeperSummary.done_cancelled_minutes = QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES;
+  this._sweeperSummary.keep_failed_minutes = QUEUE_DB_KEEP_FAILED_MINUTES;
+
+  if (!QUEUE_DB_SWEEPER_ENABLED) {
+    console.log('QUEUE-DB sweeper disabled by QUEUE_DB_SWEEPER_ENABLED');
+    return;
+  }
+
+  if (this._sweeperTimer) return;
+
+  const intervalSeconds = Number(QUEUE_DB_SWEEPER_INTERVAL_SECONDS);
+  const validIntervalSeconds = Number.isFinite(intervalSeconds) && intervalSeconds > 0
+    ? intervalSeconds
+    : 300;
+
+  this._sweeperTimer = setInterval(() => {
+    this._runSweeperOnce();
+  }, validIntervalSeconds * 1000);
+
+  this._sweeperSummary.started_at = new Date().toISOString();
+  this._sweeperSummary.interval_seconds = validIntervalSeconds;
+
+  console.log('QUEUE-DB sweeper started', {
+    interval_seconds: validIntervalSeconds,
+    done_cancelled_minutes: QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES,
+    keep_failed_minutes: QUEUE_DB_KEEP_FAILED_MINUTES,
+  });
+
+  // Kick once at startup to trim stale rows from previous runs.
+  this._runSweeperOnce();
+};
+
+queueDb.stopSweeper = function() {
+  if (this._sweeperTimer) {
+    clearInterval(this._sweeperTimer);
+    this._sweeperTimer = null;
+  }
+  this._sweeperSummary.running = false;
+};
+
+queueDb.getSweeperSummary = function() {
+  return {
+    ...this._sweeperSummary,
+    running: this._sweeperRunning,
+    has_timer: Boolean(this._sweeperTimer),
+    now: new Date().toISOString(),
+  };
+};
+
+queueDb._toRidString = function(value) {
+  if (!value) return null;
+  return String(value);
+};
+
+queueDb._extractProcessRid = function(message) {
+  return this._toRidString(message?.process?.['@rid']);
+};
+
+queueDb._extractSetProcessRid = function(message) {
+  return this._toRidString(message?.set_process || message?.set_process_rid);
+};
+
+queueDb.publish = async function(topic, data) {
+  try {
+    const enriched = await createProcessQueueMessage(data, {
+      resolveProjectRidForNode: (rid) => Graph.getProjectRidForNode(rid)
+    });
+
+    if (
+      LOG_QUEUE_CONTEXT &&
+      enriched &&
+      typeof enriched === 'object' &&
+      !Array.isArray(enriched) &&
+      !this._queueContextSampledTopics.has(topic)
+    ) {
+      this._queueContextSampledTopics.add(topic);
+      console.log('queue_context_sample', {
+        topic,
+        project_rid: enriched.project_rid || null,
+        set_rid: enriched.set_rid || null,
+        set_process: enriched.set_process || null,
+        file_rid: enriched.file?.['@rid'] || null,
+      });
+    }
+
+    const payloadJson = typeof enriched === 'string' ? enriched : JSON.stringify(enriched);
+    const parsed = typeof enriched === 'string' ? JSON.parse(enriched) : enriched;
+
+    const now = new Date().toISOString();
+    const db = this._openDb();
+    db.prepare(`
+      INSERT INTO queue_jobs (
+        queue,
+        payload_json,
+        process_rid,
+        set_process_rid,
+        status,
+        attempts,
+        max_attempts,
+        next_retry_at,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?)
+    `).run(
+      topic,
+      payloadJson,
+      this._extractProcessRid(parsed),
+      this._extractSetProcessRid(parsed),
+      Number(parsed?.queue_options?.max_attempts || process.env.QUEUE_DB_MAX_ATTEMPTS || 3),
+      now,
+      now,
+      now
+    );
+  } catch (e) {
+    console.log(`ERROR: Could not add topic ${topic} to db queue!\n`, e);
+  }
+};
+
+queueDb.getQueueStatus = async function(topic) {
+  const db = this._openDb();
+  const rows = db.prepare(`
+    SELECT queue, status, COUNT(*) AS count
+    FROM queue_jobs
+    WHERE queue = ? OR queue = ?
+    GROUP BY queue, status
+  `).all(topic, `${topic}_batch`);
+
+  const status = {};
+  for (const row of rows) {
+    if (!status[row.queue]) {
+      status[row.queue] = { queue: row.queue, queued: 0, running: 0, done: 0, failed: 0, cancelled: 0 };
+    }
+    status[row.queue][row.status] = Number(row.count || 0);
+  }
+  return status;
+};
+
+queueDb.drainQueue = async function(topic, process_rid) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE (queue = ? OR queue = ?)
+      AND status = 'queued'
+      AND (? IS NULL OR process_rid = ? OR set_process_rid = ?)
+  `).run(topic, `${topic}_batch`, process_rid || null, process_rid || null, process_rid || null);
+
+  return Number(result.changes || 0);
+};
+
+queueDb.drainQueueByProcess = async function(process_rid) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE status = 'queued'
+      AND (process_rid = ? OR set_process_rid = ?)
+  `).run(process_rid, process_rid);
+
+  return Number(result.changes || 0);
+};
+
+queueDb._hasActiveBatchJobs = function(process_rid) {
+  const db = this._openDb();
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM queue_jobs
+    WHERE set_process_rid = ?
+      AND status IN ('queued', 'running')
+  `).get(process_rid);
+  return Number(row?.count || 0) > 0;
+};
+
+queueDb._cleanupBatchTerminalRows = function(process_rid, keepFailedMinutes = QUEUE_DB_KEEP_FAILED_MINUTES) {
+  const db = this._openDb();
+  const sanitizedKeepFailedMinutes = Number.isFinite(Number(keepFailedMinutes))
+    ? Number(keepFailedMinutes)
+    : QUEUE_DB_KEEP_FAILED_MINUTES;
+
+  const doneCancelledResult = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE set_process_rid = ?
+      AND status IN ('done', 'cancelled')
+  `).run(process_rid);
+
+  let failedDeleted = 0;
+  if (sanitizedKeepFailedMinutes <= 0) {
+    const failedResult = db.prepare(`
+      DELETE FROM queue_jobs
+      WHERE set_process_rid = ?
+        AND status = 'failed'
+    `).run(process_rid);
+    failedDeleted = Number(failedResult.changes || 0);
+  } else {
+    const failedCutoffIso = new Date(Date.now() - sanitizedKeepFailedMinutes * 60 * 1000).toISOString();
+    const failedResult = db.prepare(`
+      DELETE FROM queue_jobs
+      WHERE set_process_rid = ?
+        AND status = 'failed'
+        AND updated_at < ?
+    `).run(process_rid, failedCutoffIso);
+    failedDeleted = Number(failedResult.changes || 0);
+  }
+
+  return {
+    done_cancelled_deleted: Number(doneCancelledResult.changes || 0),
+    failed_deleted: failedDeleted,
+    keep_failed_minutes: sanitizedKeepFailedMinutes,
+  };
+};
+
+queueDb.flushQueue = async function(topic) {
+  const db = this._openDb();
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE queue = ? OR queue = ?
+  `).run(topic, `${topic}_batch`);
+
+  return { deleted: Number(result.changes || 0) };
+};
+
+queueDb.cleanupOlderThan = async function({ olderThanMinutes, statuses = ['done', 'failed', 'cancelled'], dryRun = false }) {
+  const minutes = Number(olderThanMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    throw new Error('olderThanMinutes must be a positive number');
+  }
+
+  const allowedStatuses = new Set(['queued', 'running', 'done', 'failed', 'cancelled']);
+  const normalizedStatuses = (Array.isArray(statuses) ? statuses : [statuses])
+    .map((status) => String(status || '').trim().toLowerCase())
+    .filter((status) => allowedStatuses.has(status));
+
+  if (normalizedStatuses.length === 0) {
+    throw new Error('statuses must include at least one valid queue status');
+  }
+
+  // Running jobs must never be hard-deleted through cleanup.
+  if (normalizedStatuses.includes('running')) {
+    throw new Error('cleanup does not allow status "running"');
+  }
+
+  const cutoffIso = new Date(Date.now() - (minutes * 60 * 1000)).toISOString();
+  const db = this._openDb();
+  const placeholders = normalizedStatuses.map(() => '?').join(', ');
+
+  if (dryRun) {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM queue_jobs
+      WHERE status IN (${placeholders})
+        AND updated_at < ?
+    `).get(...normalizedStatuses, cutoffIso);
+
+    return {
+      dry_run: true,
+      older_than_minutes: minutes,
+      statuses: normalizedStatuses,
+      cutoff: cutoffIso,
+      count: Number(row?.count || 0),
+    };
+  }
+
+  const result = db.prepare(`
+    DELETE FROM queue_jobs
+    WHERE status IN (${placeholders})
+      AND updated_at < ?
+  `).run(...normalizedStatuses, cutoffIso);
+
+  return {
+    dry_run: false,
+    older_than_minutes: minutes,
+    statuses: normalizedStatuses,
+    cutoff: cutoffIso,
+    deleted: Number(result.changes || 0),
+  };
+};
+
+queueDb.writeToDB = async function() {
+  return true;
+};
+
+queueDb.createSetProcessNodesAndPublish = async function(msg) {
+  const batchRid = msg?.set_process || msg?.set_process_rid;
+
+  if (batchRid) {
+    const batchNode = await Graph.getBatchProcess(batchRid);
+    const batchStatus = batchNode?.status || batchNode?.state || 'running';
+
+    if (batchStatus === 'paused' || batchStatus === 'cancelling' || batchStatus === 'cancelled' || batchStatus === 'done') {
+      return;
+    }
+
+    if (!msg.process || !msg.process['@rid']) {
+      msg.process = { '@rid': batchRid };
+    }
+
+    await this.publish(`${msg.service.id}_batch`, JSON.stringify(msg));
+    return;
+  }
+
+  const processNode = await Graph.createProcessNode_queue(msg);
+  await media.createProcessDir(processNode.path);
+  await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
+  msg.process = processNode;
+
+  await this.publish(`${msg.service.id}_batch`, JSON.stringify(msg));
+};
+
+queueDb.cancelBatch = async function(process_rid) {
+  this.cancelledBatches.add(process_rid);
+  this.pausedBatches.delete(process_rid);
+  const deleted = await this.drainQueueByProcess(process_rid);
+  let cleaned = null;
+  if (!this._hasActiveBatchJobs(process_rid)) {
+    cleaned = this._cleanupBatchTerminalRows(process_rid);
+  }
+  return { status: 'cancelled', process_rid, deleted, cleaned };
+};
+
+queueDb.cancelJob = function(jobId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET status = 'cancelled',
+        lease_until = NULL,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ? AND status IN ('queued', 'running')
+  `).run(now, now, jobId);
+  return Number(result.changes || 0) > 0;
+};
+
+queueDb.getJobById = function(jobId) {
+  const db = this._openDb();
+  const row = db.prepare(`
+    SELECT id, queue, payload_json, process_rid, set_process_rid, status,
+           attempts, claimed_by, created_at, updated_at, completed_at
+    FROM queue_jobs
+    WHERE id = ?
+  `).get(jobId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    queue: row.queue,
+    process_rid: row.process_rid,
+    set_process_rid: row.set_process_rid,
+    status: row.status,
+    attempts: row.attempts,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    completed_at: row.completed_at,
+  };
+};
+
+queueDb.pauseBatch = async function(process_rid) {
+  this.pausedBatches.add(process_rid);
+  const deleted = await this.drainQueueByProcess(process_rid);
+  return { status: 'paused', process_rid, deleted };
+};
+
+queueDb.resumeBatch = async function(process_rid) {
+  this.pausedBatches.delete(process_rid);
+  this.cancelledBatches.delete(process_rid);
+  return { status: 'running', process_rid };
+};
+
+// --- Consumer-facing operations ---
+
+const DEFAULT_LEASE_SECONDS = Number(process.env.QUEUE_DB_LEASE_SECONDS || 120);
+
+queueDb.claim = function(topic, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+  const leaseUntil = new Date(Date.now() + DEFAULT_LEASE_SECONDS * 1000).toISOString();
+
+  // Claim from both <topic> and <topic>_batch queues
+  const queues = [topic, `${topic}_batch`];
+
+  for (const queueName of queues) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const row = db.prepare(`
+        SELECT id, payload_json, attempts, max_attempts, queue
+        FROM queue_jobs
+        WHERE queue = ?
+          AND (
+            (status = 'queued' AND next_retry_at <= ?)
+            OR (status = 'running' AND lease_until < ?)
+          )
+        ORDER BY created_at ASC
+        LIMIT 1
+      `).get(queueName, now, now);
+
+      if (!row) {
+        db.exec('COMMIT');
         continue;
       }
 
-      let message;
-      try {
-        message = msg.json();
-      } catch {
-        continue;
-      }
+      db.prepare(`
+        UPDATE queue_jobs
+        SET status = 'running',
+            claimed_by = ?,
+            claimed_at = ?,
+            lease_until = ?,
+            attempts = attempts + 1,
+            updated_at = ?
+        WHERE id = ?
+      `).run(adapterId, now, leaseUntil, now, row.id);
 
-      if (message?.set_process === process_rid || message?.process?.['@rid'] === process_rid) {
-        await this.jsm.streams.deleteMessage('PROCESS', seq);
-        count++;
+      db.exec('COMMIT');
+
+      return {
+        id: row.id,
+        queue: row.queue,
+        payload: JSON.parse(row.payload_json),
+        attempts: Number(row.attempts || 0) + 1,
+        max_attempts: Number(row.max_attempts || 3),
+      };
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_) { /* ignore */ }
+      throw error;
+    }
+  }
+
+  return null; // no work available
+};
+
+queueDb.heartbeat = function(jobId, adapterId) {
+  const db = this._openDb();
+  const leaseUntil = new Date(Date.now() + DEFAULT_LEASE_SECONDS * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET lease_until = ?, updated_at = ?
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).run(leaseUntil, now, jobId, adapterId);
+
+  return Number(result.changes || 0) > 0;
+};
+
+queueDb.complete = function(jobId, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+
+  const job = db.prepare(`
+    SELECT set_process_rid
+    FROM queue_jobs
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).get(jobId, adapterId);
+  if (!job) return false;
+
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET status = 'done',
+        lease_until = NULL,
+        completed_at = ?,
+        updated_at = ?
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).run(now, now, jobId, adapterId);
+
+  if (Number(result.changes || 0) <= 0) {
+    return false;
+  }
+
+  if (!job.set_process_rid) {
+    // Single-file jobs do not need history for batch failure calculations.
+    db.prepare('DELETE FROM queue_jobs WHERE id = ?').run(jobId);
+    return true;
+  }
+
+  if (!this._hasActiveBatchJobs(job.set_process_rid)) {
+    this._cleanupBatchTerminalRows(job.set_process_rid);
+  }
+
+  return true;
+};
+
+queueDb.fail = async function(jobId, errorMessage, adapterId) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
+
+  // Get current state
+  const row = db.prepare(`
+    SELECT attempts, max_attempts, set_process_rid, payload_json FROM queue_jobs
+    WHERE id = ? AND status = 'running' AND claimed_by = ?
+  `).get(jobId, adapterId);
+
+  if (!row) return false;
+
+  const attempts = Number(row.attempts || 0);
+  const maxAttempts = Number(row.max_attempts || 3);
+
+  if (attempts >= maxAttempts) {
+    // Permanently failed
+    db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'failed',
+          lease_until = NULL,
+          claimed_by = NULL,
+          claimed_at = NULL,
+          last_error = ?,
+          completed_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(String(errorMessage || 'processing failed'), now, now, jobId);
+
+    // Check batch auto-abort conditions
+    const batchRid = row.set_process_rid;
+    if (batchRid) {
+      const abortResult = await this._checkBatchAutoAbort(batchRid, row.payload_json);
+      if (abortResult) {
+        // Extract userId from payload for notification
+        let userId = null;
+        try { userId = JSON.parse(row.payload_json || '{}').userId; } catch { /* ignore */ }
+        return { ok: true, permanent: true, batch_aborted: true, abort_reason: abortResult.reason, batch_rid: batchRid, userId, abort_detail: abortResult };
       }
     }
 
-    console.log('deleted messages by process: ', count)
-    return count;
-  } catch (err) {
-    console.error('drainQueueByProcess error:', err);
-    return 0;
+    return { ok: true, permanent: true };
+  } else {
+    // Requeue with backoff
+    const backoffMs = Math.min(500 * Math.pow(2, Math.max(0, attempts - 1)), 30000);
+    const retryAt = new Date(Date.now() + backoffMs).toISOString();
+
+    db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'queued',
+          lease_until = NULL,
+          claimed_by = NULL,
+          claimed_at = NULL,
+          next_retry_at = ?,
+          last_error = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(retryAt, String(errorMessage || 'processing failed'), now, jobId);
   }
-}
 
+  return { ok: true, permanent: false };
+};
 
-// Queue draining
-nats.drainQueue_old = async function(topic, process_rid) {
+queueDb._checkBatchAutoAbort = async function(batchRid, payloadJson) {
+  const db = this._openDb();
 
-  // find a stream that stores a specific subject:
-  const name = await this.jsm.streams.find("process." + topic);
-  console.log(name)
-  // retrieve info about the stream by its name
-  const si = await this.jsm.streams.info(name);
-  console.log(si)
-  const seq = si.state.first_seq
-  var last_seq = si.state.last_seq
-
+  // Read per-message overrides if available
+  let queueOptions = {};
   try {
-    for(var i = last_seq; i >= seq; i--) {
-      let payload, data
-      const message = await this.jsm.streams.getMessage(name, { seq: i });
+    const parsed = JSON.parse(payloadJson || '{}');
+    queueOptions = parsed?.queue_options || {};
+  } catch { /* ignore */ }
 
-      try {
-        data = message.json()
-        console.log(data)
-      } catch (e) {
-        console.log('invalid message payload!', e.message)
-      }
+  const maxConsecutive = Number(
+    queueOptions.abort_consecutive
+    || process.env.QUEUE_BATCH_ABORT_CONSECUTIVE
+    || 5
+  );
+  const maxPercent = Number(
+    queueOptions.abort_percent
+    || process.env.QUEUE_BATCH_ABORT_PERCENT
+    || 50
+  );
 
-      await this.jsm.streams.deleteMessage(name, i);
-      //console.log(sm);
+  // Check failure percentage
+  const stats = db.prepare(`
+    SELECT
+      SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+      COUNT(*) AS total_count
+    FROM queue_jobs
+    WHERE set_process_rid = ?
+      AND status IN ('done', 'failed', 'cancelled')
+  `).get(batchRid);
+
+  if (stats && stats.total_count > 0) {
+    const failPercent = (stats.failed_count / stats.total_count) * 100;
+    if (failPercent >= maxPercent) {
+      await this.cancelBatch(batchRid);
+      return { reason: 'failure_threshold', failed_percent: Math.round(failPercent) };
     }
-
-  } catch(e) {
-    console.log(e.message)
   }
 
-  //  await this.jsm.streams.purge("SYSTEM");
-  return true
- 
+  // Check consecutive failures (last N completed/failed jobs)
+  const recentRows = db.prepare(`
+    SELECT status FROM queue_jobs
+    WHERE set_process_rid = ?
+      AND status IN ('done', 'failed')
+      AND completed_at IS NOT NULL
+    ORDER BY completed_at DESC
+    LIMIT ?
+  `).all(batchRid, maxConsecutive);
 
-
-  // const co = await js.consumers.get("SYSTEM", "arcadedb");
-  // if (co) {
-  //   let messages = await co.fetch({ max_messages: 4, expires: 2000 });
-  //   for await (const m of messages) {
-  //     m.ack();
-  //   }
-  //   //co.stop();
-  //   await nc.close();
-  //   console.log(`batch completed: ${messages.getProcessed()} msgs processed`);
-  //   return true
-    
-  // }
-}
-
-
-
-// Database writing queue
-
-
-nats.writeToDB = async function(query, params) {
-  try {
-    const json = JSON.stringify({query: query, params: params})
-    await this.js.publish("system.arcadedb", json)
-  } catch(e) {
-    console.log('ERROR:', e.message)
+  if (recentRows.length >= maxConsecutive && recentRows.every(r => r.status === 'failed')) {
+    await this.cancelBatch(batchRid);
+    return { reason: 'consecutive_failures', count: maxConsecutive };
   }
-}
 
-nats.createSetProcessNodesAndPublish = async function(msg) {
-  console.log('creating set process nodes and publishing...')
+  return null;
+};
 
-  try {
-    const json = JSON.stringify({topic: 'create_and_publish', value: msg})
-    await this.js.publish("system.arcadedb", json)
-  } catch(e) {
-    console.log('ERROR:', e.message)
+queueDb.getActiveJobs = function() {
+  const db = this._openDb();
+  const rows = db.prepare(`
+    SELECT id, queue, payload_json, process_rid, set_process_rid, status,
+           attempts, claimed_by, created_at, updated_at
+    FROM queue_jobs
+    WHERE status IN ('queued', 'running')
+    ORDER BY created_at ASC
+    LIMIT 200
+  `).all();
+
+  // Group by set_process_rid to return batch-level summaries
+  const batches = {};
+  for (const row of rows) {
+    // Filter out internal thumbnail jobs from active job list
+    try {
+      const payload = JSON.parse(row.payload_json);
+      if (isThumbnailPayload(payload)) continue;
+    } catch { /* ignore parse errors */ }
+
+    let serviceId = row.queue || '';
+    try {
+      const payload = JSON.parse(row.payload_json);
+      serviceId = payload?.service?.id || payload?.topic?.id || serviceId;
+    } catch { /* ignore */ }
+    // Strip _batch suffix for display
+    serviceId = serviceId.replace(/_batch$/, '');
+
+    const key = row.set_process_rid || row.process_rid || `job_${row.id}`;
+    if (!batches[key]) {
+      batches[key] = {
+        rid: key,
+        set_process: row.set_process_rid,
+        process_rid: row.process_rid,
+        queue: row.queue,
+        service_id: serviceId,
+        status: 'running',
+        total_files: 0,
+        processed_files: 0,
+        queued_files: 0,
+        running_files: 0,
+      };
+    }
+    batches[key].total_files += 1;
+    if (row.status === 'queued') batches[key].queued_files += 1;
+    if (row.status === 'running') batches[key].running_files += 1;
   }
-}
 
-nats.cancelBatch = async function(process_rid) {
-  this.cancelledBatches.add(process_rid)
-  this.pausedBatches.delete(process_rid)
-  const deleted = await this.drainQueueByProcess(process_rid)
-  return {status: 'cancelled', process_rid, deleted}
-}
+  return Object.values(batches);
+};
 
-nats.pauseBatch = async function(process_rid) {
-  this.pausedBatches.add(process_rid)
-  const deleted = await this.drainQueueByProcess(process_rid)
-  return {status: 'paused', process_rid, deleted}
-}
+queueDb.dismissJob = function(rid) {
+  const db = this._openDb();
+  const now = new Date().toISOString();
 
-nats.resumeBatch = async function(process_rid) {
-  this.pausedBatches.delete(process_rid)
-  this.cancelledBatches.delete(process_rid)
-  return {status: 'running', process_rid}
-}
-
-nats.listenDBQueue = async function(topic) {
-  console.log('connecting to DB queue...')
-  const nc = await connect({servers: NATS_URL});
-  const js = jetstream(nc);  
-  console.log('connected to DB queue!')
- 
-
-
-  const co = await js.consumers.get("SYSTEM", "arcadedb");
-  if (co) {
-      const messages = await co.consume({ max_messages: 1 });
-      for await (const m of messages) {
-          try {
-            var msg_data = m.json()
-            var msg = msg_data.value
-            //console.log(data)
-
-            // CREATE AND PUBLISH
-            if(msg_data.topic == 'create_and_publish') {
-              const batchRid = msg?.set_process || msg?.set_process_rid
-              if(batchRid) {
-                const batchNode = await Graph.getBatchProcess(batchRid)
-                const batchState = batchNode?.state || 'running'
-
-                if(batchState === 'paused' || this.pausedBatches.has(batchRid)) {
-                  // Drop queued create_and_publish tasks while paused; resume will rebuild pending files from graph.
-                  m.ack();
-                  continue;
-                }
-
-                if(batchState === 'cancelling' || batchState === 'cancelled' || this.cancelledBatches.has(batchRid)) {
-                  m.ack();
-                  continue;
-                }
-
-                // Set batches use one SetProcess node; do not create per-file Process nodes.
-                if(!msg.process || !msg.process['@rid']) {
-                  msg.process = {'@rid': batchRid}
-                }
-                nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
-                m.ack();
-                continue;
-              }
-
-              //console.log('creating and publishing received...', msg.current_file)
-              // Add 500ms delay
-             // await new Promise(resolve => setTimeout(resolve, 500));
-             //var msg_copy = structuredClone(msg)
-             //if(msg_copy.system_params) delete msg_copy.system_params.json_schema
-             //if(msg_copy?.params?.json_schema) delete msg_copy.params.json_schema
-              var processNode = await Graph.createProcessNode_queue(msg);
-              await media.createProcessDir(processNode.path);
-              //delete data.service.tasks
-              await media.writeJSON(msg, 'message.json', path.join(path.dirname(processNode.path)));
-              //console.log(data)
-              msg.process = processNode
-              
-              //console.log('message', msg)
-              nats.publish(msg.service.id + '_batch', JSON.stringify(msg))
-              // we call database writes here and then we publish the message to actual processing queue
-            } else {
-              console.log('no topic defined!')
-            }
-            m.ack();
-          } catch(e) {
-              console.log('ERROR:', e.message)
-              // we do not retry, so we ack
-              m.ack();
-          }
-      } 
+  // Handle job_N format (individual queue job)
+  const jobIdMatch = /^job_(\d+)$/.exec(rid);
+  if (jobIdMatch) {
+    const jobId = Number(jobIdMatch[1]);
+    const result = db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'cancelled',
+          lease_until = NULL,
+          completed_at = ?,
+          updated_at = ?
+      WHERE id = ? AND status IN ('queued', 'running')
+    `).run(now, now, jobId);
+    return Number(result.changes || 0) > 0;
   }
-}
 
-export default nats
+  // Handle OrientDB RID format – clear all active jobs for a process/batch
+  const result = db.prepare(`
+    UPDATE queue_jobs
+    SET status = 'cancelled',
+        lease_until = NULL,
+        completed_at = ?,
+        updated_at = ?
+    WHERE (process_rid = ? OR set_process_rid = ?)
+      AND status IN ('queued', 'running')
+  `).run(now, now, rid, rid);
+  return Number(result.changes || 0) > 0;
+};
+
+queueDb.listConsumers = async function() {
+  return [];
+};
+
+queueDb.listenDBQueue = async function() {
+  return;
+};
+
+queueDb.ensureProcessConsumersForService = async function() {
+  return;
+};
+
+queueDb.reconcileProcessConsumers = async function() {
+  return { scanned: 0, removed: 0, skipped: 0 };
+};
+
+export default queueDb;

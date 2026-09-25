@@ -1,178 +1,219 @@
+import path from 'node:path';
+import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import axios from 'axios';
+import FormData from 'form-data';
 
-// this file is for testing purposes
+const DEFAULT_API = 'http://localhost:8200';
+const DEFAULT_MAIL = 'local.user@localhost';
+const DEFAULT_PROJECT = 'dev_test';
 
-const path 			= require('path')
-const fse 			= require('fs-extra')
-const websocket 	= require('koa-easy-ws')
+function parseArgs(argv) {
+    const args = {
+        api: DEFAULT_API,
+        mail: DEFAULT_MAIL,
+        project: DEFAULT_PROJECT,
+        file: '',
+        description: '',
+        allowDuplicate: false,
+    };
 
-const Graph 		= require('../graph.js');
+    for (let i = 0; i < argv.length; i++) {
+        const key = argv[i];
+        const next = argv[i + 1];
 
-const media 		= require('../media.js');
-const web 		    = require('../web.js');
-const services 		= require('../services.js');
-const nomad 		= require('../nomad.js');
+        if (key === '--api' && next) {
+            args.api = next;
+            i++;
+            continue;
+        }
+        if (key === '--mail' && next) {
+            args.mail = next;
+            i++;
+            continue;
+        }
+        if (key === '--project' && next) {
+            args.project = next;
+            i++;
+            continue;
+        }
+        if (key === '--file' && next) {
+            args.file = next;
+            i++;
+            continue;
+        }
+        if (key === '--description' && next) {
+            args.description = next;
+            i++;
+            continue;
+        }
+        if (key === '--allow-duplicate') {
+            args.allowDuplicate = true;
+            continue;
+        }
+    }
 
-let nats
-let positions
+    return args;
+}
 
-const connections = new Map();
-const AUTH_HEADER = 'mail'
-const user = 'local.user@localhost'
+async function apiJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let body = null;
+    try {
+        body = text ? JSON.parse(text) : null;
+    } catch {
+        body = text;
+    }
 
-process.on( 'SIGINT', async function() {
-	console.log( "\nGracefully shutting down from SIGINT (Ctrl-C)" );
-    await nats.close()
-	process.exit( );
-  })
+    if (!response.ok) {
+        throw new Error(`Request failed ${response.status} ${response.statusText}: ${JSON.stringify(body)}`);
+    }
 
+    return body;
+}
+
+function normalizeProjectLabel(project) {
+    if (!project || typeof project !== 'object') return '';
+    if (Array.isArray(project.label)) return String(project.label[0] || '');
+    if (Array.isArray(project.name)) return String(project.name[0] || '');
+    return String(project.label || project.name || '');
+}
+
+function normalizeProjectRid(project) {
+    if (!project || typeof project !== 'object') return '';
+    if (Array.isArray(project['@rid'])) return String(project['@rid'][0] || '');
+    return String(project['@rid'] || '');
+}
+
+async function findProjectByLabel(apiBase, mail, label) {
+    const projects = await apiJson(`${apiBase}/api/projects`, {
+        headers: { mail },
+    });
+
+    const wanted = String(label || '').trim().toLowerCase();
+    return (projects || []).find((project) => normalizeProjectLabel(project).trim().toLowerCase() === wanted) || null;
+}
+
+async function createProject(apiBase, mail, label, description = '') {
+    const payload = {
+        label,
+        description,
+        position: { x: 50, y: 50 },
+    };
+
+    return apiJson(`${apiBase}/api/projects`, {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+            mail,
+        },
+        body: JSON.stringify(payload),
+    });
+}
+
+async function uploadFileToProject(apiBase, mail, projectRid, filePath) {
+    const cleanRid = String(projectRid).replace(/^#/, '');
+    const absFilePath = path.resolve(filePath);
+    const filename = path.basename(absFilePath);
+    const form = new FormData();
+    form.append('file', createReadStream(absFilePath), filename);
+
+    const response = await axios.post(
+        `${apiBase}/api/projects/${cleanRid}/upload`,
+        form,
+        {
+            headers: {
+                ...form.getHeaders(),
+                mail,
+            },
+            maxBodyLength: Infinity,
+            maxContentLength: Infinity,
+            validateStatus: () => true,
+        }
+    );
+
+    if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Upload failed ${response.status}: ${JSON.stringify(response.data)}`);
+    }
+
+    return response.data;
+}
+
+async function getProjectGraph(apiBase, mail, projectRid) {
+    const cleanRid = String(projectRid).replace(/^#/, '');
+    return apiJson(`${apiBase}/api/projects/${cleanRid}`, {
+        headers: { mail },
+    });
+}
+
+function projectHasFilename(projectGraph, filename) {
+    const wanted = String(filename || '').trim().toLowerCase();
+    if (!wanted) return false;
+
+    const nodes = Array.isArray(projectGraph?.nodes) ? projectGraph.nodes : [];
+    for (const node of nodes) {
+        if (node?.data?.type !== 'File') continue;
+        const name = String(node?.data?.name || '').trim().toLowerCase();
+        if (name === wanted) return true;
+    }
+    return false;
+}
+
+async function ensureFileExists(filePath) {
+    try {
+        await fs.access(path.resolve(filePath));
+    } catch {
+        throw new Error(`File not found: ${filePath}`);
+    }
+}
 
 async function main() {
-    
+    const args = parseArgs(process.argv.slice(2));
 
-	console.log('initing...')
-	// migration to ES6 in progress...
-	const {queue} = await import('../queue.mjs');
-	const {layout} = await import('../layouts.mjs');
-	nats = queue
-	positions = layout
-	await nomad.getStatus()
-	await services.loadServiceAdapters('../services')
-    await nats.connect() 
-    await Graph.initDB()
+    if (!args.file) {
+        console.error('Usage: node test/internal.js --file <path> [--project <label>] [--mail <mail>] [--api <url>] [--allow-duplicate]');
+        process.exit(1);
+    }
 
+    await ensureFileExists(args.file);
 
-    // we create fake 'uploads' dir
-    await fse.ensureDir('uploads')
+    console.log('API:', args.api);
+    console.log('User:', args.mail);
+    console.log('Project label:', args.project);
+    console.log('File:', path.resolve(args.file));
 
-    // create/get test project
-    const project = await createTestProject()
-    console.log('project RID:', project['@rid'])
+    let project = await findProjectByLabel(args.api, args.mail, args.project);
+    if (!project) {
+        console.log('Project not found, creating it...');
+        project = await createProject(args.api, args.mail, args.project, args.description);
+    } else {
+        console.log('Using existing project.');
+    }
 
-    const test_png =await addFileToProject('2_persons.jpg', 'image', project['@rid'])
-    //const jyudig = await addFileToProject('jyudig.pdf', 'pdf', project['@rid'])
-    //const face = await addFileToProject('face.jpeg', 'image', project['@rid'])
-    //const test_txt = await addFileToProject('test.txt', 'text', project['@rid'])
-    // const dissertation_text = await addFileToProject('dissertation_AH_text.txt', 'text', project['@rid'])
-    
+    const projectRid = normalizeProjectRid(project);
+    if (!projectRid) {
+        throw new Error(`Could not resolve project rid from response: ${JSON.stringify(project)}`);
+    }
 
+    console.log('Project RID:', projectRid);
 
-    await processFile(test_png, 'md-replicate-image:alt_text', {
-        info: 'ALT text', 
-    }, user)
-    // await processFile(dissertation_text, 'md-azure-ai:discpiline_info', {
-    //     info: 'Eristä data', 
-    // }, user)
-    // await processFile(test_txt, 'md-azure-ai:discpiline_info', {
-    //     info: 'tekstii', 
-    // }, user)
-    //await processFile(jyudig, 'md-poppler:pdf2images', {info: 'Rendered images from PDF'}, user)
-    //await processFile(jyudig, 'md-poppler:pdfimages', {info: 'images from PDF'}, user)
-
-    //await nats.close()
-
-}
-
-
-async function processFile(fileNode, service_task, options, user) {
-    // split service task to variables service and task
-    let [servicename, task] = service_task.split(':')
-    console.log(servicename)
-    const service = services.getServiceAdapterByName(servicename)
-    var task_name = service.tasks[task].name
-    var processNode = await createProcess(task_name, options, fileNode, user)
-    if(options.params) options.params.task = task
-    else options.params = {task: task}
-
-    if(service.tasks[task].system_params) {
-        options.params = { ...options.params, ...service.tasks[task].system_params};
-        if(service.tasks[task].system_params.prompts) { 
-            // TODO: write propmt to processNode info
+    if (!args.allowDuplicate) {
+        const filename = path.basename(path.resolve(args.file));
+        const projectGraph = await getProjectGraph(args.api, args.mail, projectRid);
+        if (projectHasFilename(projectGraph, filename)) {
+            console.log(`File \"${filename}\" already exists in project ${projectRid}, skipping upload.`);
+            return;
         }
-
-    // send to queue
-    const data = {
-        params: options.params,
-        process: processNode,
-        file: fileNode,
-        target: fileNode['@rid'],
-        userId: user
     }
 
-    if(service.tasks[task].output_node && service.tasks[task].output_node == 'Set') {
-        const setNode = await Graph.createProcessSetNode(processNode['@rid'], {label: 'testisetti', type:'set'}, user)
-        data.set = setNode['@rid']
-    }
-
-    nats.publish(servicename, JSON.stringify(data))
+    const fileNode = await uploadFileToProject(args.api, args.mail, projectRid, args.file);
+    console.log('Uploaded file node:', fileNode?.['@rid'] || fileNode?.rid || JSON.stringify(fileNode));
 }
 
-async function createProcess(task_name, info, file, user) {
-    // we could get file node like this (if we had only rid):
-	//var file_metadata = await Graph.getUserFileMetadata(rid, user)
-    var processNode = await Graph.createProcessNode(task_name, info, file, user)
-    console.log(processNode)
-    await media.createProcessDir(processNode.path)
-    await media.writeJSON(info, 'params.json', path.join(path.dirname(processNode.path)))
-    return processNode
-}
-
-async function addFileToProject(filename, type, project_rid) {
-    // 'upload' file
-    await fse.copy('files/' + filename, 'uploads/' + filename)
-    // create file node
-    const ctx = {file: {originalname: filename}}
-
-    if(type == 'text') {
-		ctx.file.description = await media.getTextDescription('uploads/' + filename)
-	}
-
-    var filegraph = await Graph.createOriginalFileNode(project_rid, ctx, type)
-    // move file to data dir
-    await media.uploadFile('uploads/' + filename, filegraph)
-    console.log(filegraph)
-    // send it to a thumbnail service
-    if(type == 'image' || type == 'pdf') {
-        var data = {
-            file: filegraph,
-            userId: user,
-            target: filegraph['@rid'],
-            task: 'thumbnail',
-            params: {width: 800, type: 'jpeg'},
-            id: 'thumbnailer'   
-        }
-        // send to thumbnailer queue 
-        nats.publish(data.id, JSON.stringify(data))
-    }
-
-
-    return filegraph
-}
-async function createTestProject() {        
-    try {
-        var me = await Graph.myId(user)
-        console.log(me)
-        var n = await Graph.createProject({label: 'dev_test'}, me.rid)
-        console.log('project created')
-        console.log(n)
-        await media.createProjectDir(n)
-        return n.result[0]
-    } catch (e) {
-        console.log(e)  
-        var n = await Graph.getProjects(user)
-        await fse.remove('data/projects/' + n[0]['@rid'].replace('#', '').replace(':', '_') + '/files')
-        await clearFiles()
-        return n[0]
-    }
-}
-
-async function clearFiles() {
-    const sql = 'DELETE from File'
-    await web.sql(sql)
-}
-
-   // const data = await fse.promises.readFile(file_1, 'utf8');
-    //await fse.promises.writeFile('uploads/dev_test.png', data, 'utf8');
-
-main()
+main().catch((error) => {
+    console.error('internal.js failed:', error.message);
+    process.exit(1);
+});
 
 

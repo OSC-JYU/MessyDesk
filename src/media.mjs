@@ -308,7 +308,14 @@ media.detectType = async function(file) {
         return 'json'
     } else if(mimeType == 'application/html'  || extension == '.html') {
         return 'html'
-    } else if(mimeType == 'text/plain' || extension == '.txt') {
+	} else if(
+		mimeType == 'text/plain'
+		|| mimeType == 'text/markdown'
+		|| mimeType == 'text/x-markdown'
+		|| mimeType == 'application/markdown'
+		|| extension == '.txt'
+		|| extension == '.md'
+	) {
         return 'text'
     }
 

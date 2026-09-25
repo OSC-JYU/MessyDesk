@@ -2,6 +2,7 @@
     "id": "mdf-image-roi",
     "type": "filter",
     "name" :"Image ROI",
+    "category": "preparation",
 
     "supported_types": ["image"],
     "supported_formats": ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"],

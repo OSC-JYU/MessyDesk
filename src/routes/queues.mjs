@@ -1,15 +1,14 @@
-import { randomUUID } from 'crypto';
 import Boom from '@hapi/boom';
 
 import Graph from '../graph.mjs';
 import services from '../services.mjs';
-import nats from '../queue.mjs';
+import queue from '../queue.mjs';
 import userManager from '../userManager.mjs';
 import media from '../media.mjs';
 import path from 'path';
 import { API_URL, DATA_DIR } from '../env.mjs';
 
-async function dispatchSetFilesForBatch({service, task, files, setProcessRid, outputSetRid, userRid, totalFiles, startIndex = 1}) {
+async function dispatchSetFilesForBatch({service, task, files, setProcessRid, inputSetRid = null, outputSetRid, userRid, totalFiles, startIndex = 1, searchOutput = false}) {
     let fileCount = startIndex;
     for(const file of files) {
         const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], userRid);
@@ -18,6 +17,7 @@ async function dispatchSetFilesForBatch({service, task, files, setProcessRid, ou
             service,
             task,
             file: fileMetadata,
+            set_rid: inputSetRid,
             set_process: setProcessRid,
             process: { '@rid': setProcessRid },
             output_set: outputSetRid,
@@ -25,6 +25,11 @@ async function dispatchSetFilesForBatch({service, task, files, setProcessRid, ou
             current_file: fileCount,
             userId: userRid,
         };
+
+        if(searchOutput) {
+            msg.search_output = true;
+            msg.search_source_set = inputSetRid;
+        }
 
         if(service.tasks?.[task.id]?.source == 'source_file') {
             const source = await Graph.getFileSource(file['@rid'], msg.file['@type']);
@@ -34,7 +39,7 @@ async function dispatchSetFilesForBatch({service, task, files, setProcessRid, ou
             }
         }
 
-        await nats.createSetProcessNodesAndPublish(msg);
+        await queue.createSetProcessNodesAndPublish(msg);
         fileCount += 1;
     }
 
@@ -49,16 +54,236 @@ function getFileSortName(file) {
     return '';
 }
 
+function getFilePageNumber(file) {
+    if (!file) return null;
+    const raw = Number(file.page_number);
+    if (!Number.isFinite(raw)) return null;
+    return raw;
+}
+
 function sortFilesByFilename(files) {
     return [...(files || [])].sort((a, b) => {
+        const aPage = getFilePageNumber(a);
+        const bPage = getFilePageNumber(b);
+        if (aPage !== null && bPage !== null && aPage !== bPage) {
+            return aPage - bPage;
+        }
+        if (aPage !== null && bPage === null) {
+            return -1;
+        }
+        if (aPage === null && bPage !== null) {
+            return 1;
+        }
+
         const aName = getFileSortName(a);
         const bName = getFileSortName(b);
         return aName.localeCompare(bName);
     });
 }
 
+function shouldUseRootSourceGrouping({ service, task, isSearchOutput }) {
+    const taskConfig = service?.tasks?.[task?.id] || {};
+
+    if(task?.group_by_root_source === false || taskConfig?.group_by_root_source === false) {
+        return { enabled: false, explicit: true };
+    }
+
+    if(task?.grouping_mode === 'group_by_root_source' || taskConfig?.grouping_mode === 'group_by_root_source') {
+        return { enabled: true, explicit: true };
+    }
+
+    if(task?.group_by_root_source === true || taskConfig?.group_by_root_source === true) {
+        return { enabled: true, explicit: true };
+    }
+
+    if(isSearchOutput) {
+        return { enabled: false, explicit: false };
+    }
+
+    return { enabled: true, explicit: false };
+}
+
+async function resolveManyToOneDispatchGroups(service, task, files, isSearchOutput) {
+    const orderedFiles = sortFilesByFilename(files);
+    const inputFileRidSet = new Set(
+        orderedFiles
+            .map((file) => file?.['@rid'])
+            .filter(Boolean)
+            .map((rid) => Graph.sanitizeRID(rid))
+    );
+    const groupingDecision = shouldUseRootSourceGrouping({ service, task, isSearchOutput });
+
+    if(!groupingDecision.enabled) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const resolvedGroups = await Graph.groupFilesByRootSource(orderedFiles, {
+        boundary: 'pdf',
+        excludeRootTypes: ['zip'],
+    });
+
+    if(!Array.isArray(resolvedGroups) || resolvedGroups.length === 0) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const groupsWithSourceInInputSet = resolvedGroups.filter((group) => {
+        if(!group?.source_rid) return false;
+        const cleanSourceRid = Graph.sanitizeRID(group.source_rid);
+        return inputFileRidSet.has(cleanSourceRid);
+    });
+
+    if(groupsWithSourceInInputSet.length === 0) {
+        // Only enable grouped outputs when grouping source files exist in the input set.
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const groupedFileRidSet = new Set();
+    for(const group of groupsWithSourceInInputSet) {
+        for(const file of group?.files || []) {
+            if(file?.['@rid']) groupedFileRidSet.add(Graph.sanitizeRID(file['@rid']));
+        }
+    }
+
+    const ungroupedFiles = orderedFiles.filter((file) => {
+        if(!file?.['@rid']) return true;
+        return !groupedFileRidSet.has(Graph.sanitizeRID(file['@rid']));
+    });
+
+    if(groupingDecision.explicit) {
+        const normalizedGroups = groupsWithSourceInInputSet.map((group) => ({
+            ...group,
+            files: sortFilesByFilename(group.files),
+        }));
+        if(ungroupedFiles.length > 0) {
+            normalizedGroups.push({ source_rid: null, label: null, type: null, path: null, files: ungroupedFiles });
+        }
+        return normalizedGroups;
+    }
+
+    // Auto mode: only enable grouping when traversal finds PDF roots.
+    const hasPdfRoots = groupsWithSourceInInputSet.some((group) => String(group?.type || '').toLowerCase() === 'pdf');
+    if(!hasPdfRoots) {
+        return [{ source_rid: null, label: null, type: null, path: null, files: orderedFiles }];
+    }
+
+    const normalizedGroups = groupsWithSourceInInputSet.map((group) => ({
+        ...group,
+        files: sortFilesByFilename(group.files),
+    }));
+    if(ungroupedFiles.length > 0) {
+        normalizedGroups.push({ source_rid: null, label: null, type: null, path: null, files: ungroupedFiles });
+    }
+    return normalizedGroups;
+}
+
 
 export default [
+
+    // --- Consumer queue API ---
+
+    {
+        method: 'POST',
+        path: '/api/queue/claim',
+        handler: async (request) => {
+            const { topic, adapter_id } = request.payload || {};
+            if (!topic || !adapter_id) {
+                throw Boom.badRequest('topic and adapter_id are required');
+            }
+            const job = queue.claim(topic, adapter_id);
+            return { job }; // null if no work available
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/heartbeat',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const ok = queue.heartbeat(jobId, adapter_id);
+            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
+            return { ok: true };
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/complete',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const ok = queue.complete(jobId, adapter_id);
+            if (!ok) throw Boom.notFound('Job not found or not owned by this adapter');
+            return { ok: true };
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/{job_id}/fail',
+        handler: async (request) => {
+            const jobId = Number(request.params.job_id);
+            const { adapter_id, error } = request.payload || {};
+            if (!adapter_id) throw Boom.badRequest('adapter_id is required');
+            const result = await queue.fail(jobId, error || 'unknown error', adapter_id);
+            if (!result) throw Boom.notFound('Job not found or not owned by this adapter');
+
+            // Auto-abort triggered: notify user and update batch status
+            if (result.batch_aborted && result.batch_rid) {
+                const batch = await Graph.getBatchProcess(result.batch_rid);
+                await Graph.updateBatchProcess(result.batch_rid, {
+                    status: 'cancelled',
+                    finished_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    eta_sec: 0,
+                });
+                if (result.userId) {
+                    userManager.sendToUser(result.userId, {
+                        command: 'process_finished',
+                        process: { '@rid': result.batch_rid, status: 'cancelled' },
+                        batch: {
+                            status: 'cancelled',
+                            state: 'cancelled',
+                            processed_files: batch?.processed_files || 0,
+                            failed_files: batch?.failed_files || 0,
+                            total_files: batch?.total_files || 0,
+                            eta_sec: 0,
+                        },
+                        abort_reason: result.abort_reason,
+                    });
+                }
+            }
+
+            return { ok: true, permanent: result.permanent || false, batch_aborted: result.batch_aborted || false };
+        }
+    },
+
+    {
+        method: 'GET',
+        path: '/api/queue/jobs/active',
+        handler: async () => {
+            return queue.getActiveJobs();
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/jobs/{rid}/dismiss',
+        handler: async (request) => {
+            const rid = request.params.rid;
+            const ok = queue.dismissJob(rid);
+            if (ok) {
+                userManager.sendToUser(request.auth.credentials.user.rid, {
+                    command: 'process_finished',
+                    process: { '@rid': rid, status: 'cancelled' },
+                });
+            }
+            return { ok, rid };
+        }
+    },
+
     // pipeline
     {
         method: 'POST',
@@ -75,7 +300,7 @@ export default [
                 var service = services.getServiceAdapterByName(line.params.topic);
                 messages = await Graph.createQueueMessages(service, line.payload, request.params.file_rid, request.auth.credentials.user.rid );
                 for(var msg of messages) {
-                    nats.publish(line.params.topic, JSON.stringify(msg));
+                    queue.publish(line.params.topic, JSON.stringify(msg));
                 }
             }
             return messages;
@@ -89,7 +314,7 @@ export default [
             const topic = request.params.topic;
             const process_rid = Graph.sanitizeRID(request.params.process_rid);
             console.log('process_rid: ', process_rid);
-            const status = await nats.drainQueue(topic, process_rid);
+            const status = await queue.drainQueue(topic, process_rid);
             var wsdata = {
                 command: 'process_finished',
                 process: { '@rid': process_rid, status: 'finished'}
@@ -103,7 +328,17 @@ export default [
         method: 'GET',
         path: '/api/batches/{process_rid}',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) - return queue job info directly
+            if (/^job_\d+$/.test(rawRid)) {
+                const jobId = Number(rawRid.replace('job_', ''));
+                const job = queue.getJobById(jobId);
+                if (!job) throw Boom.notFound('Job not found');
+                return job;
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             return await Graph.getBatchProcess(process_rid);
         }
     },
@@ -112,19 +347,27 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/pause',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) cannot be paused
+            if (/^job_\d+$/.test(rawRid)) {
+                throw Boom.badRequest('Individual queue jobs cannot be paused, only batch processes');
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             const batch = await Graph.updateBatchProcess(process_rid, {
-                state: 'paused',
+                status: 'paused',
                 paused_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             });
 
-            const queueStatus = await nats.pauseBatch(process_rid);
+            const queueStatus = await queue.pauseBatch(process_rid);
 
             userManager.sendToUser(request.auth.credentials.user.rid, {
                 command: 'process_update',
                 process: { '@rid': process_rid, status: 'paused' },
                 batch: {
+                    status: 'paused',
                     state: 'paused',
                     processed_files: batch?.processed_files || 0,
                     failed_files: batch?.failed_files || 0,
@@ -142,7 +385,14 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/resume',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // SQLite queue job IDs (job_N) cannot be resumed
+            if (/^job_\d+$/.test(rawRid)) {
+                throw Boom.badRequest('Individual queue jobs cannot be resumed, only batch processes');
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             const batch = await Graph.getBatchProcess(process_rid);
             if(!batch) {
                 throw Boom.notFound('Batch not found');
@@ -151,10 +401,15 @@ export default [
                 throw Boom.badRequest('Batch resume is currently supported for set-to-set batches only');
             }
 
-            await nats.resumeBatch(process_rid);
+            const batchStatus = batch.status || batch.state;
+            if(batchStatus !== 'paused') {
+                throw Boom.conflict(`Batch is not paused (status: ${batchStatus || 'unknown'})`);
+            }
+
+            await queue.resumeBatch(process_rid);
 
             await Graph.updateBatchProcess(process_rid, {
-                state: 'resuming',
+                status: 'resuming',
                 updated_at: new Date().toISOString(),
             });
 
@@ -198,21 +453,31 @@ export default [
 
             const setFiles = await Graph.getSetFiles(batch.input_set, request.auth.credentials.user.rid, {limit: 10000});
             const processedRids = new Set(await Graph.getProcessedInputFileRidsForBatch(process_rid));
+            console.log('processedRids: ', processedRids);
+            console.log('******************* pending files for resume *******************');
             const pendingFiles = setFiles.files.filter((file) => !processedRids.has(file['@rid']));
+
+            const beforeDispatch = await Graph.getBatchProcess(process_rid);
+            const beforeDispatchStatus = beforeDispatch?.status || beforeDispatch?.state;
+            if(beforeDispatchStatus !== 'resuming' && beforeDispatchStatus !== 'running') {
+                throw Boom.conflict(`Batch changed state before dispatch (status: ${beforeDispatchStatus || 'unknown'})`);
+            }
 
             await dispatchSetFilesForBatch({
                 service,
                 task,
                 files: pendingFiles,
                 setProcessRid: process_rid,
+                inputSetRid: batch.input_set,
                 outputSetRid: batch.output_set,
                 userRid: request.auth.credentials.user.rid,
                 totalFiles: batch.total_files || setFiles.files.length,
                 startIndex: Number(batch.processed_files || 0) + 1,
+                searchOutput: batch.search_output === true,
             });
 
             const resumedBatch = await Graph.updateBatchProcess(process_rid, {
-                state: 'running',
+                status: 'running',
                 updated_at: new Date().toISOString(),
             });
 
@@ -220,6 +485,7 @@ export default [
                 command: 'process_update',
                 process: { '@rid': process_rid, status: 'running' },
                 batch: {
+                    status: 'running',
                     state: 'running',
                     processed_files: resumedBatch?.processed_files || 0,
                     failed_files: resumedBatch?.failed_files || 0,
@@ -238,14 +504,27 @@ export default [
         method: 'POST',
         path: '/api/batches/{process_rid}/cancel',
         handler: async (request) => {
-            const process_rid = Graph.sanitizeRID(request.params.process_rid);
+            const rawRid = request.params.process_rid;
+
+            // Handle SQLite queue job IDs (job_N format)
+            if (/^job_\d+$/.test(rawRid)) {
+                const jobId = Number(rawRid.replace('job_', ''));
+                const deleted = queue.cancelJob(jobId);
+                userManager.sendToUser(request.auth.credentials.user.rid, {
+                    command: 'process_finished',
+                    process: { '@rid': rawRid, status: 'cancelled' },
+                });
+                return { status: 'cancelled', job_id: jobId, deleted };
+            }
+
+            const process_rid = Graph.sanitizeRID(rawRid);
             await Graph.updateBatchProcess(process_rid, {
-                state: 'cancelling',
+                status: 'cancelling',
                 updated_at: new Date().toISOString(),
             });
-            const queueStatus = await nats.cancelBatch(process_rid);
+            const queueStatus = await queue.cancelBatch(process_rid);
             const batch = await Graph.updateBatchProcess(process_rid, {
-                state: 'cancelled',
+                status: 'cancelled',
                 finished_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
                 eta_sec: 0,
@@ -255,6 +534,7 @@ export default [
                 command: 'process_finished',
                 process: { '@rid': process_rid, status: 'cancelled' },
                 batch: {
+                    status: 'cancelled',
                     state: 'cancelled',
                     processed_files: batch?.processed_files || 0,
                     failed_files: batch?.failed_files || 0,
@@ -273,7 +553,7 @@ export default [
         path: '/api/queue/drain/{process_rid}',
         handler: async (request) => {
             const process_rid = Graph.sanitizeRID(request.params.process_rid);
-            const status = await nats.drainQueueByProcess(process_rid);
+            const status = await queue.drainQueueByProcess(process_rid);
             var wsdata = {
                 command: 'process_finished',
                 process: { '@rid': process_rid, status: 'finished'}
@@ -289,7 +569,7 @@ export default [
         path: '/api/queue/{topic}/status',
         handler: async (request) => {
             const topic = request.params.topic;
-            const status = await nats.getQueueStatus(topic);
+            const status = await queue.getQueueStatus(topic);
             return status;
         }
     },
@@ -300,8 +580,34 @@ export default [
         path: '/api/queue/{topic}/flush',
         handler: async (request) => {
             const topic = request.params.topic;
-            const status = await nats.flushQueue(topic);
+            const status = await queue.flushQueue(topic);
             return status;
+        }
+    },
+
+    {
+        method: 'POST',
+        path: '/api/queue/cleanup',
+        handler: async (request) => {
+            try {
+                const payload = request.payload || {};
+                const status = await queue.cleanupOlderThan({
+                    olderThanMinutes: payload.older_than_minutes,
+                    statuses: payload.statuses || ['done', 'cancelled'],
+                    dryRun: Boolean(payload.dry_run),
+                });
+                return status;
+            } catch (error) {
+                throw Boom.badRequest(error.message);
+            }
+        }
+    },
+
+    {
+        method: 'GET',
+        path: '/api/queue/sweeper/summary',
+        handler: async () => {
+            return queue.getSweeperSummary();
         }
     },
 
@@ -315,9 +621,25 @@ export default [
                 const topic = request.params.topic;
                 const service = services.getServiceAdapterByName(topic);
                 var messages = await Graph.createQueueMessages(service, request.payload, request.params.file_rid, request.auth.credentials.user.rid, request.params.roi);
-                const queue = Graph.getQueueName(service, request.payload, topic);
+                const queueName = Graph.getQueueName(service, request.payload, topic);
                 //console.log('messages: ', messages);
 
+                // For search-output tasks on a single file, create a search output Set upfront
+                const isSearchOutput = Graph.isSearchOutputTask(service, request.payload);
+                if(isSearchOutput && messages.length > 0) {
+                    const msg = messages[0];
+                    const file_rid = Graph.sanitizeRID(request.params.file_rid);
+                    const project_rid = await Graph.getProjectRidForNode(file_rid);
+                    const searchSetNode = await Graph.createProcessSetNode(msg.process['@rid'], {
+                        input_set: file_rid,
+                        search_output: true,
+                        label: 'Search index',
+                        project_rid
+                    });
+                    msg.output_set = searchSetNode['@rid'];
+                    msg.search_output = true;
+                    msg.set_node = searchSetNode;
+                }
 
                 // add Process node to UI
                 if(messages.length > 0) {
@@ -337,7 +659,7 @@ export default [
 
                 for(var msg of messages) {    
                     // send message to queue
-                    nats.publish(queue, JSON.stringify(msg));
+                    queue.publish(queueName, JSON.stringify(msg));
                 }
 
                 return request.params.file_rid;
@@ -370,14 +692,19 @@ export default [
                     task.name = task.name;
                 } else {
                     task.name = service.tasks[task.id].name;
+                    if(service.tasks[task.id].description && !task.description)
+                        task.description = service.tasks[task.id].description;
+                    if(service.tasks[task.id].info && !task.info)
+                        task.info = service.tasks[task.id].info;
                 }
                 var msg = {task: task}
-                var task_name = '';
+                var task_name = task?.name || task?.id || topic;
                // var task_output = 'file';
                 // LLM services have tasks defined in prompts
                 if(service.external_tasks) {
                     msg.external = 'yes'
                     msg.task.params = task.system_params
+                    task_name = task?.name || task?.id || topic
                     // add model information if service has models
                     if(service.models && task.model) {
                         // task.model could be either a string ID or the entire model object
@@ -388,106 +715,99 @@ export default [
                         }
                     }
                 } 
-
-
-
-                // if(service.tasks[task.id].output) {
-                //     task_output = service.tasks[task.id].output;
-                // }
-
                 var set_metadata = await Graph.getUserFileMetadata(set_rid, request.auth.credentials.user.rid);
                 var set_files = await Graph.getSetFiles(set_rid, request.auth.credentials.user.rid, {limit: 10000});
+                const behaviour = Graph.resolveTaskBehaviour(service, task)
 
                 // in many-to-one outputs we do not create process nodes for each file 
-                if(!service.external_tasks && service.tasks[task.id].output == 'many-to-one') {
-                    var processNode = await Graph.createManyToOneProcessNode(task_name, service, request.payload, set_metadata)
+                if(!service.external_tasks && behaviour === 'many-to-one') {
+                    const isSearchOutput = Graph.isSearchOutputTask(service, task)
+                    const dispatchGroups = await resolveManyToOneDispatchGroups(service, task, set_files.files, isSearchOutput);
+                    var processNode = await Graph.createManyToOneProcessNode(task_name, service, task, set_metadata)
                     const outputSetNode = await Graph.createProcessSetNode(processNode['@rid'], {
                         input_set: set_rid,
                         label: `${task.name || task.id} output`,
                         project_rid: set_metadata.project_rid,
+                        search_output: isSearchOutput,
                     })
                     await Graph.initBatchProcess(processNode['@rid'], {
                         topic: topic,
                         task_id: task.id,
                         input_set: set_rid,
-                        output_set: outputSetNode['@rid'],
+                        output_set: outputSetNode?.['@rid'] || null,
                         total_files: set_files.files.length,
+                        search_output: isSearchOutput,
                     });
                     // add node to UI
                     var wsdata = {command: 'add', type: 'process', input: set_rid, node:processNode, output: outputSetNode};
                     userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
 
-                    var set_type = ''
-                    if(set_files.files.length > 0) {
-                        set_type = set_files.files[0].type;
+                    if(set_files.files.length === 0) {
+                        throw Boom.badRequest('Set has no files to process');
                     }
-                    if(set_type.includes('json') || set_type == 'csv') {
-                        console.log('just one request');
 
-                        var file_metadata = await Graph.getUserFileMetadata(set_files.files[0]['@rid'], request.auth.credentials.user.rid);
-                        msg.file = file_metadata;
-                        msg.process = processNode;
-                        msg.input_set = set_rid;  // processing endpoint should ask all files at once as a zip file
-                        msg.output_set = outputSetNode['@rid'];
-             
-                        msg.output = service.tasks[task.id].output;
-                        msg.set_process = processNode['@rid'];
-                        msg.total_files = set_files.files.length;
-                   
-                        msg.userId = request.auth.credentials.user.rid;
-                        nats.publish(topic + '_batch', JSON.stringify(msg));
+                    console.log('many-to-one batch dispatch');
+                    await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
 
-                    } else {
-                        console.log('many-to-one grouped output');
-                        const groupedFiles = await Graph.groupFilesByRootSource(set_files.files, {
-                            boundary: 'pdf',
-                            excludeRootTypes: ['zip'],
-                        });
+                    const batchTotalFiles = set_files.files.length;
+                    let batchIndex = 1;
 
-                        let batchFileCount = 1;
-                        for(const group of groupedFiles) {
-                            const output_uuid = randomUUID()
-                            let groupFileCount = 1
-                            const orderedGroupFiles = sortFilesByFilename(group.files)
-                            for(const file of orderedGroupFiles) {
-                            var file_metadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
-    
-                            // do we need info about "parent" file? (when processing osd.json for example)
+                    for(const group of dispatchGroups) {
+                        const groupFiles = Array.isArray(group?.files) ? group.files : [];
+                        const groupSize = groupFiles.length;
+                        let groupIndex = 1;
+
+                        for(const file of groupFiles) {
+                            const fileMetadata = await Graph.getUserFileMetadata(file['@rid'], request.auth.credentials.user.rid);
+
+                            msg.process = processNode;
+                            msg.project_rid = set_metadata.project_rid;
+                            msg.set_rid = set_rid;
+                            msg.input_set = set_rid;
+                            msg.output_set = outputSetNode['@rid'];
+                            msg.behaviour = behaviour;
+                            msg.set_process = processNode['@rid'];
+                            // Group counters are per combine run; batch counters track overall progress.
+                            msg.total_files = groupSize;
+                            msg.current_file = groupIndex;
+                            msg.batch_total_files = batchTotalFiles;
+                            msg.batch_current_file = batchIndex;
+                            msg.userId = request.auth.credentials.user.rid;
+                            msg.file = fileMetadata;
+
+                            if(group?.source_rid) {
+                                msg.root_source = {
+                                    '@rid': group.source_rid,
+                                    label: group.label || null,
+                                    type: group.type || null,
+                                    path: group.path || null,
+                                };
+                                msg.root_source_rid = group.source_rid;
+                                msg.root_source_label = group.label || null;
+                                msg.group_size = groupSize;
+                            } else {
+                                delete msg.root_source;
+                                delete msg.root_source_rid;
+                                delete msg.root_source_label;
+                                delete msg.group_size;
+                            }
+
+                            if(isSearchOutput) {
+                                msg.search_output = true;
+                                msg.search_source_set = set_rid;
+                            }
+
                             if(service.tasks[task.id]?.source == 'source_file') {
+                                delete msg.source;
                                 const source = await Graph.getFileSource(file['@rid']);
-                                console.log('source: ', source);
                                 if(source) {
-                                    const source_metadata = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
-                                    msg.source = source_metadata;
+                                    msg.source = await Graph.getUserFileMetadata(source['@rid'], request.auth.credentials.user.rid);
                                 }
                             }
-    
-                            await media.writeJSON(request.payload, 'params.json', path.join(path.dirname(processNode.path)));
-    
-                            msg.process = processNode;
-                            msg.output_uuid = output_uuid // we need this to identify the output file in processing endpoint
-                            msg.output = service.tasks[task.id].output
-                            msg.file = file_metadata;
-                            msg.output_set = outputSetNode['@rid'];
-                            msg.root_source = {
-                                '@rid': group.source_rid,
-                                label: group.label,
-                                type: group.type,
-                                path: group.path,
-                            }
-                            msg.set_process = processNode['@rid'];
-                            // per-group counters for many-to-one combine behavior
-                            msg.total_files = group.files.length;
-                            msg.current_file = groupFileCount;
-                            // aggregated counters for backend progress tracking
-                            msg.batch_total_files = set_files.files.length;
-                            msg.batch_current_file = batchFileCount;
-                            msg.userId = request.auth.credentials.user.rid;
-                            nats.publish(topic + '_batch', JSON.stringify(msg));
-    
-                            groupFileCount += 1;
-                            batchFileCount += 1;
-                            }
+
+                            queue.publish(topic + '_batch', JSON.stringify(msg));
+                            groupIndex += 1;
+                            batchIndex += 1;
                         }
                     }
 
@@ -514,6 +834,7 @@ export default [
                         task,
                         files: set_files.files,
                         setProcessRid: nodes.process['@rid'],
+                        inputSetRid: set_rid,
                         outputSetRid: nodes.set['@rid'],
                         userRid: request.auth.credentials.user.rid,
                         totalFiles: set_files.files.length,
@@ -596,7 +917,7 @@ export default [
                     output_set: setNode['@rid']  // link file to output Set
                 }
                 //console.log('msg: ', msg);
-                nats.publish(topic + '_batch', JSON.stringify(msg));
+                queue.publish(topic + '_batch', JSON.stringify(msg));
 
                 return source_rid;
 

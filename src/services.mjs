@@ -2,9 +2,225 @@ import path from 'path';
 import fs from 'fs';
 
 import nomad from './nomad.mjs';
+import { DATA_DIR } from './env.mjs';
 //const queue = require('./queue.js');
 
 const services = {service_list: {}}
+services.registry_file_path = process.env.SERVICE_REGISTRY_PATH || path.join(DATA_DIR, 'service-registry.json')
+
+const ALLOWED_BEHAVIOURS = ['one-to-one', 'one-to-many', 'many-to-one']
+// The 4 tool categories from docs/help/3.tools.md; services without a valid value show as "Uncategorized" in the UI.
+// 'system' is a 5th category for internal-only services that are never listed in the crunchers UI.
+const ALLOWED_CATEGORIES = ['preparation', 'linguistic', 'ml', 'generative', 'system']
+
+function nowIso() {
+	return new Date().toISOString()
+}
+
+function ensureRegistrationMetadata(service, source = 'runtime') {
+	const current = service.registration || {}
+	return {
+		source,
+		registered_at: current.registered_at || current.last_seen || nowIso(),
+		last_seen: nowIso()
+	}
+}
+
+function mergeServiceWithDescriptor(existing = {}, descriptor = {}, source = 'runtime') {
+	const merged = {
+		...(existing || {}),
+		...(descriptor || {}),
+		consumers: Array.isArray(existing?.consumers) ? existing.consumers : []
+	}
+
+	if(existing?.path && !descriptor.path) merged.path = existing.path
+	if(existing?.nomad_hcl && !descriptor.nomad_hcl) merged.nomad_hcl = existing.nomad_hcl
+	if(existing?.nomad !== undefined && descriptor.nomad === undefined) merged.nomad = existing.nomad
+	if(existing?.url && !descriptor.url) merged.url = existing.url
+
+	merged.registration = ensureRegistrationMetadata(merged, source)
+
+	return merged
+}
+
+async function ensureRegistryDirectoryExists(filePath) {
+	const dir = path.dirname(filePath)
+	await fs.promises.mkdir(dir, { recursive: true })
+}
+
+async function readRegistryFile(filePath) {
+	try {
+		const content = await fs.promises.readFile(filePath, 'utf-8')
+		const parsed = JSON.parse(content)
+		if(!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { version: 1, services: {} }
+		if(!parsed.services || typeof parsed.services !== 'object' || Array.isArray(parsed.services)) {
+			return { version: 1, services: {} }
+		}
+		return parsed
+	} catch(error) {
+		if(error.code === 'ENOENT') {
+			return { version: 1, services: {} }
+		}
+		throw error
+	}
+}
+
+async function writeRegistryFile(filePath, data) {
+	await ensureRegistryDirectoryExists(filePath)
+	await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8')
+}
+
+function registryEntriesToServiceMap(registryData) {
+	const result = {}
+	const entries = registryData?.services || {}
+	for(const [serviceId, entry] of Object.entries(entries)) {
+		if(!entry || typeof entry !== 'object') continue
+		const descriptor = entry.descriptor || {}
+		if(!descriptor.id) continue
+		result[serviceId] = {
+			...descriptor,
+			registration: {
+				source: entry.source || 'registry',
+				registered_at: entry.registered_at || entry.last_seen || nowIso(),
+				last_seen: entry.last_seen || entry.registered_at || nowIso()
+			}
+		}
+	}
+	return result
+}
+
+function serviceMapToRegistryEntries(serviceMap) {
+	const entries = {}
+	for(const [serviceId, service] of Object.entries(serviceMap || {})) {
+		if(!service || typeof service !== 'object') continue
+		const {
+			consumers,
+			path: _path,
+			nomad_hcl,
+			url,
+			registration,
+			...descriptor
+		} = service
+		// Preserve Nomad spec for UI-installed services so start/stop survives restarts.
+		// Disk services keep their nomad.hcl on disk, so we do not duplicate it here.
+		if(service.kind && typeof nomad_hcl === 'string' && nomad_hcl.trim().length > 0) {
+			descriptor.nomad_hcl = nomad_hcl
+		}
+		entries[serviceId] = {
+			source: registration?.source || 'runtime',
+			registered_at: registration?.registered_at || nowIso(),
+			last_seen: registration?.last_seen || nowIso(),
+			descriptor
+		}
+	}
+	return entries
+}
+
+function overlayRegistryServices(baseServices = {}, registryServices = {}) {
+	const merged = { ...baseServices }
+	for(const [serviceId, registryService] of Object.entries(registryServices)) {
+		const existing = merged[serviceId] || {}
+		merged[serviceId] = mergeServiceWithDescriptor(existing, registryService, registryService?.registration?.source || 'registry')
+	}
+	return merged
+}
+
+function createValidationError(message) {
+	const error = new Error(message)
+	error.statusCode = 400
+	return error
+}
+
+function asStringArray(value, fieldName) {
+	if(value === undefined) return undefined
+	if(!Array.isArray(value)) {
+		throw createValidationError(`${fieldName} must be an array`)
+	}
+	return value.map((v) => String(v).toLowerCase())
+}
+
+function normalizeTaskDescriptor(serviceDescriptor, taskName, taskValue) {
+	if(!taskValue || typeof taskValue !== 'object' || Array.isArray(taskValue)) {
+		throw createValidationError(`tasks.${taskName} must be an object`)
+	}
+
+	if(taskValue.behaviour !== undefined && !ALLOWED_BEHAVIOURS.includes(taskValue.behaviour)) {
+		throw createValidationError(`tasks.${taskName}.behaviour is invalid`)
+	}
+
+	const behaviour = resolveTaskBehaviour(serviceDescriptor, taskName, taskValue)
+	if(!ALLOWED_BEHAVIOURS.includes(behaviour)) {
+		throw createValidationError(`tasks.${taskName}.behaviour is invalid`)
+	}
+
+	const normalizedTask = {
+		...taskValue,
+		behaviour
+	}
+
+	const supportedTypes = asStringArray(taskValue.supported_types, `tasks.${taskName}.supported_types`)
+	if(supportedTypes !== undefined) {
+		normalizedTask.supported_types = supportedTypes
+	}
+
+	const supportedFormats = asStringArray(taskValue.supported_formats, `tasks.${taskName}.supported_formats`)
+	if(supportedFormats !== undefined) {
+		normalizedTask.supported_formats = supportedFormats
+	}
+
+	return normalizedTask
+}
+
+function normalizeServiceDescriptor(rawDescriptor = {}) {
+	if(!rawDescriptor || typeof rawDescriptor !== 'object' || Array.isArray(rawDescriptor)) {
+		throw createValidationError('service descriptor must be an object')
+	}
+
+	if(!rawDescriptor.id || typeof rawDescriptor.id !== 'string') {
+		throw createValidationError('service descriptor id is required')
+	}
+
+	const id = rawDescriptor.id.trim()
+	if(id.length === 0) {
+		throw createValidationError('service descriptor id must not be empty')
+	}
+
+	if(rawDescriptor.tasks !== undefined && (typeof rawDescriptor.tasks !== 'object' || Array.isArray(rawDescriptor.tasks))) {
+		throw createValidationError('tasks must be an object when provided')
+	}
+
+	const normalizedDescriptor = {
+		...rawDescriptor,
+		id
+	}
+
+	const supportedTypes = asStringArray(rawDescriptor.supported_types, 'supported_types')
+	if(supportedTypes !== undefined) {
+		normalizedDescriptor.supported_types = supportedTypes
+	}
+
+	const supportedFormats = asStringArray(rawDescriptor.supported_formats, 'supported_formats')
+	if(supportedFormats !== undefined) {
+		normalizedDescriptor.supported_formats = supportedFormats
+	}
+
+	const serviceBehaviour = rawDescriptor.behaviour
+	if(serviceBehaviour !== undefined && !ALLOWED_BEHAVIOURS.includes(serviceBehaviour)) {
+		throw createValidationError('behaviour is invalid')
+	}
+
+	if(rawDescriptor.category !== undefined && !ALLOWED_CATEGORIES.includes(rawDescriptor.category)) {
+		throw createValidationError(`category is invalid, must be one of: ${ALLOWED_CATEGORIES.join(', ')}`)
+	}
+
+	const tasks = rawDescriptor.tasks || {}
+	normalizedDescriptor.tasks = {}
+	for(const [taskName, taskValue] of Object.entries(tasks)) {
+		normalizedDescriptor.tasks[taskName] = normalizeTaskDescriptor(normalizedDescriptor, taskName, taskValue)
+	}
+
+	return normalizedDescriptor
+}
 
 function filterTask(filter, task) {
 	// When filter is provided, we return only tasks that has that filter that matches to query filter
@@ -22,6 +238,15 @@ function filterTask(filter, task) {
 	return false
 }
 
+function resolveTaskBehaviour(service, taskId, task = {}) {
+	const taskDef = service?.tasks?.[taskId] || task || {}
+	const explicit = task?.behaviour || taskDef?.behaviour || service?.behaviour
+	if(['one-to-one', 'one-to-many', 'many-to-one'].includes(explicit)) {
+		return explicit
+	}
+	return 'one-to-one'
+}
+
 
 
 function checkService(array, service) {
@@ -33,60 +258,63 @@ function checkService(array, service) {
 	}
 }
 
-services.loadServiceAdapters = async function (service_path = 'services', nomad_bool = false) {
-	const directoryPath = service_path
-	try {
-		// Create an object to store the results
-		const servicesObject = {};
+services.loadServiceAdapters = async function (service_path = null, nomad_bool = false) {
+	// Descriptors come from the persisted registry and runtime registrations.
+	// The legacy on-disk `services/` directory is obsolete and no longer read by
+	// default; a directory is only scanned when an explicit, existing path is given.
+	const servicesObject = {};
 
-		// Read the subdirectories in the specified directory
-		const subdirectories = await fs.promises.readdir(directoryPath, { withFileTypes: true })
-			.then(entries => entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
+	if (service_path) {
+		try {
+			// Read the subdirectories in the specified directory
+			const subdirectories = await fs.promises.readdir(service_path, { withFileTypes: true })
+				.then(entries => entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
 
-		// Loop through each subdirectory
-		for (const subdirectory of subdirectories) {
-			// Get the path to the JSON file in the subdirectory
-			const filePath = path.join(directoryPath, subdirectory)
+			// Loop through each subdirectory
+			for (const subdirectory of subdirectories) {
+				// Get the path to the JSON file in the subdirectory
+				const filePath = path.join(service_path, subdirectory)
 
-			try {
-				// Read the content of the JSON file
-				const fileContent = await fs.promises.readFile(path.join(filePath, 'service.json'), 'utf-8');
-
-				// Parse the JSON content
-				const jsonData = JSON.parse(fileContent);
-				jsonData['path'] = filePath
-				jsonData['consumers'] = []
-
-				// mark nomad services
 				try {
-					const nomadFile = await fs.promises.readFile(path.join(filePath, 'nomad.hcl'), 'utf-8');
-					if(nomadFile) {
-						jsonData['nomad'] = true
-						jsonData['nomad_hcl'] = nomadFile
+					// Read the content of the JSON file
+					const fileContent = await fs.promises.readFile(path.join(filePath, 'service.json'), 'utf-8');
+
+					// Parse the JSON content
+					const jsonData = JSON.parse(fileContent);
+					jsonData['path'] = filePath
+					jsonData['consumers'] = []
+
+					// mark nomad services
+					try {
+						const nomadFile = await fs.promises.readFile(path.join(filePath, 'nomad.hcl'), 'utf-8');
+						if(nomadFile) {
+							jsonData['nomad'] = true
+							jsonData['nomad_hcl'] = nomadFile
+						}
+						else jsonData['nomad'] = false
+
+					} catch(e) {
+						//console.error(`Error reading nomad.hcl file in ${subdirectory}: ${e.message}`);
 					}
-					else jsonData['nomad'] = false
 
-				} catch(e) {
-					//console.error(`Error reading nomad.hcl file in ${subdirectory}: ${e.message}`);
+					// Add the data to the result object with the subdirectory name as the key
+					servicesObject[subdirectory] = jsonData;
+				} catch (error) {
+					console.error(`Error reading or parsing JSON file in ${subdirectory}: ${error.message}`);
 				}
-
-				// Add the data to the result object with the subdirectory name as the key
-				servicesObject[subdirectory] = jsonData;
-			} catch (error) {
-				console.error(`Error reading or parsing JSON file in ${subdirectory}: ${error.message}`);
 			}
-
-
+		} catch (error) {
+			if (error.code !== 'ENOENT') throw error;
+			// Directory does not exist: fall back to registry-only service list.
 		}
-
-		this.service_list = await markRegisteredAdapter(servicesObject, nomad_bool)
-
-		return this.service_list
-
-	} catch (error) {
-		console.error(`Error reading subdirectories: ${error.message}`);
-		throw error;
 	}
+
+	const fileServices = await markRegisteredAdapter(servicesObject, nomad_bool)
+	const registryData = await readRegistryFile(this.registry_file_path)
+	const registryServices = registryEntriesToServiceMap(registryData)
+	this.service_list = overlayRegistryServices(fileServices, registryServices)
+
+	return this.service_list
 }
 
 services.getParamsHelp = async function(service, task, param) {
@@ -116,6 +344,68 @@ services.getService = function (service) {
 	return this.service_list[service]
 }
 
+services.registerServiceDescriptor = function (rawDescriptor, options = {}) {
+	const descriptor = normalizeServiceDescriptor(rawDescriptor)
+	const source = options.source || 'runtime'
+	const existing = this.service_list[descriptor.id]
+	const merged = mergeServiceWithDescriptor(existing, descriptor, source)
+
+	this.service_list[descriptor.id] = merged
+
+	return {
+		status: existing ? 'updated' : 'created',
+		service: merged
+	}
+}
+
+services.setRegistryFilePath = function(filePath) {
+	this.registry_file_path = filePath
+}
+
+services.loadServiceRegistry = async function() {
+	const registryData = await readRegistryFile(this.registry_file_path)
+	return registryEntriesToServiceMap(registryData)
+}
+
+services.persistServiceRegistry = async function() {
+	const data = {
+		version: 1,
+		services: serviceMapToRegistryEntries(this.service_list)
+	}
+	await writeRegistryFile(this.registry_file_path, data)
+	return data
+}
+
+services.registerServiceDescriptorAndPersist = async function(rawDescriptor, options = {}) {
+	const response = this.registerServiceDescriptor(rawDescriptor, options)
+	await this.persistServiceRegistry()
+	return response
+}
+
+services.forgetService = async function(serviceId) {
+	const id = String(serviceId || '').trim()
+	if(!id) {
+		return { status: 'not_found', service: id }
+	}
+
+	// The map key (registry key) can differ from the descriptor id for legacy
+	// entries, so match on either to find the entry to remove.
+	let keyToDelete = this.service_list[id] ? id : null
+	if(!keyToDelete) {
+		for(const [key, svc] of Object.entries(this.service_list)) {
+			if(svc && svc.id === id) { keyToDelete = key; break }
+		}
+	}
+
+	if(!keyToDelete) {
+		return { status: 'not_found', service: id }
+	}
+
+	delete this.service_list[keyToDelete]
+	await this.persistServiceRegistry()
+	return { status: 'forgotten', service: keyToDelete }
+}
+
 services.getServicesForNode = async function(node, filter, user, prompts) {
 
 	// we first check supporter types (internal types)
@@ -125,7 +415,33 @@ services.getServicesForNode = async function(node, filter, user, prompts) {
 	const matches = {for_type: [], for_format: []}
 	if(!node) return matches
 
+	// If node is explicitly marked as not processable, only offer the PDF splitter.
+	const isUnprocessable = node.processable === false
+
 	for(var service in this.service_list) {
+
+		// System services are internal-only and must never be offered in the crunchers UI.
+		if(this.service_list[service].category === 'system') continue
+
+		// md-thumbnailer is a reserved topic driving automatic thumbnail generation only,
+		// never a user-selectable cruncher (see queue.mjs/processFilesController.mjs).
+		if(service === 'md-thumbnailer') continue
+
+		// When unprocessable, only allow md-pypdf_fs split task
+		if(isUnprocessable) {
+			if(service !== 'md-pypdf_fs') continue
+			if(this.service_list[service].consumers.length > 0) {
+				const splitOnly = JSON.parse(JSON.stringify(this.service_list[service]))
+				splitOnly.tasks = {}
+				if(this.service_list[service].tasks?.split) {
+					splitOnly.tasks.split = this.service_list[service].tasks.split
+				}
+				if(Object.keys(splitOnly.tasks).length > 0) {
+					matches.for_format.push(splitOnly)
+				}
+			}
+			continue
+		}
 
 		
 		// for Sets we compare only extensions
@@ -192,55 +508,57 @@ function pickTasks(service, extensions, types, filter, user, prompts, node_type)
 	}
 
 	for(var task in service.tasks) {
+		const taskConfig = service.tasks[task]
+		const behaviour = resolveTaskBehaviour(service, task, taskConfig)
 
 		// task can be disabled/enabled by service_groups
-		if(service.tasks[task].service_groups) {
-			if(!service.tasks[task].service_groups.some(value => user.service_groups.includes(value))) {
+		if(taskConfig.service_groups) {
+			if(!taskConfig.service_groups.some(value => user.service_groups.includes(value))) {
 				continue
 			}
 		}
 		
 		// task can be disabled for Sets
 		if(node_type == 'Set') {
-			if(service.tasks[task].set_disabled) {
+			if(taskConfig.set_disabled) {
 				continue
 			}
 		}
 
-		// task can be disabled for individual files
-		if(node_type == 'text' || node_type == 'pdf' || node_type == 'image' || node_type == 'json' ) {
-			if(service.tasks[task].set_only) {
+		// many-to-one tasks require Set inputs; legacy set_only keeps old behavior intact.
+		if(node_type !== 'Set') {
+			if(taskConfig.set_only || behaviour === 'many-to-one') {
 				continue
 			}
 		}
 		
 		// if task has its own supported types then compare to node type (NOT @type!)
-		if(service.tasks[task].supported_types && service.tasks[task].supported_types.length > 0) {
-			console.log('supported types: ', service.tasks[task].supported_types)
+		if(taskConfig.supported_types && taskConfig.supported_types.length > 0) {
+			console.log('supported types: ', taskConfig.supported_types)
 			console.log('types: ', types)
-			if(service.tasks[task].supported_types.some(value => types.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+			if(taskConfig.supported_types.some(value => types.includes(value))) {
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		// if task has its own supported formats then compare to file extension
-		} else if(service.tasks[task].supported_formats && service.tasks[task].supported_formats.length > 0) {
-			if(service.tasks[task].supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+		} else if(taskConfig.supported_formats && taskConfig.supported_formats.length > 0) {
+			if(taskConfig.supported_formats.some(value => extensions.includes(value))) {
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		
 
 		// otherwise compare file extension to service's supported formats
 		} else if(service.supported_types && service.supported_types.length > 0) {
 			if(service.supported_types.some(value => types.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 			
 		} else if(service.supported_formats && service.supported_formats.length > 0) {
 			if(service.supported_formats.some(value => extensions.includes(value))) {
-				if(filterTask(filter, service.tasks[task]))
-					service_object.tasks[task] = service.tasks[task]
+				if(filterTask(filter, taskConfig))
+					service_object.tasks[task] = taskConfig
 			}
 		}
 		
@@ -338,6 +656,11 @@ services.getServiceAdapterByName = function(name) {
 	} else {
 		throw(`Service adapter not found for service "${name}"`)
 	}
+}
+
+services.hasActiveConsumer = function(serviceId) {
+	const service = this.service_list[serviceId]
+	return Boolean(service && service.consumers && service.consumers.length > 0)
 }
 
 

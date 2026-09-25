@@ -3,11 +3,11 @@ import Graph from '../graph.mjs';
 import nomad from '../nomad.mjs';
 import services from '../services.mjs';
 import db from '../db.mjs';
-import nats from '../queue.mjs';
 import logger from '../logger.mjs';
 import media from '../media.mjs';
 
 import path from 'path';
+import Boom from '@hapi/boom';
 
 import { processFilesHandler, processFilesFromTmpHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
@@ -26,11 +26,34 @@ export default [
         method: 'POST', 
         path: '/api/nomad/service/{name}',
         handler: async (request, h) => {
+            if (request.auth?.credentials?.user?.access !== 'admin') {
+                throw Boom.forbidden('Admin access required');
+            }
             console.log('POST /api/nomad/service/{name}');
             console.log(request.params.name);
-            const adapter = await services.getServiceAdapterByName(request.params.name);
+            const hclOverride = request.payload?.nomad_hcl;
+
+            let adapter = null;
             try {
-                const service = await nomad.createService(adapter);
+                adapter = await services.getServiceAdapterByName(request.params.name);
+            } catch (e) {
+                adapter = null;
+            }
+
+            const serviceConfig = adapter ? { ...adapter } : { id: request.params.name };
+            if (typeof hclOverride === 'string' && hclOverride.trim().length > 0) {
+                serviceConfig.nomad_hcl = hclOverride;
+                serviceConfig.nomad = true;
+            }
+
+            if (!serviceConfig.nomad_hcl) {
+                return h.response({
+                    error: `No Nomad spec found for service "${request.params.name}"`,
+                    message: 'Provide request payload field "nomad_hcl" or register service adapter with nomad_hcl.'
+                }).code(400);
+            }
+            try {
+                const service = await nomad.createService(serviceConfig);
                 return service;
             } catch(e) {
                 logger.error('Error creating service', { error: e });
@@ -42,6 +65,9 @@ export default [
         method: 'DELETE',
         path: '/api/nomad/service/{name}',
         handler: async (request, h) => {
+            if (request.auth?.credentials?.user?.access !== 'admin') {
+                throw Boom.forbidden('Admin access required');
+            }
             const adapter = await services.getServiceAdapterByName(request.params.name);
             try {
                 const service = await nomad.stopService(adapter);
@@ -199,11 +225,52 @@ export default [
                 if(message?.output_set) {
                     const wsdata = {
                         command: 'process_finished',
-                        process: message.process,
+                        process: { ...message.process, status: 'done' },
                         metadata: message.file.metadata,
                         paths: message.paths
                     };
                     await userManager.sendToUser(message.userId, wsdata);
+                }
+
+                if(message?.set_process) {
+                    const processRid = Graph.sanitizeRID(message.set_process);
+                    const totalFiles = Number(message?.total_files || message?.batch_total_files || 0);
+                    const currentFile = Number(message?.current_file || 0);
+
+                    let batch = null;
+                    if(totalFiles > 0 && currentFile > 0) {
+                        batch = await Graph.incrementBatchProcessed(
+                            processRid,
+                            Number(message?.response?.time || 0),
+                            totalFiles
+                        );
+                    }
+
+                    if(message?.summary) {
+                        const processNode = await Graph.getBatchProcess(processRid);
+                        if(processNode) {
+                            const processType = processNode['@type'] || 'Process';
+                            await Graph.setNodeAttribute_old(processNode['@rid'], {
+                                key: 'summary',
+                                value: message.summary,
+                            }, processType);
+                        }
+                    }
+
+                    const batchStatus = batch?.status || batch?.state;
+                    const isDone = batchStatus === 'done' || (totalFiles > 0 && currentFile >= totalFiles);
+                    if(isDone) {
+                        const wsdata = {
+                            command: 'process_finished',
+                            process: {
+                                ...(message.process || {'@rid': processRid}),
+                                '@rid': processRid,
+                                status: 'done',
+                            },
+                            summary: message.summary || null,
+                        };
+                        await userManager.sendToUser(message.userId, wsdata);
+                    }
                 }
 
             }

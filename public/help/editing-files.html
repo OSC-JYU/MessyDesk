@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - Correcting outputs</title>
+  <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a class="active" href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>Correcting outputs</h1>
+<p>Let&#39;s take an example: You detected text from images and the result is almost right. Then it is sensible to fix that error.
+But if you modify the result of optical character recognition, then we do not know anymore what was the machine product and what was corrected.</p>
+<p>Solution: make a new version.</p>
+<p>MessyDesk does not edit files in place without provenance. Instead, create a corrected version so it stays clear what was machine output and what was user-corrected.</p>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>The corrected version becomes the current version used in further processing.</p></div><p>You can revert back to the original; because current versioning is single-step, that edited version is then permanently lost.</p>
+<p>Current behavior:</p>
+<ul>
+<li>Text-like files (<code>text</code>, <code>html</code>, <code>json</code>, <code>csv</code>, and <code>*.json</code>) can be edited from the UI and saved as an edited version.</li>
+<li>Image files can be rotated in the UI and saved as an edited version.</li>
+<li>Save writes the current file to <code>&lt;path&gt;.original</code> (single backup slot) and replaces the current file content.</li>
+<li>Revert restores <code>&lt;path&gt;.original</code> and clears edited metadata.</li>
+<li>Text payloads are size-limited by <code>MAX_VERSION_TEXT_BYTES</code> (default 10 MB).</li>
+</ul>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>only one backup version is kept (<code>.original</code>). A new save overwrites the previous backup.</p></div>
+    </article>
+  </main>
+</body>
+</html>
