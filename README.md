@@ -1,30 +1,34 @@
 # MessyDesk
 
-## Digital Humanities Desktop
+Digital humanities desktop for collecting, organising and processing research materials.
 
-This is a VERY early version of MessyDesk, a digital humanities desktop (for humanists).
+**No release yet — this is under active development.** Interfaces, data formats and APIs can change without notice.
 
-The idea is that you can collect, organise and process your materials easily by experimenting with different kind of options.
+![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/docs/crunchers.png)
 
+## What it does
 
-![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/docs/messydesk-ui-close.png)
+- Extract images and text from PDF
+- Process images
+- Run OCR
+- Run text/image analysis tasks
+- Chain these into pipelines ("crunchers")
 
-Things you can do:
-- extract images and text from PDF
-- process images
-- do optical character recognition
-- do different kind of text and images analysis
-- and so on... 
+## How it works
 
-### status
+MessyDesk is a backend + UI for running processing tasks against pluggable services ("crunchers"). Services can run locally, in a Nomad cluster, or externally, and are connected via **service adapters** that translate MessyDesk requests into whatever API a given service exposes.
 
-Development in progress.
+Tools are grouped into four categories, from fully manual to AI-based, so it's clear how each result was produced:
+- **Preparation & annotation** — manual/deterministic (tagging, cropping, simple OCR, search)
+- **Linguistic & statistical analysis** — deterministic NLP (topic modelling, POS, frequency/similarity analysis)
+- **Task-specific machine learning** — trained non-LLM models (HTR, advanced OCR, NER, PII detection, classification, translation)
+- **Generative AI** — LLM/VLM-based (OCR/HTR, classification, summarisation, Q&A, metadata generation)
 
-### Help And Tutorial Pages
+See `wiki/` for architecture details and `docs/help/*.md` for user-facing help content.
 
-Help content lives in `docs/help/*.md` and is converted to HTML for the UI/backend help endpoint.
+## Help pages
 
-Help images should be stored in `docs/images`. In help markdown, you can reference image files by bare filename (for example `![Diagram](input_output.png)`), and the build will resolve them automatically.
+Help markdown lives in `docs/help/*.md`; images go in `docs/images` and can be referenced by bare filename (e.g. `![Diagram](input_output.png)`).
 
 Build help pages with:
 
@@ -32,19 +36,7 @@ Build help pages with:
 npm run build:help
 ```
 
-Generated files are written to `public/help` and served by `GET /api/help/{slug?}`.
-
-
-### How does it work?
-
-MessyDesk provides intuitive user interface for rapid testing of different kind of services. Services run locally, in nomad cluster or externally. 
-
-### Service adapters
-
-Service adapters are links between MessyDesk backend and services. They translates requests from MessyDesk to the API that service implements. 
-
-
-
+Generated output is written to `public/help` and served by `GET /api/help/{slug?}`.
 
 
 

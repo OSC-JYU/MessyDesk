@@ -34,5 +34,5 @@ The system is now up but it is totally useless without any services.
 
 ## 4. Services
 
-Each service needs adapter  that connects it to MessyDesk. see []()
+Each service needs adapter  that connects it to MessyDesk. see [MD-consumers](https://github.com/OSC-JYU/MD-consumers)
 
