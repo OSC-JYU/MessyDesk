@@ -46,7 +46,7 @@ describe('Graph.createTagFilterSet', () => {
             if (query.includes('FROM Entity WHERE owner')) {
                 return { result: [{ rid: '#31:2', label: 'Alice' }, { rid: '#31:7', label: 'Helsinki' }] };
             }
-            if (query.includes('MATCH {type:File, as:file, where:(set = "#12:1")}-HAS_ENTITY')) {
+            if (query.includes('FROM TagLink WHERE target_rid') && query.includes('entity_rid IN')) {
                 return {
                     result: [
                         { file_rid: '#50:1', entity_rid: '#31:2' },
@@ -131,7 +131,7 @@ describe('Graph.createTagFilterSet', () => {
             if (query.includes('FROM Entity WHERE owner')) {
                 return { result: [{ rid: '#31:2', label: 'Alice' }, { rid: '#31:7', label: 'Helsinki' }] };
             }
-            if (query.includes('MATCH {type:File, as:file, where:(set = "#12:1")}-HAS_ENTITY')) {
+            if (query.includes('FROM TagLink WHERE target_rid') && query.includes('entity_rid IN')) {
                 return {
                     result: [
                         { file_rid: '#50:1', entity_rid: '#31:2' },
@@ -212,7 +212,7 @@ describe('Graph.createTagFilterSet', () => {
             if (query.includes('FROM Entity WHERE owner')) {
                 return { result: [{ rid: '#31:2', label: 'Alice' }] };
             }
-            if (query.includes('MATCH {type:File, as:file, where:(set = "#12:1")}-HAS_ENTITY->{type:Entity')) {
+            if (query.includes('FROM TagLink WHERE target_rid') && query.includes('entity_rid IN')) {
                 return {
                     result: [
                         { file_rid: '#50:1', entity_rid: '#31:2' },
@@ -288,8 +288,8 @@ describe('Graph.createTagFilterSet', () => {
             if (query.startsWith('SELECT @rid AS rid FROM File WHERE set = "#12:1"')) {
                 return { result: [{ rid: '#50:1' }, { rid: '#50:2' }, { rid: '#50:3' }] };
             }
-            if (query.includes('MATCH {type:File, as:file, where:(set = "#12:1")}-HAS_ENTITY->{type:Entity, as:entity, where:(owner = "#2:99")}')) {
-                return { result: [{ file_rid: '#50:1' }, { file_rid: '#50:3' }] };
+            if (query.includes('SELECT DISTINCT target_rid FROM TagLink')) {
+                return { result: [{ target_rid: '#50:1' }, { target_rid: '#50:3' }] };
             }
             if (query.startsWith('SELECT @rid, project_rid, type, extension, label, info FROM File WHERE @rid IN [')) {
                 return {

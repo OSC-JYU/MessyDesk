@@ -43,6 +43,15 @@ async function dispatchSetFilesForReindex({service, task, files, setProcessRid, 
         }
 
         await queue.createSetProcessNodesAndPublish(msg);
+
+        // A project reindex drops and recreates every Solr doc for the project (see dropProjectIndex
+        // above), so previously-synced tag_* fields are gone until re-applied. Queue the tag resync
+        // right after the index message for the same file/topic so it processes once the fresh doc
+        // exists (see graph.mjs reindexFileTags for why this is queued, not synchronous).
+        if (task.id === 'index') {
+            await Graph.reindexFileTags(file['@rid'], userRid);
+        }
+
         fileCount += 1;
     }
 

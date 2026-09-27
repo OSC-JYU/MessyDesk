@@ -8,6 +8,8 @@ import db from "./db.mjs";
 import media from "./media.mjs";
 import solr from "./solr.mjs";
 import filters from "./filters.mjs";
+import queue from "./queue.mjs";
+import services from "./services.mjs";
 import { randomBytes } from 'crypto';
 
 import timers from 'timers-promises';
@@ -85,10 +87,12 @@ graph.initDB = async function () {
 		console.log('Database created!')
 	}
 
-	// Ensure edge types exist also for already-initialized databases
+	// Ensure edge/document types and their properties/indexes exist also for already-initialized databases
 	await db.createEdgeType('HAS_PROCESS')
 	await db.createEdgeType('DERIVED_FROM')
 	await db.createEdgeType('HAS_OWNER')
+	await db.createDocumentType('TagLink')
+	await db.ensureIndexes()
 }
 
 graph.hasAccess = async function (item_rid, user_rid) {
@@ -935,9 +939,11 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 				file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
 			}
 				// TODO: do this in one query!
-				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
-				var entity_response = await db.cypher(entity_query)
-				file.entities = entity_response.result
+				const linkResponse = await db.sql(`SELECT entity_rid FROM TagLink WHERE target_rid = "${file['@rid']}" AND region_id IS NULL`)
+				const entityRids = (linkResponse.result || []).map((row) => row.entity_rid).filter(Boolean)
+				file.entities = entityRids.length
+					? (await db.sql(`SELECT label, icon, color, @rid AS rid FROM Entity WHERE @rid IN [${entityRids.join(',')}]`)).result
+					: []
 			}
 	}
 	
@@ -1066,6 +1072,9 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 			msg.task.description = service.tasks[task.id].description
 		if(service.tasks[task.id].info && !msg.task.info)
 			msg.task.info = service.tasks[task.id].info
+		// autotag: convert this task's ner.json output straight into TagLink rows on arrival
+		if(service.tasks[task.id].autotag)
+			msg.task.autotag = true
 	}
 
 
@@ -1217,21 +1226,11 @@ graph.createTagFilterSet = async function(node_rid, user_rid, params = {}) {
 
 	let matchedFileRids = []
 	if(selectionMode === 'untagged') {
-		let taggedResponse = await db.sql(`MATCH {type:File, as:file, where:(set = "${sourceSetRid}")}-HAS_ENTITY->{type:Entity, as:entity, where:(owner = "${user_rid}")}
-			RETURN DISTINCT file.@rid AS file_rid`)
-		if(!taggedResponse.result.length) {
-			taggedResponse = await db.sql(`MATCH {type:Set, as:set, where:(@rid = ${sourceSetRid})}-HAS_ITEM->{type:File, as:file}-HAS_ENTITY->{type:Entity, as:entity, where:(owner = "${user_rid}")}
-				RETURN DISTINCT file.@rid AS file_rid`)
-		}
-		const taggedFileSet = new Set((taggedResponse.result || []).map((row) => row.file_rid).filter(Boolean))
+		const taggedResponse = await db.sql(`SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN [${allFileRids.join(',')}] AND owner = "${user_rid}"`)
+		const taggedFileSet = new Set((taggedResponse.result || []).map((row) => row.target_rid).filter(Boolean))
 		matchedFileRids = allFileRids.filter((rid) => !taggedFileSet.has(rid))
 	} else {
-		const sourceMembershipQuery = `MATCH {type:File, as:file, where:(set = "${sourceSetRid}")}-HAS_ENTITY->{type:Entity, as:entity, where:(@rid IN [${selectedEntityRids.join(',')}])} RETURN file.@rid AS file_rid, entity.@rid AS entity_rid`
-		let membershipResponse = await db.sql(sourceMembershipQuery)
-		if(!membershipResponse.result.length) {
-			const fallbackMembershipQuery = `MATCH {type:Set, as:set, where:(@rid = ${sourceSetRid})}-HAS_ITEM->{type:File, as:file}-HAS_ENTITY->{type:Entity, as:entity, where:(@rid IN [${selectedEntityRids.join(',')}])} RETURN file.@rid AS file_rid, entity.@rid AS entity_rid`
-			membershipResponse = await db.sql(fallbackMembershipQuery)
-		}
+		const membershipResponse = await db.sql(`SELECT target_rid AS file_rid, entity_rid FROM TagLink WHERE target_rid IN [${allFileRids.join(',')}] AND entity_rid IN [${selectedEntityRids.join(',')}] AND owner = "${user_rid}"`)
 		const membershipRows = membershipResponse.result || []
 
 		const fileEntities = new Map()
@@ -1782,6 +1781,111 @@ graph.getImageROIs = async function(rid, set_rid, user_rid) {
 	}
 }
 
+// ner.json regions: machine-produced, immutable. Unlike roi.json there is no upsert — every run
+// creates its own File node, so a source file can have many ner.json runs over time.
+graph.createNerRegions = async function(file_rid, set_rid, data, user_rid, meta = {}) {
+
+	if (!file_rid.match(/^#/)) file_rid = '#' + file_rid
+	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
+	const source_node = await this.getNodeAttributes(file_rid, user_rid)
+	if(!source_node) {
+		throw new Error('File not found: '+ file_rid
+		)
+	}
+	// find out source file's path by stripping filename from file path
+	var source_path = source_node.path
+	if(source_path) source_path = source_path.split('/').slice(0, -1).join('/')
+	else {
+		console.log('File path not found for node: ', source_node)
+		throw new Error('File path not found for node: '+ file_rid )
+	}
+
+	let ner = null
+	try {
+		const ner_data = {
+			type: 'ner.json',
+			extension: 'json',
+			set: set_rid,
+			project_rid: source_node?.project_rid,
+			label: `${path.basename(source_node?.label || file_rid)}.ner.json`,
+			service_id: meta.service_id || null,
+			task: meta.task || null
+		}
+		ner = await this.create('File', ner_data, null, null, true)
+		await this.connectDerivedFrom(ner['@rid'], file_rid)
+		var ner_rid = ner['@rid'].replace('#', '').replace(':', '_')
+		media.writeJSON(data, ner_rid + '.ner.json', source_path)
+		var ner_path = path.join(source_path, ner_rid + '.ner.json')
+		await this.setNodeAttribute_old(ner['@rid'], {"key": "path", "value": ner_path}, 'File')
+		await this.setNodeAttribute_old(ner['@rid'], {"key": "set", "value": set_rid}, 'File')
+	} catch (error) {
+		console.log('Error creating NER node: ', error)
+		throw new Error('Error creating NER node: '+ error.message )
+	}
+
+	return ner
+}
+
+graph.getNerRegions = async function(file_rid, user_rid) {
+	if (!file_rid.match(/^#/)) file_rid = '#' + file_rid.replace('_', ':')
+	const query = `MATCH {type:File, as:ner, where:(type = "ner.json")}-DERIVED_FROM->{type:File, where:(@rid = ${file_rid})} RETURN ner ORDER BY ner.created DESC`
+	var response = await db.sql(query)
+	const nerNodes = (response.result || []).map((row) => row.ner).filter(Boolean)
+	if(!nerNodes.length) return []
+
+	return await Promise.all(nerNodes.map(async (node) => {
+		try {
+			const parsed = await media.readJSON(node.path)
+			return {rid: node['@rid'], service_id: node.service_id, task: node.task, created: node.created, set: node.set, rois: parsed.rois || parsed}
+		} catch (error) {
+			console.log('Error reading NER JSON: ', error)
+			return {rid: node['@rid'], service_id: node.service_id, task: node.task, created: node.created, set: node.set, error: 'Error reading NER JSON: ' + error.message}
+		}
+	}))
+}
+
+// Autotag: turn a freshly-arrived ner.json into TagLink rows, one per distinct label seen in the
+// file (not per raw mention) so repeated hits of the same label don't spam the link table.
+graph.autotagNerFile = async function(nerNode, source_rid, message) {
+	if(!nerNode?.path) return []
+	let parsed
+	try {
+		parsed = await media.readJSON(nerNode.path)
+	} catch (error) {
+		console.log('autotag: could not read ner.json: ', error.message)
+		return []
+	}
+	const regions = Object.values(parsed.rois || parsed || {})
+	if(!regions.length) return []
+
+	const userRID = message.userId
+	const service_id = message.service?.id || null
+	const task = message.task?.id || null
+
+	const bestConfidenceByLabel = new Map()
+	for(const region of regions) {
+		if(!region?.label) continue
+		const current = bestConfidenceByLabel.get(region.label)
+		if(current === undefined || (region.confidence ?? 0) > current) {
+			bestConfidenceByLabel.set(region.label, region.confidence ?? null)
+		}
+	}
+
+	const linked = []
+	for(const [label, confidence] of bestConfidenceByLabel) {
+		const check = await this.checkEntity({type: 'Tag', label}, source_rid, userRID)
+		let entity_rid = check.result?.[0]?.entity?.['@rid']
+		if(!entity_rid) {
+			const created = await this.createEntity({type: 'Tag', label}, userRID)
+			entity_rid = created.result?.[0]?.['@rid']
+		}
+		if(!entity_rid) continue
+		await this.linkEntity(entity_rid, source_rid, userRID, {created_by: 'machine', service_id, task, confidence})
+		linked.push({entity_rid, label, confidence})
+	}
+	return linked
+}
+
 graph.updateFileCount = async function (set_rid) {
 	if (!set_rid.match(/^#/)) set_rid = '#' + set_rid
 
@@ -2222,6 +2326,8 @@ graph.deleteNode = async function (rid, userRID) {
 	const toDelete = new Set()
 	const solrTargets = new Set()
 	const pathTargets = new Set()
+	const nerJsonNodes = new Set()
+	const fileNodes = new Set()
 
 	const enqueueRid = (value) => {
 		if(!value) return
@@ -2245,7 +2351,7 @@ graph.deleteNode = async function (rid, userRID) {
 
 		let node = null
 		try {
-			const nodeResponse = await db.sql(`SELECT @rid, @type, path, service, ref FROM ${current}`)
+			const nodeResponse = await db.sql(`SELECT @rid, @type, path, service, ref, type AS file_type, service_id, task FROM ${current}`)
 			node = nodeResponse.result[0]
 		} catch (error) {
 			if(isNotFoundError(error)) {
@@ -2260,6 +2366,15 @@ graph.deleteNode = async function (rid, userRID) {
 
 		if(node.service === 'Solr') {
 			solrTargets.add(node['@rid'])
+		}
+
+		// ner.json is machine-tag provenance, not just an artifact file: its TagLink rows (§5) must
+		// be cleaned up too, since TagLink doesn't otherwise reference the ner.json rid.
+		if(node['@type'] === 'File' && node.file_type === 'ner.json') {
+			nerJsonNodes.add(node['@rid'])
+		}
+		if(node['@type'] === 'File') {
+			fileNodes.add(node['@rid'])
 		}
 
 		const isReferenceFile = node['@type'] === 'File' && Boolean(node.ref)
@@ -2314,6 +2429,36 @@ graph.deleteNode = async function (rid, userRID) {
 	for(const solrRid of solrTargets) {
 		console.log('deleting solr index', solrRid)
 		await solr.dropSetIndex(solrRid)
+	}
+
+	// Machine tags produced by a deleted ner.json run: TagLink stores no direct FK to the ner.json
+	// rid (region_id stays null for MVP), so look each one up via its DERIVED_FROM source instead.
+	for(const nerRid of nerJsonNodes) {
+		const sourceResponse = await db.sql(`SELECT @in AS rid FROM DERIVED_FROM WHERE @out = ${nerRid}`)
+		const sourceRid = sourceResponse.result?.[0]?.rid
+		if(!sourceRid) continue
+		const nerNodeResponse = await db.sql(`SELECT service_id, task FROM ${nerRid}`)
+		const {service_id, task} = nerNodeResponse.result?.[0] || {}
+		let cleanupQuery = `DELETE FROM TagLink WHERE target_rid = "${sourceRid}" AND created_by = "machine"`
+		if(service_id) cleanupQuery += ` AND service_id = "${service_id}"`
+		if(task) cleanupQuery += ` AND task = "${task}"`
+		await db.sql(cleanupQuery)
+		// The source file itself isn't being deleted here, so its Solr doc(s) survive with now-stale
+		// tag_* fields (\u00a74) — resync them from the TagLink rows that remain after cleanup.
+		if(!toDelete.has(sourceRid)) {
+			await this.reindexFileTags(sourceRid, userRID)
+		}
+	}
+
+	// Any file being deleted outright (not just its ner.json provenance) should drop its TagLink rows too.
+	if(toDelete.size > 0) {
+		const targetRidList = Array.from(toDelete).map((r) => `"${r}"`).join(',')
+		await db.sql(`DELETE FROM TagLink WHERE target_rid IN [${targetRidList}]`)
+	}
+
+	// Solr docs for deleted files become orphans (stale content + tag_* fields) otherwise.
+	for(const fileRid of fileNodes) {
+		await solr.dropFileIndex(fileRid)
 	}
 
 	const targets = Array.from(toDelete).map((id) => ({id}))
@@ -2791,31 +2936,41 @@ graph.getSetEntities = async function (set_rid, userRID) {
 		return []
 	}
 
-	const query = `MATCH {type:File, as:file, where:(set = "${cleanSetRid}")}-HAS_ENTITY->{type:Entity, as:entity, where:(owner = "${userRID}")}
-		RETURN entity.@rid AS rid, entity.label AS label, entity.type AS type, entity.icon AS icon, entity.color AS color, count(file) AS count
-		ORDER by count DESC, label`
-	let response = await db.sql(query)
-
-	if(!response.result.length) {
-		const fallback = `MATCH {type:Set, as:set, where:(@rid = ${cleanSetRid})}-HAS_ITEM->{type:File, as:file}-HAS_ENTITY->{type:Entity, as:entity, where:(owner = "${userRID}")}
-			RETURN entity.@rid AS rid, entity.label AS label, entity.type AS type, entity.icon AS icon, entity.color AS color, count(file) AS count
-			ORDER by count DESC, label`
-		response = await db.sql(fallback)
+	let fileResponse = await db.sql(`SELECT @rid AS rid FROM File WHERE set = "${cleanSetRid}"`)
+	if(!fileResponse.result.length) {
+		fileResponse = await db.sql(`MATCH {type:Set, as:set, where:(@rid = ${cleanSetRid})}-HAS_ITEM->{type:File, as:file} RETURN DISTINCT file.@rid AS rid`)
 	}
+	const fileRids = (fileResponse.result || []).map((row) => row.rid).filter(Boolean)
+	if(!fileRids.length) return []
 
-	return response.result || []
+	const linkResponse = await db.sql(`SELECT entity_rid, count(*) AS count FROM TagLink WHERE target_rid IN [${fileRids.join(',')}] AND region_id IS NULL AND owner = "${userRID}" GROUP BY entity_rid`)
+	const linkRows = linkResponse.result || []
+	if(!linkRows.length) return []
+
+	const entityRids = linkRows.map((row) => row.entity_rid).filter(Boolean)
+	const entityResponse = await db.sql(`SELECT @rid AS rid, label, type, icon, color FROM Entity WHERE owner = "${userRID}" AND @rid IN [${entityRids.join(',')}]`)
+	const entityMap = new Map((entityResponse.result || []).map((entity) => [entity.rid, entity]))
+
+	return linkRows
+		.map((row) => {
+			const entity = entityMap.get(row.entity_rid)
+			if(!entity) return null
+			return {rid: entity.rid, label: entity.label, type: entity.type, icon: entity.icon, color: entity.color, count: row.count}
+		})
+		.filter(Boolean)
+		.sort((a, b) => (b.count - a.count) || String(a.label).localeCompare(String(b.label)))
 }
 
 // TODO: this requires pagination
 graph.getEntityItems = async function (entities, userRID) {
 	var entities_clean = cleanRIDList(entities)
 	if(!entities_clean.length) return []
-	//var query = `select in("HAS_ENTITY") AS items, label, @rid From Entity WHERE owner = "${userRID}" AND @rid IN [${entities_clean.join(',')}]`
-	var query = `match {type:File, as:item}-HAS_ENTITY->{as:entity, where:(@rid IN [${entities_clean.join(',')}] AND owner = "${userRID}")} return  DISTINCT item.label AS label, item.info AS info, item.description AS description, item.@rid AS rid, item.path AS path, item.type AS type LIMIT 20`
-	var response = await db.sql(query)
-
-	if(!response.result.length) return []
-	var items = addThumbPaths(response.result)
+	const linkResponse = await db.sql(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid IN [${entities_clean.join(',')}] AND owner = "${userRID}" LIMIT 20`)
+	const targetRids = (linkResponse.result || []).map((row) => row.target_rid).filter(Boolean)
+	if(!targetRids.length) return []
+	const itemResponse = await db.sql(`SELECT label, info, description, @rid AS rid, path, type FROM File WHERE @rid IN [${targetRids.join(',')}]`)
+	if(!itemResponse.result.length) return []
+	var items = addThumbPaths(itemResponse.result)
 
 	return items
 }
@@ -2833,10 +2988,71 @@ graph.getEntity = async function (rid, userRID) {
 
 graph.getLinkedEntities = async function (rid, userRID) {
 	if (!rid.match(/^#/)) rid = '#' + rid
-	var query = `MATCH {type: File, as: file, where:(@rid = ${rid} )}-HAS_ENTITY->{type: Entity, as: entity, where: (owner = "${userRID}")} RETURN entity.label AS label, entity.type AS type, entity.@rid AS rid, entity.color AS color, entity.icon AS icon`
+	const linksResponse = await db.sql(`SELECT entity_rid FROM TagLink WHERE target_rid = "${rid}" AND region_id IS NULL AND owner = "${userRID}"`)
+	const entityRids = Array.from(new Set((linksResponse.result || []).map((row) => row.entity_rid).filter(Boolean)))
+	if(!entityRids.length) return []
+	const entityResponse = await db.sql(`SELECT label, type, @rid AS rid, color, icon FROM Entity WHERE owner = "${userRID}" AND @rid IN [${entityRids.join(',')}]`)
+	return entityResponse.result || []
+}
 
-	var response = await db.sql(query)
-	return response.result
+// Solr tag_* fields (§4) are sourced from TagLink, not graph edges. Called after every file-level
+// tag add/remove so Solr stays in sync; non-fatal since a missing/unreachable Solr index shouldn't
+// block tagging. The actual Solr write happens on the md-solr queue (task: update_tags), not inline
+// here, since a single autotag run can touch thousands of files and each Solr write now costs a
+// realtime-get per existing doc (see MD-consumers/src/adapters/solr.mjs) — too slow to do synchronously
+// in the request/file-processing path. TagLink remains the source of truth; Solr is eventually
+// consistent, which is fine since the Tags UI reads TagLink directly, not Solr.
+graph.reindexFileTags = async function (file_rid, userRID) {
+	if (!file_rid.match(/^#/)) file_rid = '#' + file_rid
+	try {
+		const linksResponse = await db.sql(`SELECT entity_rid, created_by, confidence FROM TagLink WHERE target_rid = "${file_rid}" AND region_id IS NULL AND owner = "${userRID}"`)
+		const links = linksResponse.result || []
+
+		const tagFields = {tag_label: [], tag_rid: [], tag_created_by: [], tag_confidence: []}
+		if(links.length) {
+			const entityRids = Array.from(new Set(links.map((row) => row.entity_rid).filter(Boolean)))
+			const entityResponse = await db.sql(`SELECT @rid AS rid, label FROM Entity WHERE @rid IN [${entityRids.join(',')}]`)
+			const labelByRid = new Map((entityResponse.result || []).map((entity) => [entity.rid, entity.label]))
+
+			for(const link of links) {
+				const label = labelByRid.get(link.entity_rid)
+				if(!label) continue
+				tagFields.tag_label.push(label)
+				tagFields.tag_rid.push(link.entity_rid)
+				tagFields.tag_created_by.push(link.created_by || 'user')
+				tagFields.tag_confidence.push(link.confidence != null ? link.confidence : 0)
+			}
+		}
+
+		return await this.enqueueTagSync(file_rid, userRID, tagFields)
+	} catch (error) {
+		console.log('reindexFileTags failed (non-fatal): ', error.message)
+		return null
+	}
+}
+
+// Publishes the update_tags task to the md-solr queue (see reindexFileTags above for why this is
+// queued rather than a direct solr.mjs call). Falls back to the old direct/synchronous Solr call if
+// the md-solr service hasn't registered its update_tags task yet (e.g. older consumer build).
+graph.enqueueTagSync = async function (file_rid, userRID, tagFields) {
+	const service = services.getServiceAdapterByName('md-solr')
+	if(!service?.tasks?.update_tags) {
+		return await solr.updateTagsForFile(file_rid, tagFields)
+	}
+
+	const fileMetadata = await this.getUserFileMetadata(file_rid, userRID)
+	if(!fileMetadata) return null
+
+	const task = {id: 'update_tags', name: service.tasks.update_tags.name || 'Sync tags to search index'}
+	const msg = {
+		service,
+		task,
+		file: fileMetadata,
+		userId: userRID,
+		tag_fields: tagFields,
+		output_file: false
+	}
+	return await queue.createSetProcessNodesAndPublish(msg)
 }
 
 graph.createEntity = async function (data, userRID) {
@@ -2853,13 +3069,20 @@ graph.createEntity = async function (data, userRID) {
 	}
 	const entity_uuid = uuidv7()
 	var query = `CREATE Vertex Entity set uuid = "${entity_uuid}", type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
+	if(data.description) query += `, description = "${String(data.description).replace(/"/g, '\\"')}"`
 	console.log(query)
 	return await db.sql(query)
 }
 
 graph.checkEntity = async function (data, node_rid, userRID) {
-	var query = `MATCH {type: Entity, as: entity, where: (type = "${data.type}" AND label = "${data.label}" AND owner = "${userRID}")}--{as: node, where: (@rid = ${node_rid}), optional: true} RETURN entity, node`
-	return await db.sql(query)
+	if (!node_rid.match(/^#/)) node_rid = '#' + node_rid
+	var query = `MATCH {type: Entity, as: entity, where: (type = "${data.type}" AND label = "${data.label}" AND owner = "${userRID}")} RETURN entity`
+	var response = await db.sql(query)
+	if(!response.result.length) return response
+	const entity_rid = response.result[0].entity['@rid']
+	const linkResponse = await db.sql(`SELECT @rid FROM TagLink WHERE entity_rid = "${entity_rid}" AND target_rid = "${node_rid}" AND region_id IS NULL`)
+	response.result[0].node = linkResponse.result.length ? {'@rid': node_rid} : null
+	return response
 }
 
 // data should be array of entities
@@ -2870,7 +3093,7 @@ graph.createEntityAndLink = async function (data, rid, userRID) {
 		var response = await this.checkEntity(entity, rid, userRID)
 		if(response.result.length) {
 			if(!response.result[0].node) {
-				await this.linkEntity(rid, response.result[0].entity['@rid'], userRID)
+				await this.linkEntity(response.result[0].entity['@rid'], rid, userRID)
 			}
 		} else {
 			var new_entity = await this.createEntity(entity, userRID)
@@ -2883,21 +3106,54 @@ graph.createEntityAndLink = async function (data, rid, userRID) {
 	return entities
 }
 
-graph.linkEntity = async function (rid, vid, userRID) {	
+// Tag assignment (TagLink rows) replaces HAS_ENTITY edges: assignment is a flat fact, not a
+// relationship that needs graph traversal, and rows are far cheaper to write at machine-tagging volume.
+graph.createTagLink = async function (entity_rid, target_rid, userRID, meta = {}) {
+	if(!entity_rid.match(/^#/)) entity_rid = '#' + entity_rid
+	if(!target_rid.match(/^#/)) target_rid = '#' + target_rid
+	const region_id = meta.region_id || null
+	const regionClause = region_id ? `= "${String(region_id).replace(/"/g, '\\"')}"` : 'IS NULL'
+	const existing = await db.sql(`SELECT @rid AS rid FROM TagLink WHERE entity_rid = "${entity_rid}" AND target_rid = "${target_rid}" AND region_id ${regionClause}`)
+	if(existing.result.length) return existing.result[0]
+
+	const fields = {
+		entity_rid,
+		target_rid,
+		region_id,
+		owner: userRID,
+		created_by: meta.created_by || 'user',
+		service_id: meta.service_id || null,
+		task: meta.task || null,
+		confidence: meta.confidence != null ? meta.confidence : null
+	}
+	const assignments = Object.entries(fields)
+		.map(([key, value]) => `${key} = ${value === null ? 'null' : `"${String(value).replace(/"/g, '\\"')}"`}`)
+		.join(', ')
+	const query = `INSERT INTO TagLink SET ${assignments}, created = sysdate('YYYY-MM-DD HH:MM:SS')`
+	return await db.sql(query)
+}
+
+graph.deleteTagLink = async function (entity_rid, target_rid, region_id = null) {
+	if(!entity_rid.match(/^#/)) entity_rid = '#' + entity_rid
+	if(!target_rid.match(/^#/)) target_rid = '#' + target_rid
+	const regionClause = region_id ? `AND region_id = "${String(region_id).replace(/"/g, '\\"')}"` : 'AND region_id IS NULL'
+	const query = `DELETE FROM TagLink WHERE entity_rid = "${entity_rid}" AND target_rid = "${target_rid}" ${regionClause}`
+	return await db.sql(query)
+}
+
+graph.linkEntity = async function (rid, vid, userRID, meta = {}) {	
 	if(!rid.match(/^#/)) rid = '#' + rid
 	if(!vid.match(/^#/)) vid = '#' + vid
 	var query = `MATCH {type: Entity, as: entity, where: (@rid = ${rid} AND owner = "${userRID}")} RETURN entity`
-	console.log(query)
 	var response = await db.sql(query)
 	var entity = response.result[0]
-	
-	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
-	response = await db.sql(query)
 
-	var target = response.result[0]
-	console.log(entity, target)
-	if(!entity || !target) return	
-	var linked = await this.connect(vid, 'HAS_ENTITY',rid)
+	var pathQuery = `SELECT shortestPath(${vid}, ${userRID}) AS path`
+	var pathResponse = await db.sql(pathQuery)
+	var target = pathResponse.result[0]
+	if(!entity || !target) return
+	const linked = await this.createTagLink(rid, vid, userRID, meta)
+	if(!meta.region_id) await this.reindexFileTags(vid, userRID)
 	return linked
 }
 
@@ -2907,24 +3163,270 @@ graph.unLinkEntity = async function (rid, vid, userRID) {
 	var query = `MATCH {type: Entity, as: entity, where: (@rid = "${rid}" AND owner = "${userRID}")} RETURN entity`
 	var response = await db.sql(query)
 	var entity = response.result[0]
-	console.log(entity)
-	var query = `SELECT shortestPath(${vid}, ${userRID}) AS path`
-	response = await db.sql(query)
-	console.log(response.result)
-	var target = response.result[0]
-	if(!entity || !target) return	
-	await this.unconnect(vid, 'HAS_ENTITY',rid)
+	if(!entity) return
+	const deleted = await this.deleteTagLink(rid, vid)
+	await this.reindexFileTags(vid, userRID)
+	return deleted
 }
 graph.getTags = async function (userRID) {
-	var query = `MATCH {type:Tag, as:tag, where:(owner = "${userRID}")} RETURN tag order by tag.label`
+	var query = `SELECT @rid AS rid, label, type, icon, color, description FROM Entity WHERE owner = "${userRID}" AND type = "Tag" ORDER BY label`
 	return await db.sql(query)
 }
 
-graph.createTag = async function (label, userRID) {
+graph.createTag = async function (label, userRID, description) {
 	if(!label) return
-	const tag_uuid = uuidv7()
-	var query = `create Vertex Tag set uuid = "${tag_uuid}", label = "${label}", owner = "${userRID}"`
-	return await db.sql(query)
+	return await this.createEntity({type: 'Tag', label, description}, userRID)
+}
+
+// Browsing view for the Tags UI (\u00a76): machine-created tags grouped by the service/task run that
+// produced them, so a user can see e.g. "md-gliner2:extract_entities found 'celestial body' on 12 files".
+graph.getMachineTags = async function (userRID) {
+	const query = `SELECT service_id, task, entity_rid, count(*) AS count FROM TagLink
+		WHERE created_by = "machine" AND owner = "${userRID}"
+		GROUP BY service_id, task, entity_rid`
+	const linksResponse = await db.sql(query)
+	const links = linksResponse.result || []
+	if(!links.length) return []
+
+	const entityRids = Array.from(new Set(links.map((row) => row.entity_rid).filter(Boolean)))
+	const entityResponse = await db.sql(`SELECT @rid AS rid, label, description FROM Entity WHERE @rid IN [${entityRids.join(',')}]`)
+	const labelByRid = new Map((entityResponse.result || []).map((entity) => [entity.rid, entity.label]))
+	const descriptionByRid = new Map((entityResponse.result || []).map((entity) => [entity.rid, entity.description]))
+
+	return links
+		.map((row) => ({
+			service_id: row.service_id,
+			task: row.task,
+			entity_rid: row.entity_rid,
+			label: labelByRid.get(row.entity_rid) || null,
+			description: descriptionByRid.get(row.entity_rid) || null,
+			count: row.count
+		}))
+		.filter((row) => row.label)
+		.sort((a, b) => String(a.service_id).localeCompare(String(b.service_id))
+			|| String(a.task).localeCompare(String(b.task))
+			|| String(a.label).localeCompare(String(b.label)))
+}
+
+// Files tagged with a specific machine-created (service_id, task, entity) combination, used when a
+// user drills into one row from graph.getMachineTags.
+graph.getMachineTagFiles = async function (entity_rid, service_id, task, userRID) {
+	if (!entity_rid.match(/^#/)) entity_rid = '#' + entity_rid
+	const query = `SELECT target_rid, confidence FROM TagLink
+		WHERE entity_rid = "${entity_rid}" AND service_id = "${service_id}" AND task = "${task}"
+		AND created_by = "machine" AND owner = "${userRID}"`
+	const linksResponse = await db.sql(query)
+	const links = linksResponse.result || []
+	if(!links.length) return []
+
+	const fileRids = links.map((row) => row.target_rid).filter(Boolean)
+	const fileResponse = await db.sql(`SELECT @rid AS rid, label, path, type FROM File WHERE @rid IN [${fileRids.join(',')}]`)
+	const fileByRid = new Map((fileResponse.result || []).map((file) => [file.rid, file]))
+	const confidenceByRid = new Map(links.map((row) => [row.target_rid, row.confidence]))
+
+	return fileRids
+		.map((rid) => {
+			const file = fileByRid.get(rid)
+			if(!file) return null
+			return {...file, confidence: confidenceByRid.get(rid)}
+		})
+		.filter(Boolean)
+}
+
+// Aggregated, paged, searchable view of the actual mention text (e.g. every distinct "John Smith"
+// found under a PERSON tag) behind one row from graph.getMachineTags. TagLink only records
+// file+label (§6/§8 step 4 in tags.md), not per-mention text, so this reads each tagged file's
+// ner.json on demand (same source graph.getNerRegions/TagsMain already read per-file) and
+// aggregates in memory - there is no dedicated mention index.
+graph.getMachineTagMentions = async function (entity_rid, service_id, task, userRID, options = {}) {
+	if (!entity_rid.match(/^#/)) entity_rid = '#' + entity_rid
+	const search = String(options.search || '').trim().toLowerCase()
+	const page = Math.max(1, parseInt(options.page) || 1)
+	const pageSize = Math.max(1, Math.min(200, parseInt(options.pageSize) || 20))
+
+	const entityResponse = await db.sql(`SELECT label FROM Entity WHERE @rid = "${entity_rid}"`)
+	const label = entityResponse.result?.[0]?.label
+	if(!label) return {mentions: [], total: 0, page, pageSize}
+
+	const files = await this.getMachineTagFiles(entity_rid, service_id, task, userRID)
+	if(!files.length) return {mentions: [], total: 0, page, pageSize}
+
+	const mentionsByText = new Map()
+	for(const file of files) {
+		const runs = await this.getNerRegions(file.rid, userRID)
+		for(const run of runs) {
+			for(const region of Object.values(run.rois || {})) {
+				if(region?.label !== label) continue
+				const text = String(region.text || '').trim()
+				if(!text) continue
+				if(search && !text.toLowerCase().includes(search)) continue
+
+				let entry = mentionsByText.get(text)
+				if(!entry) {
+					entry = {text, count: 0, hits: []}
+					mentionsByText.set(text, entry)
+				}
+				entry.count += 1
+				// one hit per matched region, not deduped per file, so the UI can let a user browse
+				// every individual occurrence (§ "show actual file and roi when user clicks ner item").
+				entry.hits.push({
+					file_rid: file.rid,
+					file_label: file.label,
+					ner_rid: run.rid,
+					region_id: region.id || null,
+					start: region.start ?? null,
+					end: region.end ?? null,
+					confidence: region.confidence ?? null
+				})
+			}
+		}
+	}
+
+	const all = Array.from(mentionsByText.values()).sort((a, b) => a.text.localeCompare(b.text))
+	const total = all.length
+	const start = (page - 1) * pageSize
+	return {mentions: all.slice(start, start + pageSize), total, page, pageSize}
+}
+
+// All ner.json runs owned (transitively, via project) by this user. NER tasks never create
+// TagLink rows (tags.md \u00a71: NER only indexes, it does not tag), so label browsing has no link
+// table to query and must read runs directly instead. Files point at their project via BELONGS_TO
+// (and chain back through DERIVED_FROM), so from the project the traversal is incoming ("<--"),
+// matching graph.getUserFileMetadata's pattern - not outgoing.
+graph.getNerRuns = async function (userRID) {
+	const query = `MATCH {type:User, as:user, where:(@rid = "${userRID}")}<-HAS_OWNER-{type:Project, as:project}<--{as:file, where:(@type = 'File' AND type = "ner.json"), while: ($depth < 40)} RETURN DISTINCT file`
+	const response = await db.sql(query)
+	const nerNodes = (response.result || []).map((row) => row.file).filter(Boolean)
+	if(!nerNodes.length) return []
+
+	// File.service_id/task may be missing on runs created before autotag-independent stamping was
+	// added; DERIVED_FROM's cruncher/task (always set by connectDerivedFrom, autotag or not) is the
+	// reliable fallback source.
+	const nerRids = nerNodes.map((node) => node['@rid'])
+	const edgeResponse = await db.sql(`SELECT @out AS rid, cruncher, task FROM DERIVED_FROM WHERE @out IN [${nerRids.join(',')}]`)
+	const edgeByRid = new Map((edgeResponse.result || []).map((row) => [row.rid, row]))
+
+	return nerNodes.map((node) => {
+		const edge = edgeByRid.get(node['@rid'])
+		return {
+			...node,
+			service_id: node.service_id || edge?.cruncher || null,
+			task: node.task || edge?.task || null
+		}
+	})
+}
+
+// (service_id, task, label) groups found across all of a user's ner.json runs, the NER equivalent
+// of graph.getMachineTags but without any Entity/TagLink involved. options.search matches against
+// both the label itself and the actual mention text found under it, so typing a name (not just a
+// category like "henkil\u00f6") surfaces the label it was found under.
+graph.getNerLabelGroups = async function (userRID, options = {}) {
+	const search = String(options.search || '').trim().toLowerCase()
+	const nerNodes = await this.getNerRuns(userRID)
+	const counts = new Map()
+	for(const node of nerNodes) {
+		if(!node.path) continue
+		let parsed
+		try {
+			parsed = await media.readJSON(node.path)
+		} catch (error) {
+			continue
+		}
+		for(const region of Object.values(parsed.rois || parsed || {})) {
+			if(!region?.label) continue
+			if(search) {
+				const labelMatch = String(region.label).toLowerCase().includes(search)
+				const textMatch = String(region.text || '').toLowerCase().includes(search)
+				if(!labelMatch && !textMatch) continue
+			}
+			const key = `${node.service_id}:${node.task}:${region.label}`
+			const entry = counts.get(key) || {service_id: node.service_id, task: node.task, label: region.label, count: 0}
+			entry.count += 1
+			counts.set(key, entry)
+		}
+	}
+
+	return Array.from(counts.values())
+		.sort((a, b) => String(a.service_id).localeCompare(String(b.service_id))
+			|| String(a.task).localeCompare(String(b.task))
+			|| String(a.label).localeCompare(String(b.label)))
+}
+
+// Source files behind one (service_id, task, label) row from graph.getNerLabelGroups. Resolved via
+// each matching run's DERIVED_FROM edge, since there is no TagLink to look files up from.
+graph.getNerLabelFiles = async function (service_id, task, label, userRID) {
+	const nerNodes = (await this.getNerRuns(userRID)).filter((node) => node.service_id === service_id && node.task === task)
+	if(!nerNodes.length) return []
+
+	const files = []
+	const seen = new Set()
+	for(const node of nerNodes) {
+		if(!node.path) continue
+		let parsed
+		try {
+			parsed = await media.readJSON(node.path)
+		} catch (error) {
+			continue
+		}
+		const hasLabel = Object.values(parsed.rois || parsed || {}).some((region) => region?.label === label)
+		if(!hasLabel) continue
+
+		const sourceResponse = await db.sql(`SELECT @in AS rid FROM DERIVED_FROM WHERE @out = ${node['@rid']}`)
+		const sourceRid = sourceResponse.result?.[0]?.rid
+		if(!sourceRid || seen.has(sourceRid)) continue
+		seen.add(sourceRid)
+
+		const fileResponse = await db.sql(`SELECT @rid AS rid, label, path, type FROM File WHERE @rid = ${sourceRid}`)
+		const file = fileResponse.result?.[0]
+		if(file) files.push(file)
+	}
+	return files
+}
+
+// Aggregated, paged, searchable mention view for one NER (service_id, task, label) group. Mirrors
+// graph.getMachineTagMentions's file-then-region aggregation, just sourced from getNerLabelFiles
+// instead of TagLink.
+graph.getNerLabelMentions = async function (service_id, task, label, userRID, options = {}) {
+	const search = String(options.search || '').trim().toLowerCase()
+	const page = Math.max(1, parseInt(options.page) || 1)
+	const pageSize = Math.max(1, Math.min(200, parseInt(options.pageSize) || 20))
+
+	const files = await this.getNerLabelFiles(service_id, task, label, userRID)
+	if(!files.length) return {mentions: [], total: 0, page, pageSize}
+
+	const mentionsByText = new Map()
+	for(const file of files) {
+		const runs = await this.getNerRegions(file.rid, userRID)
+		for(const run of runs) {
+			for(const region of Object.values(run.rois || {})) {
+				if(region?.label !== label) continue
+				const text = String(region.text || '').trim()
+				if(!text) continue
+				if(search && !text.toLowerCase().includes(search)) continue
+
+				let entry = mentionsByText.get(text)
+				if(!entry) {
+					entry = {text, count: 0, hits: []}
+					mentionsByText.set(text, entry)
+				}
+				entry.count += 1
+				entry.hits.push({
+					file_rid: file.rid,
+					file_label: file.label,
+					ner_rid: run.rid,
+					region_id: region.id || null,
+					start: region.start ?? null,
+					end: region.end ?? null,
+					confidence: region.confidence ?? null
+				})
+			}
+		}
+	}
+
+	const all = Array.from(mentionsByText.values()).sort((a, b) => a.text.localeCompare(b.text))
+	const total = all.length
+	const start = (page - 1) * pageSize
+	return {mentions: all.slice(start, start + pageSize), total, page, pageSize}
 }
 
 graph.getNode = async function (rid, userRID) {

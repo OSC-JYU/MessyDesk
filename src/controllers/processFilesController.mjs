@@ -497,6 +497,19 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
         if(fileNode.metadata) {
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'metadata', value: fileNode.metadata}, 'File');
         }
+        if (!isReferenceOutput && fileNode.type === 'ner.json') {
+            // service_id/task are needed to browse NER label groups (graph.getNerLabelGroups) even
+            // when the task never autotags - stamp them unconditionally, independent of autotag.
+            await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'service_id', value: message.service?.id || null}, 'File');
+            await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'task', value: message.task?.id || null}, 'File');
+            if (message.task?.autotag) {
+                try {
+                    await Graph.autotagNerFile(fileNode, message.file['@rid'], message);
+                } catch (e) {
+                    console.log('autotag failed (non-fatal), skipping tag creation', {error: e.message, file: fileNode['@rid']});
+                }
+            }
+        }
         if(groupedRootSourceRid) {
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'root_source_rid', value: groupedRootSourceRid}, 'File');
             const rootSourceLabel = message?.root_source_label || message?.root_source?.label || null;

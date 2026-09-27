@@ -16,8 +16,10 @@
 | **Message** | JSON payload that the backend sends to a service via the consumer. Contains file metadata, task parameters, process context, and user identity. |
 | **Queue** | Per-service list of processing requests. Implemented as a SQLite database (`data/{db_name}/queue.sqlite`) with WAL mode. Jobs have status (`queued`, `running`, `done`, `failed`, `cancelled`), lease-based claiming, and retry logic. |
 | **ROI** | Region of Interest. Area of an image (rectangle, circle, polygon) defined with percentage-based coordinates. Stored as `roi.json` file nodes. |
-| **Entity** | Named entity or tag. Can be created manually or by services (NER). Types: Tag, Person, Location, Theme, Quality, Date, Organisation. |
-| **Tag** | An entity of type "Tag". Main manual organisation tool for files. |
+| **Entity** | Named entity or tag. Created manually, or by a classification service's autotag (never by NER — see Tag). Types: Tag, Person, Location, Theme, Quality, Date, Organisation. |
+| **Tag** | An entity of type "Tag". Main manual organisation tool for files, also used by classification autotag. Optionally has a `description`, used by the cruncher tag-picker (see [processing-crunchers.md](../../MessyDesk-UI/wiki/processing-crunchers.md) in MessyDesk-UI) to improve zero-shot model accuracy. NER never creates Tags — see NER label group. |
+| **TagLink** | Document type (not a graph edge) linking an Entity to a file (optionally a region). Carries `created_by`/`service_id`/`task`/`confidence` to distinguish manual tags from classification-autotag ones. NER data is never linked this way. See [graph-data-model.md](architecture/graph-data-model.md). |
+| **NER label group** | A `(service_id, task, label)` combination found by scanning a user's `ner.json` runs directly (`graph.getNerLabelGroups`) — the NER equivalent of a machine tag, but with no `Entity`/`TagLink` created. See [graph-data-model.md](architecture/graph-data-model.md). |
 | **Source** | External data source (API, cloud storage). When created, triggers an `init` task to establish connection. |
 | **RID** | Record ID in ArcadeDB, format `#cluster:position` (e.g., `#12:50`). Used as the primary identifier for graph vertices and edges. |
 | **Descriptor** | `service.json` file describing a service's capabilities, supported types, tasks, and parameters. |

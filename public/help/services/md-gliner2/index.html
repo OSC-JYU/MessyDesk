@@ -23,6 +23,11 @@
 <p>Assigns one or more of your categories (e.g. <code>sports, politics, finance</code>) to the whole text.</p>
 <ul>
 <li>Check <strong>Allow multiple categories</strong> if a text can reasonably belong to more than one category at once. Otherwise the single best-matching category is returned.</li>
+<li>You can also pick existing tags instead of typing categories. Tags with a description give the model
+extra context (e.g. label <code>subject</code> with description &quot;the academic subject discussed&quot;) which can
+improve accuracy, and the run will only ever produce those exact tags on your files. This isn&#39;t
+available for <strong>Find named entities</strong>, since NER extracts many individual mentions per type rather
+than one whole-document label.</li>
 </ul>
 <h3><code>extract_data</code> — Extract structured data</h3>
 <p>Pulls out the specific fields you name (e.g. <code>invoice_number, date, total_amount</code>) as structured values.</p>

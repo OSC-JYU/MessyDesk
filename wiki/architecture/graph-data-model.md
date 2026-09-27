@@ -28,6 +28,7 @@ Queries are sent as HTTP POST with JSON body containing the query language and s
 | `SetProcess` | `uuid`, `status`, `total_files`, `batch_processed` | Batch processing parent |
 | `Entity` | `label`, `type`, `owner` | Named entity or tag |
 | `EntityType` | `label`, `color` | Classification for entities (Tag, Person, Location, etc.) |
+| `TagLink` | `entity_rid`, `target_rid`, `region_id`, `owner`, `created_by`, `service_id`, `task`, `confidence`, `created` | Document type (not a graph edge) linking an Entity to a file; see Entity/Tag System below |
 | `Source` | `label`, `status` | External data source (API, cloud storage) |
 | `Prompt` | (varies) | AI prompt storage |
 | `ErrorNode` | (varies) | Processing error record |
@@ -44,7 +45,6 @@ Queries are sent as HTTP POST with JSON body containing the query language and s
 | `PRODUCED` | Process → File/Entity | A process created this output |
 | `HAS_ITEM` | Set → File | Set membership |
 | `BELONGS_TO` | File/Set → Project | Project membership |
-| `HAS_ENTITY` | File → Entity | Entity association |
 | `HAS_SET` | Project → Set | Project owns set |
 | `HAS_PROCESS` | Node → Process | Node has processing history |
 | `DERIVED_FROM` | File → File | Lineage/derivation chain |
@@ -61,6 +61,8 @@ CREATE INDEX ON File (set) NOTUNIQUE
 CREATE INDEX ON Set (project_rid) NOTUNIQUE
 CREATE INDEX ON Entity (owner) NOTUNIQUE
 CREATE INDEX ON Project (label) NOTUNIQUE
+CREATE INDEX ON TagLink (target_rid) NOTUNIQUE
+CREATE INDEX ON TagLink (entity_rid) NOTUNIQUE
 ```
 
 ## Key Data Relationships
@@ -156,7 +158,42 @@ The `set` attribute on a File vertex stores the Set RID. **[inferred]** Once ass
 | Date | cyan |
 | Organisation | blue |
 
-Entities are linked to files via `HAS_ENTITY` edges. Tag filtering creates new Sets containing matching files.
+Entities are linked to files via `TagLink` (a document type, not a graph edge — see `graph.mjs` `linkEntity`/
+`unLinkEntity`; this replaced the earlier `HAS_ENTITY` edge model). One `TagLink` row per (entity, file) pair,
+plus optionally per `region_id` for a specific ROI/region within that file. Fields distinguish manual tags
+from machine-generated ones:
+
+- `created_by`: `'user'` (created manually) or `'machine'` (created by autotag, classification tasks only —
+  see below)
+- `service_id` / `task`: which processing service+task produced the tag (null for manual tags)
+- `confidence`: max confidence seen across the run, for machine tags
+- `region_id`: currently always null in practice — autotagging is file-level only by design
+
+**NER never creates tags.** `ner.json` output (per-mention spans with `label`/`text`/`start`/`end`/`confidence`,
+see `graph.getNerRegions`) is indexed/browsed directly and is never turned into an `Entity`/`TagLink` — a
+`service.json` task that produces `ner.json` (or a similarly span-shaped "extract structured data" task) must
+never set `"autotag": true`. `graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions`
+(`/api/tags/ner/labels*`) scan a user's `ner.json` runs directly — grouped by `(service_id, task, label)`, with
+files resolved via each run's `DERIVED_FROM` edge — giving the same browse/drill-down/mention-search UX as
+machine tags below, without a link table.
+
+Autotagging (classification tasks only, e.g. MD-Gliner2's `classify_text` with `service.json`'s
+`"autotag": true`): when a matching output file arrives, `graph.autotagNerFile` creates/reuses one `Entity`
+(type `Tag`) per distinct label found and one `TagLink` per (source file, label). `graph.getMachineTags`/
+`graph.getMachineTagFiles` (`/api/tags/machine*`) let the UI browse these machine tags grouped by service/task
+and drill into tagged files.
+
+
+Tags may optionally carry a `description` (`graph.createTag(label, userRID, description)`). This is used by the
+cruncher tag-picker UI (`TagPickerField.vue` in MessyDesk-UI): a user can restrict a task to a fixed set of
+existing tags instead of typing free-form categories, and if those tags have descriptions, some services (e.g.
+MD-Gliner2's zero-shot extraction) use the description text to improve model accuracy. No special "restrict to
+these tags" backend logic exists for this — `autotagNerFile` already reuses an existing `Tag` entity by exact
+`(type, label, owner)` match, so a pre-existing tag is simply found and reused rather than duplicated.
+
+Tag filtering (`graph.createTagFilterSet`) queries `TagLink` and creates new Sets containing matching files.
+Solr `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` fields are kept in sync with `TagLink` via
+`graph.reindexFileTags` (see `solr.updateTagsForFile`).
 
 ## DERIVED_FROM Edge Enrichment
 

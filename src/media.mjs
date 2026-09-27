@@ -268,7 +268,7 @@ media.readJSON =  async function(fpath) {
 
 	try {
 		const jsonData = await fse.readFile(fpath, 'utf8');
-		return jsonData
+		return JSON.parse(jsonData)
 	  } catch (error) {
 		console.error('Error reading data from json:', error);
 		return {}
@@ -518,12 +518,15 @@ media.getThumbnail = async function(filePath) {
 function NERsummary(data) {
 	try {
 
-		var json = JSON.parse(data)
+		var parsed = JSON.parse(data)
+		// ner.json is {rois: {...}} or {rois: [...]} (see graph.autotagNerFile), not a bare array of
+		// raw model entities anymore.
+		var regions = Object.values(parsed.rois || parsed || {})
 		const entityCounts = {};
 
 		// Iterate over each entity in the list
-		json.forEach(entity => {
-			const group = entity.entity_group;
+		regions.forEach(entity => {
+			const group = entity.label || entity.entity_group;
 			// Increment the count for each entity group
 			entityCounts[group] = (entityCounts[group] || 0) + 1;
 		});

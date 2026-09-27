@@ -30,6 +30,8 @@ import promptRoutes from './routes/prompts.mjs';
 import searchRoutes from './routes/search.mjs';
 import filterRoutes from './routes/filters.mjs';
 import roiRoutes from './routes/rois.mjs';
+import nerRoutes from './routes/ner.mjs';
+import tagRoutes from './routes/tags.mjs';
 import helpRoutes from './routes/help.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -210,12 +212,14 @@ const init = async () => {
 		...searchRoutes,
 		...filterRoutes,
 		...roiRoutes,
+		...nerRoutes,
+		...tagRoutes,
 		...helpRoutes
 	]);
 
 	// Start the server
 	await server.start();
-	logger.info('MessyDesk running at:', server.info.uri);
+	logger.info(`MessyDesk running at: ${server.info.uri}`);
 
 	return server;
 };

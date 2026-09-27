@@ -41,8 +41,28 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 | GET | `/api/entities` | List entities |
 | POST | `/api/entities` | Create entity |
 | GET | `/api/entities/types` | List entity types |
-| GET/POST | `/api/entities/{rid}/vertex/{vid}` | Link entity to vertex |
+| GET/POST | `/api/entities/{rid}/vertex/{vid}` | Link entity to vertex (creates/removes a `TagLink`) |
 | GET | `/api/entities/sets/{rid}` | Get entities for a set |
+
+## Tags
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/tags` | List the current user's Tag entities |
+| POST | `/api/tags` | Create a Tag entity |
+| GET | `/api/tags/machine` | List classification-autotag tags (TagLink-backed) grouped by (service_id, task, label) with counts |
+| GET | `/api/tags/machine/{entity_rid}/files` | Files tagged by one (service_id, task, entity) combination |
+| GET | `/api/tags/machine/{entity_rid}/mentions` | Paged, searchable mention text for one machine-tag combination |
+| GET | `/api/tags/ner/labels` | List NER (service_id, task, label) groups found across a user's `ner.json` runs — no TagLink involved |
+| GET | `/api/tags/ner/labels/files` | Files whose `ner.json` contains a given NER (service_id, task, label) group |
+| GET | `/api/tags/ner/labels/mentions` | Paged, searchable mention text (with per-hit start/end/confidence) for one NER label group |
+
+## NER regions
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/files/{rid}/ner` | List `ner.json` runs for a file, each with per-mention regions (label/start/end/confidence) |
+| POST | `/api/files/{rid}/sets/{set_rid}/ner` | Manually create a `ner.json` file node (accepts `service_id`/`task` query params) |
 
 ## Queue / Pipeline
 
