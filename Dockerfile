@@ -14,4 +14,5 @@ EXPOSE  8100
 # change user
 USER node
 
-CMD ["node", "src/index.mjs"]
+# node:23.3 still gates node:sqlite behind this flag (unflagged on the host's newer Node).
+CMD ["node", "--experimental-sqlite", "src/index.mjs"]

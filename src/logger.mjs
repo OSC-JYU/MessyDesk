@@ -1,14 +1,10 @@
 import winston from 'winston';
 import 'winston-daily-rotate-file';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import {  DB_NAME } from './env.mjs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { DATA_DIR } from './env.mjs';
 
 // Create logs directory if it doesn't exist
-const logsDir = path.join(path.dirname(__dirname), 'data', DB_NAME, 'logs');
+const logsDir = path.join(DATA_DIR, 'logs');
 console.log(logsDir);
 
 // Configure the daily rotate transport

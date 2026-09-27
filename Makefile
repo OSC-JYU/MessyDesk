@@ -1,8 +1,8 @@
 IMAGES := $(shell docker images -f "dangling=true" -q)
 CONTAINERS := $(shell docker ps -a -q -f status=exited)
 VOLUME := md-main
-VERSION := 26.05.29
-REPOSITORY := osc.repo.kopla.jyu.fi
+VERSION := 0.2
+REPOSITORY := localhost
 IMAGE := messydesk
 
 
