@@ -57,7 +57,12 @@ export default [
         method: 'GET',
         path: '/api/tags/ner/labels',
         handler: async (request) => {
-            const result = await Graph.getNerLabelGroups(request.auth.credentials.user.rid, {search: request.query.search});
+            const result = await Graph.getNerLabelGroups(request.auth.credentials.user.rid, {
+                search: request.query.search,
+                project_rid: request.query.project_rid,
+                project_rids: request.query.project_rids ? request.query.project_rids.split(',') : undefined,
+                file_rids: request.query.file_rids ? request.query.file_rids.split(',') : undefined
+            });
             return result;
         }
     },
@@ -69,7 +74,12 @@ export default [
                 request.query.service_id,
                 request.query.task,
                 request.query.label,
-                request.auth.credentials.user.rid
+                request.auth.credentials.user.rid,
+                {
+                    project_rid: request.query.project_rid,
+                    project_rids: request.query.project_rids ? request.query.project_rids.split(',') : undefined,
+                    file_rids: request.query.file_rids ? request.query.file_rids.split(',') : undefined
+                }
             );
             return result;
         }
@@ -83,7 +93,14 @@ export default [
                 request.query.task,
                 request.query.label,
                 request.auth.credentials.user.rid,
-                {search: request.query.search, page: request.query.page, pageSize: request.query.pageSize}
+                {
+                    search: request.query.search,
+                    page: request.query.page,
+                    pageSize: request.query.pageSize,
+                    project_rid: request.query.project_rid,
+                    project_rids: request.query.project_rids ? request.query.project_rids.split(',') : undefined,
+                    file_rids: request.query.file_rids ? request.query.file_rids.split(',') : undefined
+                }
             );
             return result;
         }

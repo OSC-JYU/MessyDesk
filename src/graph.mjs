@@ -2923,10 +2923,26 @@ graph.getEntityTypeSchema = async function (userRID) {
 	return types.result
 }
 
-graph.getEntityTypes = async function (userRID) {
-	var query = `select type, count(type) AS count, LIST(label) AS labels, icon, color,LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
-	var types = await db.sql(query)
-	return types.result
+graph.getEntityTypes = async function (userRID, options = {}) {
+	const projectRids = normalizeProjectRids(options)
+	if(!projectRids.length) {
+		var query = `select type, count(type) AS count, LIST(label) AS labels, icon, color,LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" group by type order by count desc`
+		var types = await db.sql(query)
+		return types.result
+	}
+
+	// scoped to a project: only entities actually assigned (via TagLink) to a file that belongs to it
+	const fileResponse = await db.sql(`SELECT @rid AS rid FROM File WHERE project_rid IN [${projectRids.join(',')}]`)
+	const fileRids = (fileResponse.result || []).map((row) => row.rid).filter(Boolean)
+	if(!fileRids.length) return []
+
+	const linkResponse = await db.sql(`SELECT DISTINCT entity_rid FROM TagLink WHERE target_rid IN [${fileRids.join(',')}] AND owner = "${userRID}"`)
+	const entityRids = (linkResponse.result || []).map((row) => row.entity_rid).filter(Boolean)
+	if(!entityRids.length) return []
+
+	var scopedQuery = `select type, count(type) AS count, LIST(label) AS labels, icon, color, LIST(@this) AS items FROM Entity WHERE owner = "${userRID}" AND @rid IN [${entityRids.join(',')}] group by type order by count desc`
+	var scopedTypes = await db.sql(scopedQuery)
+	return scopedTypes.result
 }
 
 graph.getSetEntities = async function (set_rid, userRID) {
@@ -2962,13 +2978,16 @@ graph.getSetEntities = async function (set_rid, userRID) {
 }
 
 // TODO: this requires pagination
-graph.getEntityItems = async function (entities, userRID) {
+graph.getEntityItems = async function (entities, userRID, options = {}) {
 	var entities_clean = cleanRIDList(entities)
 	if(!entities_clean.length) return []
 	const linkResponse = await db.sql(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid IN [${entities_clean.join(',')}] AND owner = "${userRID}" LIMIT 20`)
 	const targetRids = (linkResponse.result || []).map((row) => row.target_rid).filter(Boolean)
 	if(!targetRids.length) return []
-	const itemResponse = await db.sql(`SELECT label, info, description, @rid AS rid, path, type FROM File WHERE @rid IN [${targetRids.join(',')}]`)
+
+	const projectRids = normalizeProjectRids(options)
+	const projectClause = projectRids.length ? ` AND project_rid IN [${projectRids.join(',')}]` : ''
+	const itemResponse = await db.sql(`SELECT label, info, description, @rid AS rid, path, type FROM File WHERE @rid IN [${targetRids.join(',')}]${projectClause}`)
 	if(!itemResponse.result.length) return []
 	var items = addThumbPaths(itemResponse.result)
 
@@ -3292,11 +3311,45 @@ graph.getMachineTagMentions = async function (entity_rid, service_id, task, user
 // TagLink rows (tags.md \u00a71: NER only indexes, it does not tag), so label browsing has no link
 // table to query and must read runs directly instead. Files point at their project via BELONGS_TO
 // (and chain back through DERIVED_FROM), so from the project the traversal is incoming ("<--"),
-// matching graph.getUserFileMetadata's pattern - not outgoing.
-graph.getNerRuns = async function (userRID) {
-	const query = `MATCH {type:User, as:user, where:(@rid = "${userRID}")}<-HAS_OWNER-{type:Project, as:project}<--{as:file, where:(@type = 'File' AND type = "ner.json"), while: ($depth < 40)} RETURN DISTINCT file`
+// matching graph.getUserFileMetadata's pattern - not outgoing. options.project_rid(s) narrows the
+// traversal to specific project(s) so Tag view can scope NER data to the project it was opened from.
+graph.getNerRuns = async function (userRID, options = {}) {
+	const projectRids = normalizeProjectRids(options)
+	const projectClause = projectRids.length ? ` AND @rid IN [${projectRids.join(',')}]` : ''
+	const query = `MATCH {type:User, as:user, where:(@rid = "${userRID}")}<-HAS_OWNER-{type:Project, as:project, where:(@type = 'Project'${projectClause})}<--{as:file, where:(@type = 'File' AND type = "ner.json"), while: ($depth < 40)} RETURN DISTINCT file`
 	const response = await db.sql(query)
-	const nerNodes = (response.result || []).map((row) => row.file).filter(Boolean)
+	let nerNodes = (response.result || []).map((row) => row.file).filter(Boolean)
+	if(!nerNodes.length) return []
+
+	// options.file_rids (Tag view's "narrow NER to selected tags"): a manual tag can sit on any
+	// ancestor OR descendant of the file NER actually ran on - e.g. tagged on the original PDF while
+	// NER read extracted text derived from it, or tagged on a later summary derived from the very
+	// file NER read - so both directions must be checked. DERIVED_FROM's @out is always the newer/
+	// more-derived file and @in its source (graph.connectDerivedFrom), so TRAVERSE out(...) only ever
+	// walks upward/upstream; matching descendants needs the tagged file's own ancestor chain checked
+	// against the ner node's rid instead. This is not just "shares any common ancestor", which would
+	// also match unrelated sibling branches off the same root file.
+	const taggedFileRids = normalizeRidArray(options.file_rids)
+	if(taggedFileRids.length) {
+		const taggedSet = new Set(taggedFileRids)
+		const taggedAncestorRids = new Set()
+		for(const taggedRid of taggedFileRids) {
+			const response = await db.sql(`TRAVERSE out("DERIVED_FROM") FROM ${taggedRid}`)
+			for(const row of response.result || []) taggedAncestorRids.add(row['@rid'])
+		}
+
+		const scoped = []
+		for(const node of nerNodes) {
+			if(taggedAncestorRids.has(node['@rid'])) {
+				scoped.push(node)
+				continue
+			}
+			const ancestorResponse = await db.sql(`TRAVERSE out("DERIVED_FROM") FROM ${node['@rid']}`)
+			const ancestorRids = (ancestorResponse.result || []).map((row) => row['@rid'])
+			if(ancestorRids.some((rid) => taggedSet.has(rid))) scoped.push(node)
+		}
+		nerNodes = scoped
+	}
 	if(!nerNodes.length) return []
 
 	// File.service_id/task may be missing on runs created before autotag-independent stamping was
@@ -3322,7 +3375,7 @@ graph.getNerRuns = async function (userRID) {
 // category like "henkil\u00f6") surfaces the label it was found under.
 graph.getNerLabelGroups = async function (userRID, options = {}) {
 	const search = String(options.search || '').trim().toLowerCase()
-	const nerNodes = await this.getNerRuns(userRID)
+	const nerNodes = await this.getNerRuns(userRID, options)
 	const counts = new Map()
 	for(const node of nerNodes) {
 		if(!node.path) continue
@@ -3354,8 +3407,8 @@ graph.getNerLabelGroups = async function (userRID, options = {}) {
 
 // Source files behind one (service_id, task, label) row from graph.getNerLabelGroups. Resolved via
 // each matching run's DERIVED_FROM edge, since there is no TagLink to look files up from.
-graph.getNerLabelFiles = async function (service_id, task, label, userRID) {
-	const nerNodes = (await this.getNerRuns(userRID)).filter((node) => node.service_id === service_id && node.task === task)
+graph.getNerLabelFiles = async function (service_id, task, label, userRID, options = {}) {
+	const nerNodes = (await this.getNerRuns(userRID, options)).filter((node) => node.service_id === service_id && node.task === task)
 	if(!nerNodes.length) return []
 
 	const files = []
@@ -3391,7 +3444,7 @@ graph.getNerLabelMentions = async function (service_id, task, label, userRID, op
 	const page = Math.max(1, parseInt(options.page) || 1)
 	const pageSize = Math.max(1, Math.min(200, parseInt(options.pageSize) || 20))
 
-	const files = await this.getNerLabelFiles(service_id, task, label, userRID)
+	const files = await this.getNerLabelFiles(service_id, task, label, userRID, options)
 	if(!files.length) return {mentions: [], total: 0, page, pageSize}
 
 	const mentionsByText = new Map()
@@ -3585,6 +3638,19 @@ function cleanRIDList(list) {
 		out.push(item)
 	}
 	return out
+}
+
+// Shared by getEntityTypes/getEntityItems/getNerRuns: accepts either options.project_rid (single)
+// or options.project_rids (array) and returns a de-duped, sanitized RID array.
+function normalizeProjectRids(options = {}) {
+	const raw = Array.isArray(options.project_rids) ? options.project_rids : (options.project_rid ? [options.project_rid] : [])
+	return normalizeRidArray(raw)
+}
+
+// De-dupes and sanitizes an arbitrary list of RIDs (project or file), dropping anything invalid/empty.
+function normalizeRidArray(list) {
+	if(!Array.isArray(list)) return []
+	return Array.from(new Set(list.filter(Boolean).map((rid) => graph.sanitizeRID(String(rid)))))
 }
 
 function isIntegerString(value) {
