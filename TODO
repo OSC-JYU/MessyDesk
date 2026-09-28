@@ -1,4 +1,9 @@
 
+- ROI is showing wrong source image
+- poppler_fs does not clean data directory
+
+
+
 1. # Clever Splitted files browsing 
 In UI clever browsing means that files that are splitted from original file are browsed by their origin file. For example in the case of set of PDF files there can be thousands of pages and it makes sense that user first sees the original PDF as starting point and clicking that shows the pages of that file.
 
@@ -317,6 +322,6 @@ TOPIC=md-tesseract DEV_URL=localhost:8400  node src/index.mjs
 
  TOPIC=md-zip_fs DEV_URL=localhost:9004 node src/index.mjs 
 
- TOPIC=md-thumbnailer NOMAD=true  node src/index.mjs 
+ TOPIC=md-thumbnailer MD_PATH=/home/arihayri/Projects/MessyDesk  node src/index.mjs 
 
 TOPIC=md-opencv DEV_URL=localhost:9009 node src/index.mjs 
