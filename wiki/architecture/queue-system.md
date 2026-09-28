@@ -98,7 +98,7 @@ Consumers access the queue via HTTP endpoints exposed by the backend (`src/route
 {
   "job": {
     "id": 42,
-    "queue": "md-imaginary_batch",
+    "queue": "md-sharp_batch",
     "payload": { /* original message */ },
     "attempts": 1,
     "max_attempts": 3

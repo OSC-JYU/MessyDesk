@@ -29,8 +29,8 @@ The Solr core is pre-created by `docker-compose.yml` via `solr-precreate messyde
 
 Docs also carry `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued, kept in sync from
 `TagLink` \u2014 see Index Management below), though these aren't currently part of the default query/highlight
-fields above. `TagLink` is classification-autotag only (see graph-data-model.md Entity/Tag System) — NER
-`ner.json` data isn't indexed into Solr yet, it's browsed directly via `/api/tags/ner/labels*`.
+fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System) — Faceted ROI-data
+(`ner.json`) isn't indexed into Solr yet, it's browsed directly via `/api/tags/ner/labels*`.
 
 ### Filters
 
@@ -55,7 +55,7 @@ Solr queries normalize RIDs: accept both `#123:45` and `123:45` formats, escape 
 | `solr.updateTagsForFile(file_rid)` | Sync `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued) on every doc for a file from current `TagLink` rows, via atomic `{"set": [...]}` partial update |
 
 `updateTagsForFile` is invoked from `graph.reindexFileTags`, called from `linkEntity`/`unLinkEntity` (file-level
-only) and transitively from `graph.autotagNerFile`. A single file can have multiple Solr docs (one per indexing
+only) and transitively from `graph.autotagFile`. A single file can have multiple Solr docs (one per indexing
 process, doc `id = fileRidNorm:processRidNorm`), all keyed by the `node` field; all matching docs are updated.
 Errors are non-fatal (logged, not thrown).
 

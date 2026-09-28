@@ -19,7 +19,7 @@ Use this for most services.
 Run from `MD-consumers`:
 
 ```bash
-TOPIC=md-imaginary node src/index.mjs
+TOPIC=md-sharp node src/index.mjs
 ```
 
 What it does:
@@ -51,7 +51,7 @@ Why needed:
 Run from `MD-consumers`:
 
 ```bash
-TOPIC=md-imaginary node src/index-db.mjs
+TOPIC=md-sharp node src/index-db.mjs
 ```
 
 Useful env vars:
@@ -88,7 +88,7 @@ Preflight behavior:
 Example:
 
 ```bash
-TOPIC=md-imaginary DEV_URL=http://localhost:9000 node src/index.mjs
+TOPIC=md-sharp DEV_URL=http://localhost:9000 node src/index.mjs
 ```
 
 ## Descriptor source options

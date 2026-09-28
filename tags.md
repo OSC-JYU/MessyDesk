@@ -1,11 +1,20 @@
 # AutoTag system
 
-**Policy (superseding the original idea below): NER never creates tags.** NER (and NER-like
-structured-extraction) tasks only produce `ner.json`, which is indexed/browsed directly (§6 below,
-`graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions`) — no `Entity`/`TagLink` rows are
-ever written for them, and `service.json` for such tasks must never set `"autotag": true`. Only
-classification-style tasks (whole-document category, e.g. MD-Gliner2's `classify_text`) may still use
-autotag to turn their labels into real, TagLink-backed tags. The rest of this doc, including the
+**Terminology** (see [wiki/glossary.md](wiki/glossary.md) for the canonical definitions): there are two
+distinct mechanisms discussed throughout this doc, historically both called "autotag"/"NER" loosely —
+**Autotag** (creates real `Entity`/`TagLink` rows, needed for Set tag-filters) and **Faceted ROI-data**
+(behaviour keyed on `ner.json` output type, indexes span/region JSON directly for Tags-view browsing,
+no `Entity`/`TagLink` by itself). Where this doc says "NER", it means Faceted ROI-data.
+
+**Policy (superseding the original idea below, amended): Faceted ROI-data doesn't autotag by
+default.** NER (and NER-like structured-extraction) tasks always produce `ner.json`, which is
+indexed/browsed directly (§6 below, `graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions`)
+— by default no `Entity`/`TagLink` rows are written for them, and `service.json` for such tasks must
+never set the static `"autotag": true` flag (that's reserved for whole-document classification tasks,
+e.g. MD-Gliner2's `classify_text`). A span-based task **may** instead declare a user-facing `autotag`
+checkbox param (`params_help.autotag`) so the user can opt in per run — real tags are only needed when
+Set tag-filters must work on that data (Faceted ROI-data itself isn't filterable). MD-lingua's
+`detect_language` does this, defaulting the param to on. The rest of this doc, including the
 earlier phases in §8, predates this correction and describes NER using autotag — that part is stale.
 
 Autotag system means that classification data can be directly transformed to tags.
@@ -317,4 +326,16 @@ Consequences:
    given, and `graph.autotagNerFile` already reuses an existing `Tag` entity by exact
    `(type, label, owner)` match (`graph.checkEntity`) rather than always creating a new one,
    pre-creating/picking the tag is sufficient to guarantee the run only ever links back to that same tag.
+9. **DONE** (MD-lingua): `detect_language` turned out to be span-based (per-segment language
+   detection), not whole-document classification, so per policy (§1) it follows the NER path
+   instead of autotag — MD-lingua's `api.py` writes a real `ner.json`-typed file (`lingua.ner.json`,
+   double extension for MessyDesk's generic intake), browsed via the existing
+   `graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions` machinery, no `service.json`
+   `"autotag"` flag involved. `graph.autotagFile` (renamed from `graph.autotagNerFile`, still used by
+   `classify_text`-style autotag) gained an `entityType` param (defaults to `'Tag'`) for future
+   non-`Tag` autotag entity types, though nothing currently sets it.
+   `Entity` rows now carry `created_by` (`'user'` | `'machine'`), and `graph.pruneOrphanMachineTag`
+   deletes a machine-created entity once its last `TagLink` is gone (wired into `unLinkEntity` and both
+   `TagLink`-cleanup branches of `deleteNode`) — generic across any autotag entity type, added as part
+   of this work but not language-specific.
 

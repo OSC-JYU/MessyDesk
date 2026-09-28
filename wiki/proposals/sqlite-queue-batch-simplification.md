@@ -27,7 +27,7 @@ When batch processing is requested, the backend sends **one message** to the SQL
 ```json
 {
     "type": "batch",
-    "service": { "id": "md-imaginary" },
+    "service": { "id": "md-sharp" },
     "task": { "id": "resize", "params": { "width": 400 } },
     "set_rid": "#13:0",
     "output_set": "#15:0",

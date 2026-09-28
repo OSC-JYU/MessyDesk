@@ -52,7 +52,7 @@ MessyDesk is a document processing platform built around a graph database. Users
            │ HTTP (service-specific API)
            ▼
 ┌──────────────────────────────────────────────┐
-│  Services (FastAPI, Imaginary, Ollama, etc.) │
+│  Services (FastAPI, md-sharp, Ollama, etc.)  │
 │  Stateless; receives file, returns result    │
 └──────────┬───────────────────────────────────┘
            │ HTTP callback

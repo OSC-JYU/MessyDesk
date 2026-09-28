@@ -53,8 +53,8 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 | GET | `/api/tags/machine` | List classification-autotag tags (TagLink-backed) grouped by (service_id, task, label) with counts |
 | GET | `/api/tags/machine/{entity_rid}/files` | Files tagged by one (service_id, task, entity) combination |
 | GET | `/api/tags/machine/{entity_rid}/mentions` | Paged, searchable mention text for one machine-tag combination |
-| GET | `/api/tags/ner/labels` | List NER (service_id, task, label) groups found across a user's `ner.json` runs — no TagLink involved |
-| GET | `/api/tags/ner/labels/files` | Files whose `ner.json` contains a given NER (service_id, task, label) group |
+| GET | `/api/tags/ner/labels` | List Faceted ROI-data (service_id, task, label) groups found across a user's `ner.json` runs — no TagLink involved |
+| GET | `/api/tags/ner/labels/files` | Files whose `ner.json` contains a given Faceted ROI-data (service_id, task, label) group |
 | GET | `/api/tags/ner/labels/mentions` | Paged, searchable mention text (with per-hit start/end/confidence) for one NER label group |
 
 ## NER regions
@@ -134,8 +134,24 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/sso` | SSO endpoint |
+| GET | `/api/me` | Current user identity/access level |
+| GET | `/api/users` | **admin** List users |
+| POST | `/api/users` | **admin** Create user |
+| PUT | `/api/users/{rid}/service-groups` | **admin** Replace a user's ServiceGroup membership (`service_groups` string array) |
 | GET | `/api/permissions/request` | Permission request |
 | DELETE | `/api/logout` | Logout |
+
+## Service Groups
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/service-groups` | **admin** List ServiceGroups |
+| POST | `/api/service-groups` | **admin** Create a ServiceGroup (`id`, `name`, `description`) |
+| PUT | `/api/service-groups/{id}` | **admin** Update `name`/`description` |
+| DELETE | `/api/service-groups/{id}` | **admin** Delete a ServiceGroup |
+| POST | `/api/service-groups/{id}/logo` | **admin** Upload a logo (multipart); resized to 200x200 async via the `md-sharp` queue, see [service-descriptor-format.md](service-descriptor-format.md#service-groups) |
+| GET | `/api/service-groups/{id}/logo/source` | **admin** Fetched by the md-sharp consumer for the pending resize job |
+| GET | `/api/service-groups/{id}/logo` | Serves the resized PNG logo |
 
 ## Filters
 

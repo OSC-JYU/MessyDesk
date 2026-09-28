@@ -122,6 +122,7 @@ db.createDB = async function() {
 		await this.createVertexType('Request')
 		await this.createVertexType('Prompt')
 		await this.createVertexType('ErrorNode')
+		await this.createVertexType('ServiceGroup')
 
 		await this.createDocumentType('Usage')
 		await this.createDocumentType('TagLink')
@@ -170,7 +171,8 @@ db.ensureIndexes = async function() {
 		'CREATE PROPERTY TagLink.target_rid IF NOT EXISTS STRING',
 		'CREATE PROPERTY TagLink.entity_rid IF NOT EXISTS STRING',
 		'CREATE PROPERTY TagLink.region_id IF NOT EXISTS STRING',
-		'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING'
+		'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING',
+		'CREATE PROPERTY ServiceGroup.id IF NOT EXISTS STRING'
 	]
 
 	for(const query of propertyCommands) {
@@ -195,7 +197,8 @@ db.ensureIndexes = async function() {
 		'CREATE INDEX ON Entity (owner) NOTUNIQUE',
 		'CREATE INDEX ON Project (label) NOTUNIQUE',
 		'CREATE INDEX ON TagLink (target_rid) NOTUNIQUE',
-		'CREATE INDEX ON TagLink (entity_rid) NOTUNIQUE'
+		'CREATE INDEX ON TagLink (entity_rid) NOTUNIQUE',
+		'CREATE INDEX ON ServiceGroup (id) UNIQUE'
 	]
 
 	for(const query of indexCommands) {

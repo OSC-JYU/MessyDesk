@@ -16,7 +16,7 @@ function parseArgs(argv) {
     project: `api_example_${Date.now()}`,
     projectDescription: 'Example project created via API script',
     fileDescription: 'Example description set via /api/graph/vertices/{rid}',
-    queueTopic: 'md-imaginary',
+    queueTopic: 'md-sharp',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -150,7 +150,7 @@ async function setFileDescription({ api, mail, fileRid, description }) {
   });
 }
 
-async function queueImaginaryFlip({ api, mail, fileRid, queueTopic }) {
+async function queueSharpFlip({ api, mail, fileRid, queueTopic }) {
   const payload = {
     service: queueTopic,
     id: 'flip',
@@ -216,7 +216,7 @@ async function main() {
   console.log('Updated file description.');
 
   // 4) Add imaginary flip processing node via queue API
-  const queueResult = await queueImaginaryFlip({
+  const queueResult = await queueSharpFlip({
     api: args.api,
     mail: args.mail,
     fileRid,

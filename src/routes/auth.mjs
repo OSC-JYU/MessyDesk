@@ -116,5 +116,16 @@ export default [
             }
             return await Graph.createUser(request.payload);
         }
+    },
+    {
+        method: 'PUT',
+        path: '/api/users/{rid}/service-groups',
+        handler: async (request) => {
+            if (request.auth.credentials.user.access !== 'admin') {
+                throw Boom.forbidden('Admin access required');
+            }
+            const groups = Array.isArray(request.payload?.service_groups) ? request.payload.service_groups : [];
+            return await Graph.updateUserServiceGroups(request.params.rid, groups);
+        }
     }
 ]; 

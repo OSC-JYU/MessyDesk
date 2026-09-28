@@ -696,6 +696,13 @@ export default [
                         task.description = service.tasks[task.id].description;
                     if(service.tasks[task.id].info && !task.info)
                         task.info = service.tasks[task.id].info;
+                    // autotag: same fixed-flag / per-run opt-in logic as Graph.createQueueMessages
+                    // (single-file route) - this route (Set processing) was missing it entirely.
+                    if(service.tasks[task.id].params_help?.autotag) {
+                        task.autotag = Boolean(task.params?.autotag)
+                    } else if(service.tasks[task.id].autotag) {
+                        task.autotag = true
+                    }
                 }
                 var msg = {task: task}
                 var task_name = task?.name || task?.id || topic;

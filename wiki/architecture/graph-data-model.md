@@ -169,26 +169,63 @@ from machine-generated ones:
 - `confidence`: max confidence seen across the run, for machine tags
 - `region_id`: currently always null in practice — autotagging is file-level only by design
 
-**NER never creates tags.** `ner.json` output (per-mention spans with `label`/`text`/`start`/`end`/`confidence`,
-see `graph.getNerRegions`) is indexed/browsed directly and is never turned into an `Entity`/`TagLink` — a
-`service.json` task that produces `ner.json` (or a similarly span-shaped "extract structured data" task) must
-never set `"autotag": true`. `graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions`
-(`/api/tags/ner/labels*`) scan a user's `ner.json` runs directly — grouped by `(service_id, task, label)`, with
-files resolved via each run's `DERIVED_FROM` edge — giving the same browse/drill-down/mention-search UX as
-machine tags below, without a link table.
+The `Entity` vertex itself also carries a `created_by` (`'user'`/`'machine'`), separate from `TagLink`'s own
+field of the same name — this is what lets `graph.pruneOrphanMachineTag` tell an autotag-created tag apart
+from a user-made tag that happens to have zero links, and safely delete only the former.
 
-Autotagging (classification tasks only, e.g. MD-Gliner2's `classify_text` with `service.json`'s
-`"autotag": true`): when a matching output file arrives, `graph.autotagNerFile` creates/reuses one `Entity`
-(type `Tag`) per distinct label found and one `TagLink` per (source file, label). `graph.getMachineTags`/
-`graph.getMachineTagFiles` (`/api/tags/machine*`) let the UI browse these machine tags grouped by service/task
-and drill into tagged files.
+There are two distinct, mutually exclusive mechanisms for making a service task's output browsable in
+the Tags view. Both start from a task's output JSON; which one applies is a **policy decision made per
+task**, not a runtime choice:
+
+- **Autotag** — a declared `service.json` task parameter (`"autotag": true`). Causes MessyDesk to
+  create/link real `Entity`/`TagLink` rows for the task's output labels as soon as the file arrives, so
+  the user browses genuine, TagLink-backed tags. Strictly separated from user-created tagging via
+  `created_by` (`'machine'` vs `'user'`) on both `Entity` and `TagLink` — see below.
+- **Faceted ROI-data** — a *hidden* behaviour, not a declared `service.json` param: any task whose
+  output file has `type: "ner.json"` (a per-span/per-region JSON container, see `graph.getNerRegions`)
+  is automatically indexed for browsing in the Tags view, grouped by `(service_id, task, label)`, with
+  **no** `Entity`/`TagLink` ever created. Despite the `ner.json` type name and the `getNerLabelGroups`
+  function names (historical, from when this only served NER), the mechanism is generic span/region
+  browsing — MD-lingua's `detect_language` (per-segment language detection, not named-entity
+  recognition) is a Faceted ROI-data case, exactly like MD-Gliner2's `extract_entities`.
+
+**Faceted ROI-data never creates tags.** `ner.json` output (per-mention/per-span spans with
+`label`/`text`/`start`/`end`/`confidence`) is indexed/browsed directly — a `service.json` task that
+produces `ner.json` (any span-shaped "extract structured data" task) must never set `"autotag": true`.
+`graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions` (`/api/tags/ner/labels*`) scan a
+user's `ner.json` runs directly — grouped by `(service_id, task, label)`, with files resolved via each
+run's `DERIVED_FROM` edge — giving the same browse/drill-down/mention-search UX as Autotag-created
+machine tags below, without a link table. MD-lingua's `detect_language` reuses this exact path: it
+writes a double-extension `*.ner.json` output file (same region container shape) rather than a separate
+type, so no core changes were needed to browse it.
+
+Autotag (whole-document classification tasks, with `service.json`'s `"autotag": true`): when a
+matching output file arrives, `graph.autotagFile` creates/reuses one `Entity` per distinct label found
+and one `TagLink` per (source file, label). The `Entity.type` used is configurable per task via
+`graph.autotagFile`'s `entityType` param (defaults to `'Tag'`; nothing currently overrides it).
+`graph.getMachineTags`/`graph.getMachineTagFiles` (`/api/tags/machine*`) let the UI browse these
+machine tags grouped by service/task and drill into tagged files. **Policy**: whole-document
+classification tasks (e.g. a hypothetical `classify_text`) set `"autotag": true` unconditionally in
+`service.json` (fixed per task). Span-based "extract structured data" tasks producing `ner.json`
+(MD-Gliner2's `extract_entities`, MD-lingua's `detect_language`) are Faceted ROI-data by default and
+must never set that static flag — but such a task **may** additionally declare a user-facing
+`autotag` checkbox param (`service.json`'s `params_help.autotag`) to let the user opt in per run:
+`graph.createQueueMessages` then sets `msg.task.autotag` from the submitted param value instead of a
+fixed flag (only `Set` tag-filters need real `TagLink` rows — the `ner.json` output is always produced
+and browsable regardless of this toggle). MD-lingua's `detect_language` does this, defaulting the
+param to on, so filtering Sets by detected language works out of the box while per-segment detail
+still comes from Faceted ROI-data.
+
+When a machine-created tag's last `TagLink` is removed (manual unlink, or file/Set deletion cascading through
+`deleteNode`), `graph.pruneOrphanMachineTag` deletes the now-unused `Entity` too — generic across any autotag
+entity type. User-created tags are never pruned this way, even if unused.
 
 
 Tags may optionally carry a `description` (`graph.createTag(label, userRID, description)`). This is used by the
 cruncher tag-picker UI (`TagPickerField.vue` in MessyDesk-UI): a user can restrict a task to a fixed set of
 existing tags instead of typing free-form categories, and if those tags have descriptions, some services (e.g.
 MD-Gliner2's zero-shot extraction) use the description text to improve model accuracy. No special "restrict to
-these tags" backend logic exists for this — `autotagNerFile` already reuses an existing `Tag` entity by exact
+these tags" backend logic exists for this — `autotagFile` already reuses an existing entity by exact
 `(type, label, owner)` match, so a pre-existing tag is simply found and reused rather than duplicated.
 
 Tag filtering (`graph.createTagFilterSet`) queries `TagLink` and creates new Sets containing matching files.
@@ -205,7 +242,7 @@ The `DERIVED_FROM` edge carries metadata attributes:
 {
     process_rid: "#12:50",     // Process node that created this derivation
     process_id: "uuid-...",    // Process UUID
-    cruncher: "Imaginary",     // Service display name
+    cruncher: "md-sharp",      // Service display name
     task: "resize"             // Task ID
 }
 ```
