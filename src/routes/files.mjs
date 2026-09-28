@@ -442,6 +442,12 @@ export default [
                         throw Boom.notFound('Set not found');
                     }
 
+                    // A set that has already been batch-processed by a cruncher cannot accept new
+                    // files: there is no mechanism to re-run/extend that batch afterwards.
+                    if (await Graph.hasSetBeenProcessed(setRid)) {
+                        throw Boom.conflict('This Set has already been processed and can no longer accept new files');
+                    }
+
                     const existingTypes = Array.from(new Set(
                         (Array.isArray(setMetadata.types) ? setMetadata.types : [])
                             .map((value) => String(value || '').toLowerCase())

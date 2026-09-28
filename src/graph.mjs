@@ -592,6 +592,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 	const quotedSetIds = setIds.map((rid) => `"${rid.replace(/"/g, '\\"')}"`).join(',')
 	const query = `SELECT @rid AS rid, set, path, label, type, info, metadata FROM File WHERE set IN [${quotedSetIds}] ORDER BY label`
 	const response = await db.sql(query)
+	const processedSetRids = await graph.getProcessedSetRids(setIds)
 
 	const thumbsBySet = new Map()
 	const typesBySet = new Map()
@@ -637,6 +638,7 @@ async function getSetThumbnails(user_rid, data, project_rid) {
 		setNode.data.text_samples = textSamplesBySet.get(setNode.data.id) || []
 		const setTypes = Array.from(typesBySet.get(setNode.data.id) || [])
 		setNode.data.types = setTypes
+		setNode.data.processed = processedSetRids.has(setNode.data.id)
 	}
 
 	return data
@@ -2163,6 +2165,27 @@ graph.hasDerivedOutputs = async function (file_rid) {
 	const legacyCount = Number(legacyResponse?.result?.[0]?.count || 0)
 
 	return legacyCount > 0
+}
+
+// A Set counts as "processed" once it has been used as the input of a batch cruncher run
+// (connectDerivedFrom(output, set_rid, process_rid) sets @in = set_rid on the DERIVED_FROM edge).
+// There is no mechanism to re-run/extend that batch when files are later added to the set, so
+// uploads must be blocked once this is true.
+graph.hasSetBeenProcessed = async function (set_rid) {
+	const clean_set_rid = this.sanitizeRID(set_rid)
+	const query = `SELECT count(*) AS count FROM DERIVED_FROM WHERE @in = ${clean_set_rid} AND process_rid IS NOT NULL`
+	const response = await db.sql(query)
+	return Number(response?.result?.[0]?.count || 0) > 0
+}
+
+// Bulk variant of hasSetBeenProcessed for annotating multiple Set nodes in one query.
+graph.getProcessedSetRids = async function (set_rids) {
+	const cleanRids = Array.from(new Set((set_rids || []).map((rid) => this.sanitizeRID(rid))))
+	if (cleanRids.length === 0) return new Set()
+
+	const query = `SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE @in IN [${cleanRids.join(',')}] AND process_rid IS NOT NULL`
+	const response = await db.sql(query)
+	return new Set((response?.result || []).map((row) => row.rid))
 }
 
 graph.getFileAncestors = async function (file_rid, userRID, maxDepth = 40) {

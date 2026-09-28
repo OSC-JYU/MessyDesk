@@ -34,10 +34,12 @@ describe('Files upload route (multi-file)', () => {
 
     let fileCounter = 0;
     let setTypes = [];
+    let setAlreadyProcessed = false;
 
     let originalGetProjectMetadata;
     let originalSanitizeRID;
     let originalGetUserFileMetadata;
+    let originalHasSetBeenProcessed;
     let originalCreateOriginalFileNode;
     let originalSetNodeAttribute;
     let originalDetectType;
@@ -48,10 +50,12 @@ describe('Files upload route (multi-file)', () => {
         await fse.ensureDir(testRoot);
         fileCounter = 0;
         setTypes = [];
+        setAlreadyProcessed = false;
 
         originalGetProjectMetadata = Graph.getProjectMetadata;
         originalSanitizeRID = Graph.sanitizeRID;
         originalGetUserFileMetadata = Graph.getUserFileMetadata;
+        originalHasSetBeenProcessed = Graph.hasSetBeenProcessed;
         originalCreateOriginalFileNode = Graph.createOriginalFileNode;
         originalSetNodeAttribute = Graph.setNodeAttribute;
         originalDetectType = media.detectType;
@@ -65,6 +69,7 @@ describe('Files upload route (multi-file)', () => {
             '@type': 'Set',
             types: setTypes,
         });
+        Graph.hasSetBeenProcessed = async () => setAlreadyProcessed;
         Graph.createOriginalFileNode = async (project_rid, file, file_type, setParam, dataDir, originalFilename) => {
             fileCounter += 1;
             return {
@@ -90,6 +95,7 @@ describe('Files upload route (multi-file)', () => {
         Graph.getProjectMetadata = originalGetProjectMetadata;
         Graph.sanitizeRID = originalSanitizeRID;
         Graph.getUserFileMetadata = originalGetUserFileMetadata;
+        Graph.hasSetBeenProcessed = originalHasSetBeenProcessed;
         Graph.createOriginalFileNode = originalCreateOriginalFileNode;
         Graph.setNodeAttribute = originalSetNodeAttribute;
         media.detectType = originalDetectType;
@@ -160,6 +166,21 @@ describe('Files upload route (multi-file)', () => {
             (error) => {
                 assert.equal(error.isBoom, true);
                 assert.match(error.message, /Set accepts only image files/);
+                return true;
+            }
+        );
+    });
+
+    it('blocks uploads into a Set that has already been processed by a cruncher', async () => {
+        setAlreadyProcessed = true;
+        const files = [makeUploadFile('a.txt', 'hello a')];
+
+        await assert.rejects(
+            () => uploadHandler(buildRequest({ files, set: '77:1' }), {}),
+            (error) => {
+                assert.equal(error.isBoom, true);
+                assert.equal(error.output.statusCode, 409);
+                assert.match(error.message, /already been processed/);
                 return true;
             }
         );
