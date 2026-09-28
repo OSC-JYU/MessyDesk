@@ -7,7 +7,9 @@ export const DB_USER = process.env.DB_USER || 'root';
 export const DB_PASSWORD = process.env.DB_PASSWORD;
 
 export const API_URL = process.env.API_URL || 'http://localhost:8200/';
-export const DATA_DIR = 'data/' + DB_NAME;
+// Override with an absolute path (e.g. a mounted volume) in containerised deployments; otherwise
+// defaults to a path relative to cwd, scoped by DB_NAME.
+export const DATA_DIR = process.env.DATA_DIR || ('data/' + DB_NAME);
 export const SOLR_URL = process.env.SOLR_URL || 'http://localhost:8983/solr';
 export const SOLR_CORE = process.env.SOLR_CORE || 'messydesk';
 export const NOMAD = process.env.NOMAD || false;
