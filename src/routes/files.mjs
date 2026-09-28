@@ -254,6 +254,142 @@ function shouldSkipThumbnails(request) {
         || isTruthyOption(payload.noThumbnails);
 }
 
+// Uploads one already-typed file stream into a project/set and runs the post-write pipeline
+// (metadata extraction, thumbnail/rotate queueing, UI notification, PDF split trigger).
+async function uploadSingleFileToProject({ file, file_type, project_rid, setParam, userRid, hasUserId, deleteOriginal, noThumbnails }) {
+    const originalFilename = file.hapi.filename;
+
+    // Create file node in graph
+    const filegraph = await Graph.createOriginalFileNode(
+        project_rid,
+        file,
+        file_type,
+        setParam,
+        DATA_DIR,
+        originalFilename
+    );
+
+    // Upload file to storage
+    var filepath = filegraph.path.split('/').slice(0, -1).join('/');
+    await fse.ensureDir(filepath);
+
+    const filesave = fse.createWriteStream(filegraph.path);
+
+    // Create a promise to handle the file upload completion
+    const uploadPromise = new Promise((resolve, reject) => {
+        // Set up error handler before piping
+        filesave.on('error', (err) => {
+            console.error('File write error:', err);
+            reject(err);
+        });
+
+        file.pipe(filesave);
+
+        filesave.on('finish', async () => {
+            console.log('file uploaded');
+            var base_metadata = {}
+            const stats = await fse.stat(filegraph.path);
+            base_metadata.size = Number((stats.size / (1024 * 1024)).toFixed(1));
+            filegraph.metadata = base_metadata
+            console.log('filetype', file_type);
+
+            // IMAGE
+            if (file_type === 'image') {
+
+                // Get image metadata
+                const image_metadata = await media.getImageSize(filegraph.path)
+                console.log('metadata', image_metadata);
+                filegraph.metadata = {...filegraph.metadata, ...image_metadata}
+
+                // Always store metadata for image node.
+                try {
+                    await Graph.setNodeAttribute_old(filegraph['@rid'], {
+                        key: 'metadata',
+                        value: filegraph.metadata
+                    }, 'File');
+                } catch (error) {
+                    console.log('Error setting node attribute:', error);
+                }
+
+                if (noThumbnails) {
+                    // Skip thumbnail/update queue actions when explicitly requested.
+                } else {
+
+                    // ************** EXIF FIX **************
+                    // if file has EXIF orientation, then we need to rotate it
+                    if(image_metadata.rotate) {
+
+                        var rotatedata = {
+                            topic: {id: 'md-imaginary'},
+                            service: {id: 'md-imaginary'},
+                            task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
+                            file: filegraph,
+                            userId: userRid,
+                            role: 'internal_versioning',
+                            process: {kind: 'internal_versioning'}
+
+                        }
+                        queue.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
+
+                    // ************** EXIF FIX ENDS **************
+                    } else {
+                        const data = {
+                            topic: {id: 'md-thumbnailer'},
+                            service: {id: 'md-thumbnailer'},
+                            task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
+                            file: filegraph,
+                            userId: userRid
+                        };
+
+                        queue.publish(data.topic.id, JSON.stringify(data));
+                    }
+                }
+            }
+
+
+            // TEXT
+            if (['text', 'html', 'json', 'csv'].includes(file_type)) {
+                try {
+                    const info = await media.getTextDescription(filegraph.path, file_type);
+                    filegraph.info = info
+                    await Graph.setNodeAttribute(filegraph['@rid'], {
+                        key: 'info',
+                        value: info
+                    }, userRid);
+                } catch (error) {
+                    console.log('Error getting text description:', error);
+                }
+            }
+
+            // Add file to UI
+            if (hasUserId) {
+                filegraph._type = file_type
+                const wsdata = {
+                    command: 'add',
+                    type: file_type,
+                    node: filegraph,
+                    image: 'api/thumbnails',
+                    set: setParam
+                };
+                userManager.sendToUser(userRid, wsdata);
+            }
+
+            // PDF auto-import: trigger split pipeline
+            if (file_type === 'pdf') {
+                await afterFileCreated(filegraph, {
+                    userId: userRid,
+                    delete_original: deleteOriginal
+                });
+            }
+
+            resolve(filegraph);
+        });
+    });
+
+    // Wait for the upload to complete before returning
+    return await uploadPromise;
+}
+
 export default [
     {
         method: 'POST',
@@ -276,37 +412,32 @@ export default [
                 }
 
                 const project_rid = response.result[0].project["@rid"];
-                const file = request.payload.file;
+                const rawFiles = request.payload.file;
 
-                // Validate file exists in payload
-                if (!file) {
+                // Validate file(s) exist in payload
+                if (!rawFiles) {
                     throw Boom.badRequest('No file uploaded');
                 }
+                const files = Array.isArray(rawFiles) ? rawFiles : [rawFiles];
 
-                // Get original filename
-                const originalFilename = file.hapi.filename;
-                console.log('Uploading file:', originalFilename);
+                // Multiple files may only be uploaded directly into a Set, not onto the main desk
+                if (files.length > 1 && !request.params.set) {
+                    throw Boom.badRequest('Multiple file upload is only supported when uploading into a Set');
+                }
+
                 const noThumbnails = shouldSkipThumbnails(request);
                 if (noThumbnails) {
                     console.log('Upload option no-thumbnails enabled, skipping thumbnail queue actions');
                 }
-
-                // Get file type
-                const file_type = await media.detectType(file);
-                if (!file_type) {
-                    throw Boom.badRequest('Could not determine file type');
-                }
-
-                // PDF import gating: splitter must be active
-                if (file_type === 'pdf' && !services.hasActiveConsumer('md-pypdf_fs')) {
-                    throw Boom.serverUnavailable('PDF import requires the md-pypdf_fs splitter service to be running');
-                }
-
                 const deleteOriginal = request.query.delete_original !== 'false';
+                const userRid = request.auth.credentials.user.rid;
+                const hasUserId = !!request.auth.credentials.user.id;
 
+                // Establish/confirm the Set's required file type once for the whole batch
+                let requiredType = null;
                 if (request.params.set) {
                     const setRid = Graph.sanitizeRID(request.params.set);
-                    const setMetadata = await Graph.getUserFileMetadata(setRid, request.auth.credentials.user.rid);
+                    const setMetadata = await Graph.getUserFileMetadata(setRid, userRid);
                     if (!setMetadata || setMetadata['@type'] !== 'Set') {
                         throw Boom.notFound('Set not found');
                     }
@@ -321,140 +452,68 @@ export default [
                         throw Boom.badRequest('Set contains mixed file types; new uploads are blocked until set type is normalized');
                     }
 
-                    if (existingTypes.length === 1 && existingTypes[0] !== String(file_type).toLowerCase()) {
-                        throw Boom.badRequest(`Set accepts only ${existingTypes[0]} files`);
+                    if (existingTypes.length === 1) {
+                        requiredType = existingTypes[0];
                     }
                 }
 
-                // Create file node in graph
-                const filegraph = await Graph.createOriginalFileNode(
-                    project_rid,
-                    file,
-                    file_type,
-                    request.params.set,
-                    DATA_DIR,
-                    originalFilename
-                );
+                const uploaded = [];
+                const failed = [];
 
-                // Upload file to storage
-                var filepath = filegraph.path.split('/').slice(0, -1).join('/');
-                await fse.ensureDir(filepath);
+                for (const file of files) {
+                    const originalFilename = file.hapi && file.hapi.filename;
+                    try {
+                        console.log('Uploading file:', originalFilename);
 
-                const filesave = fse.createWriteStream(filegraph.path);
-
-                // Create a promise to handle the file upload completion
-                const uploadPromise = new Promise((resolve, reject) => {
-                    // Set up error handler before piping
-                    filesave.on('error', (err) => {
-                        console.error('File write error:', err);
-                        reject(err);
-                    });
-
-                    file.pipe(filesave);
-                    
-                    filesave.on('finish', async () => {
-                        console.log('file uploaded');
-                        var base_metadata = {}
-                        const stats = await fse.stat(filegraph.path);
-                        base_metadata.size = Number((stats.size / (1024 * 1024)).toFixed(1));
-                        filegraph.metadata = base_metadata
-console.log('filetype', file_type);
-
-                        // IMAGE
-                        if (file_type === 'image') {
-
-                            // Get image metadata
-                            const image_metadata = await media.getImageSize(filegraph.path)
-                            console.log('metadata', image_metadata);
-                            filegraph.metadata = {...filegraph.metadata, ...image_metadata}
-
-                            // Always store metadata for image node.
-                            try {
-                                await Graph.setNodeAttribute_old(filegraph['@rid'], {
-                                    key: 'metadata',
-                                    value: filegraph.metadata
-                                }, 'File');
-                            } catch (error) {
-                                console.log('Error setting node attribute:', error);
-                            }
-
-                            if (noThumbnails) {
-                                // Skip thumbnail/update queue actions when explicitly requested.
-                            } else {
-
-	                        // ************** EXIF FIX **************
-	                        // if file has EXIF orientation, then we need to rotate it
-                            if(image_metadata.rotate) {
-
-                                var rotatedata = {
-                                    topic: {id: 'md-imaginary'},
-                                    service: {id: 'md-imaginary'},
-                                    task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
-                                    file: filegraph,
-                                    userId: request.auth.credentials.user.rid,
-                                    role: 'internal_versioning',
-                                    process: {kind: 'internal_versioning'}
-                            
-                                }
-                                queue.publish(rotatedata.topic.id, JSON.stringify(rotatedata));
-
-                            // ************** EXIF FIX ENDS **************
-                            } else {
-                                const data = {
-                                    topic: {id: 'md-thumbnailer'},
-                                    service: {id: 'md-thumbnailer'},
-                                    task: {id: 'thumbnail', params: { width: 800, type: 'jpeg' }},
-                                    file: filegraph,
-                                    userId: request.auth.credentials.user.rid
-                                };
-                                
-                                queue.publish(data.topic.id, JSON.stringify(data));
-                            }
-                            }
-                        } 
-
-                        
-                        // TEXT
-                        if (['text', 'html', 'json', 'csv'].includes(file_type)) {
-                            try {
-                                const info = await media.getTextDescription(filegraph.path, file_type);
-                                filegraph.info = info
-                                await Graph.setNodeAttribute(filegraph['@rid'], {
-                                    key: 'info',
-                                    value: info
-                                }, request.auth.credentials.user.rid);
-                            } catch (error) {
-                                console.log('Error getting text description:', error);
-                            }
+                        const file_type = await media.detectType(file);
+                        if (!file_type) {
+                            throw Boom.badRequest(`Could not determine file type for ${originalFilename}`);
                         }
 
-                        // Add file to UI
-                        if (request.auth.credentials.user.id) {
-                            filegraph._type = file_type
-                            const wsdata = {
-                                command: 'add',
-                                type: file_type,
-                                node: filegraph,
-                                image: 'api/thumbnails',
-                                set: request.params.set
-                            };
-                            userManager.sendToUser(request.auth.credentials.user.rid, wsdata);
+                        if (requiredType && String(file_type).toLowerCase() !== requiredType) {
+                            throw Boom.badRequest(`Set accepts only ${requiredType} files`);
                         }
 
-                        // PDF auto-import: trigger split pipeline
-                        if (file_type === 'pdf') {
-                            await afterFileCreated(filegraph, {
-                                userId: request.auth.credentials.user.rid,
-                                delete_original: deleteOriginal
-                            });
+                        // PDF import gating: splitter must be active
+                        if (file_type === 'pdf' && !services.hasActiveConsumer('md-pypdf_fs')) {
+                            throw Boom.serverUnavailable('PDF import requires the md-pypdf_fs splitter service to be running');
                         }
 
-                        resolve(filegraph);
-                    });
-                });
+                        const filegraph = await uploadSingleFileToProject({
+                            file,
+                            file_type,
+                            project_rid,
+                            setParam: request.params.set,
+                            userRid,
+                            hasUserId,
+                            deleteOriginal,
+                            noThumbnails
+                        });
 
-                // Wait for the upload to complete before returning
-                return await uploadPromise;
+                        uploaded.push(filegraph);
+                        // Lock in the type for the remaining files in this batch
+                        if (!requiredType) {
+                            requiredType = String(file_type).toLowerCase();
+                        }
+                    } catch (error) {
+                        console.error('File upload error:', originalFilename, error);
+                        failed.push({
+                            filename: originalFilename || null,
+                            error: (error && error.message) || 'Upload failed'
+                        });
+                    }
+                }
+
+                // Preserve single-file response shape for backward compatibility
+                if (files.length === 1) {
+                    if (failed.length) {
+                        const err = failed[0];
+                        throw Boom.badRequest(err.error);
+                    }
+                    return uploaded[0];
+                }
+
+                return { uploaded, failed, total: files.length };
 
             } catch (error) {
                 console.error('File upload error:', error);
