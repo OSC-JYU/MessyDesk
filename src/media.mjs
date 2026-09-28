@@ -519,7 +519,7 @@ function NERsummary(data) {
 	try {
 
 		var parsed = JSON.parse(data)
-		// ner.json is {rois: {...}} or {rois: [...]} (see graph.autotagNerFile), not a bare array of
+		// ner.json is {rois: {...}} or {rois: [...]} (see graph.autotagFile), not a bare array of
 		// raw model entities anymore.
 		var regions = Object.values(parsed.rois || parsed || {})
 		const entityCounts = {};

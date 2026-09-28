@@ -320,8 +320,8 @@ async function uploadSingleFileToProject({ file, file_type, project_rid, setPara
                     if(image_metadata.rotate) {
 
                         var rotatedata = {
-                            topic: {id: 'md-imaginary'},
-                            service: {id: 'md-imaginary'},
+                            topic: {id: 'md-sharp'},
+                            service: {id: 'md-sharp'},
                             task: {id: 'rotate', params: {rotate: `${image_metadata.rotate}`, stripmeta: 'true'}},
                             file: filegraph,
                             userId: userRid,

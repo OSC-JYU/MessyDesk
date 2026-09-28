@@ -11,7 +11,6 @@ import Boom from '@hapi/boom';
 
 import { processFilesHandler, processFilesFromTmpHandler, processMetadataHandler, processCSVAppendHandler } from '../controllers/processFilesController.mjs';
 import userManager from '../userManager.mjs';
-import { DATA_DIR, API_URL } from '../env.mjs';
 
 
 export default [

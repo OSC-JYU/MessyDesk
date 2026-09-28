@@ -18,14 +18,14 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 
 ```json
 {
-    "id": "md-imaginary",
-    "adapter": "imaginary",
-    "name": "Imaginary",
+    "id": "md-sharp",
+    "adapter": "elg",
+    "name": "Sharp",
     "description": "Image operations service",
     "location": "on-premise",
     "access": "free",
-    "category": "linguistic",
-    "source_url": "https://github.com/h2non/node-imaginary",
+    "category": "preparation",
+    "source_url": "https://sharp.pixelplumbing.com/",
 
     "local_url": "http://localhost:9000",
     "dev_url": "http://localhost:9001",
@@ -63,7 +63,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
 | `id` | string | **Yes** | Must match TOPIC and consumer durable name |
-| `adapter` | string | **Yes** | Adapter file name (e.g., `imaginary` → `adapters/imaginary.mjs`) |
+| `adapter` | string | **Yes** | Adapter file name (e.g., `elg` → `adapters/elg.mjs`) |
 | `name` | string | No | Display name in UI |
 | `description` | string | No | Service description |
 | `local_url` | string | No | Default service endpoint |
@@ -74,7 +74,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `source_url` | string | No | Documentation/source URL |
 | `supported_types` | string[] | No | File types this service accepts (e.g., `["image", "text"]`) |
 | `supported_formats` | string[] | No | File extensions accepted (e.g., `["png", "jpg"]`) |
-| `service_groups` | string[] | No | Category tags for UI grouping |
+| `service_groups` | string[] | No | ServiceGroup `id`s gating which users may use the service/task — see [Service Groups](#service-groups) |
 | `tasks` | object | Yes* | Task definitions (see below) |
 | `external_tasks` | string | No | If set (e.g., `"prompts"`), tasks defined externally |
 | `models` | object | No | Model variants for LLM services |
@@ -157,3 +157,31 @@ All Python services in this workspace follow this common pattern:
 - `/process` accepts multipart: `message` (JSON metadata) + `content` (file) + optional `source` (image)
 - Storage mode: `STORAGE_MODE` env (`http` or `disk`)
 - Disk mode validates paths against `MD_PATH` to prevent traversal
+
+## Service Groups
+
+`service_groups` (top-level and per-task) started out as free-text strings (e.g. `"IMAGE"`, `"OSC"`)
+gating which users can see/run a service or task (`services.mjs` `pickTasks()`: a user only sees a
+service/task if `user.service_groups` intersects it). These values are now backed by an admin-managed
+`ServiceGroup` graph vertex type (`graph.mjs` `createServiceGroup`/`getServiceGroups`/etc., routes in
+`routes/service-groups.mjs`), giving each group a stable `id` (the string used in `service_groups`
+arrays), a display `name`, a `description`, and an optional `logo`.
+
+**[verified]** from `src/graph.mjs`, `src/routes/service-groups.mjs`, `src/routes/auth.mjs`.
+
+- Managed from the admin-only Service Groups tab in MessyDesk-UI's `AdminMain.vue`; backend routes
+  also enforce `access === 'admin'` independently.
+- `ServiceGroup.id` must match `^[A-Za-z0-9_-]{1,64}$` (also enforced defensively wherever the id is
+  used to build a filesystem path).
+- A user's group membership is edited inline in the Users tab and persisted via
+  `PUT /api/users/{rid}/service-groups`, which replaces `User.service_groups`.
+- Logo upload (`POST /api/service-groups/{id}/logo`) calls the standalone **MD-sharp** service's
+  `/process` endpoint directly and synchronously over HTTP (multipart `message` + `content` fields,
+  `fit` task, 200x200 PNG output) — see `src/routes/service-groups.mjs`. This bypasses the
+  queue/consumer pipeline entirely: a ServiceGroup logo isn't a Project/File graph node, so there is
+  no `@rid` for a consumer to attach a result to, and no benefit to going through a MD-consumers
+  adapter for a one-off admin action. The response is written straight to disk and returned to the
+  admin UI in the same request — no polling or pending state.
+- Requires the `md-sharp` service to be registered in MessyDesk's service registry with a reachable
+  `local_url`/`url` (see [architecture/services/consumers.md](architecture/services/consumers.md)); if
+  not registered, the upload fails immediately with a 503 rather than hanging.

@@ -52,6 +52,12 @@ const entityTypes = [
 	{type:'Organisation', icon:'warehouse', color:'rgb(40, 19, 163)', label:'Organisation'}
 ]
 
+// File types whose provenance (service_id/task on the File node) drives autotag/TagLink cleanup.
+// ner.json (Faceted ROI-data) doesn't autotag by default, but a task may opt in via a per-run
+// "autotag" param (see createQueueMessages) - either way it shares the same region container shape
+// and delete-cascade path.
+const AUTOTAG_SOURCE_FILE_TYPES = ['ner.json']
+
 
 graph.initDB = async function () {
 	db.initURL(DB_URL)
@@ -92,6 +98,7 @@ graph.initDB = async function () {
 	await db.createEdgeType('DERIVED_FROM')
 	await db.createEdgeType('HAS_OWNER')
 	await db.createDocumentType('TagLink')
+	await db.createVertexType('ServiceGroup')
 	await db.ensureIndexes()
 }
 
@@ -287,6 +294,15 @@ graph.createUser = async function (data) {
 
 
 	return user
+}
+
+// Admin-only editing of a user's ServiceGroup membership (AdminMain.vue Users tab).
+graph.updateUserServiceGroups = async function (userRid, groups) {
+	if(!userRid.match(/^#/)) userRid = '#' + userRid
+	const clean = Array.isArray(groups) ? groups.map((g) => String(g).trim()).filter(Boolean) : []
+	await this.setNodeAttribute_old(userRid, {key: 'service_groups', value: clean}, 'User')
+	const response = await db.sql(`SELECT @rid AS rid, service_groups FROM User WHERE @rid = ${userRid}`)
+	return response.result[0] || null
 }
 
 graph.initUserData = async function (user) {
@@ -861,9 +877,12 @@ graph.getSetFiles = async function (set_rid, user_rid, params) {
 				if(file.path && (file.type !== 'pdf' || await shouldUsePdfThumbnail(file))) {
 					file.thumb = API_URL + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/')
 				}
-				const entity_query = `MATCH (file:File)-[r:HAS_ENTITY]->(entity:Entity) WHERE id(file) = "${file['@rid']}" RETURN entity.label AS label, entity.icon AS icon, entity.color AS color, id(entity) AS rid`
-				const entity_response = await db.cypher(entity_query)
-				file.entities = entity_response.result
+				// tag assignment lives in TagLink (a document, not a graph edge) - HAS_ENTITY is retired, see graph-data-model.md
+				const linkResponse = await db.sql(`SELECT entity_rid FROM TagLink WHERE target_rid = "${file['@rid']}" AND region_id IS NULL`)
+				const entityRids = (linkResponse.result || []).map((row) => row.entity_rid).filter(Boolean)
+				file.entities = entityRids.length
+					? (await db.sql(`SELECT label, icon, color, @rid AS rid FROM Entity WHERE @rid IN [${entityRids.join(',')}]`)).result
+					: []
 			}
 		}
 
@@ -1074,9 +1093,17 @@ graph.createQueueMessages =  async function(service, task, node_rid, user_rid, r
 			msg.task.description = service.tasks[task.id].description
 		if(service.tasks[task.id].info && !msg.task.info)
 			msg.task.info = service.tasks[task.id].info
-		// autotag: convert this task's ner.json output straight into TagLink rows on arrival
-		if(service.tasks[task.id].autotag)
+		// autotag: convert this task's output region file straight into TagLink rows on arrival.
+		// Two ways a task can end up here: a fixed per-task descriptor flag (whole-document
+		// classification, e.g. classify_text), or - for Faceted ROI-data (ner.json) tasks that declare
+		// a user-facing "autotag" param (e.g. md-lingua's detect_language) - a per-run toggle, since
+		// only TagLink-backed tags can be used for Set tag-filters. The ner.json output is always
+		// produced/browsable either way; this only controls the additional Entity/TagLink creation.
+		if(service.tasks[task.id].params_help?.autotag) {
+			msg.task.autotag = Boolean(msg.task.params?.autotag)
+		} else if(service.tasks[task.id].autotag) {
 			msg.task.autotag = true
+		}
 	}
 
 
@@ -1846,18 +1873,32 @@ graph.getNerRegions = async function(file_rid, user_rid) {
 	}))
 }
 
-// Autotag: turn a freshly-arrived ner.json into TagLink rows, one per distinct label seen in the
-// file (not per raw mention) so repeated hits of the same label don't spam the link table.
-graph.autotagNerFile = async function(nerNode, source_rid, message) {
-	if(!nerNode?.path) return []
+// Autotag: turn a freshly-arrived output file into TagLink rows, one per distinct label (not per
+// raw mention) so repeated hits of the same label don't spam the link table. Two known output
+// shapes: Faceted ROI-data's {rois: {...}} (span per region, e.g. MD-lingua's detect_language), and
+// a whole-document classification task's {result: {category: ...}} (e.g. MD-Gliner2's
+// classify_text - a single label string, or an array of labels for multi_label runs, no
+// per-label confidence today). NER itself never autotags on its own (goes to Solr/browse instead,
+// see policy note at top of tags.md) - only fires when message.task.autotag is set.
+graph.autotagFile = async function(regionNode, source_rid, message, entityType = 'Tag') {
+	if(!regionNode?.path) return []
 	let parsed
 	try {
-		parsed = await media.readJSON(nerNode.path)
+		parsed = await media.readJSON(regionNode.path)
 	} catch (error) {
-		console.log('autotag: could not read ner.json: ', error.message)
+		console.log('autotag: could not read region JSON: ', error.message)
 		return []
 	}
-	const regions = Object.values(parsed.rois || parsed || {})
+
+	let regions
+	if(parsed.rois) {
+		regions = Object.values(parsed.rois)
+	} else if(parsed.result && parsed.result.category !== undefined) {
+		const categories = Array.isArray(parsed.result.category) ? parsed.result.category : [parsed.result.category]
+		regions = categories.filter(Boolean).map((label) => ({label, confidence: null}))
+	} else {
+		regions = Object.values(parsed)
+	}
 	if(!regions.length) return []
 
 	const userRID = message.userId
@@ -1875,10 +1916,10 @@ graph.autotagNerFile = async function(nerNode, source_rid, message) {
 
 	const linked = []
 	for(const [label, confidence] of bestConfidenceByLabel) {
-		const check = await this.checkEntity({type: 'Tag', label}, source_rid, userRID)
+		const check = await this.checkEntity({type: entityType, label}, source_rid, userRID)
 		let entity_rid = check.result?.[0]?.entity?.['@rid']
 		if(!entity_rid) {
-			const created = await this.createEntity({type: 'Tag', label}, userRID)
+			const created = await this.createEntity({type: entityType, label, created_by: 'machine'}, userRID)
 			entity_rid = created.result?.[0]?.['@rid']
 		}
 		if(!entity_rid) continue
@@ -2391,9 +2432,9 @@ graph.deleteNode = async function (rid, userRID) {
 			solrTargets.add(node['@rid'])
 		}
 
-		// ner.json is machine-tag provenance, not just an artifact file: its TagLink rows (§5) must
-		// be cleaned up too, since TagLink doesn't otherwise reference the ner.json rid.
-		if(node['@type'] === 'File' && node.file_type === 'ner.json') {
+		// ner.json/language.json are machine-tag provenance, not just artifact files: their TagLink rows
+		// (§5) must be cleaned up too, since TagLink doesn't otherwise reference the region file's rid.
+		if(node['@type'] === 'File' && AUTOTAG_SOURCE_FILE_TYPES.includes(node.file_type)) {
 			nerJsonNodes.add(node['@rid'])
 		}
 		if(node['@type'] === 'File') {
@@ -2454,29 +2495,37 @@ graph.deleteNode = async function (rid, userRID) {
 		await solr.dropSetIndex(solrRid)
 	}
 
-	// Machine tags produced by a deleted ner.json run: TagLink stores no direct FK to the ner.json
-	// rid (region_id stays null for MVP), so look each one up via its DERIVED_FROM source instead.
+	// Machine tags produced by a deleted ner.json/language.json run: TagLink stores no direct FK to the
+	// region file's rid (region_id stays null for MVP), so look each one up via its DERIVED_FROM source.
 	for(const nerRid of nerJsonNodes) {
 		const sourceResponse = await db.sql(`SELECT @in AS rid FROM DERIVED_FROM WHERE @out = ${nerRid}`)
 		const sourceRid = sourceResponse.result?.[0]?.rid
 		if(!sourceRid) continue
 		const nerNodeResponse = await db.sql(`SELECT service_id, task FROM ${nerRid}`)
 		const {service_id, task} = nerNodeResponse.result?.[0] || {}
-		let cleanupQuery = `DELETE FROM TagLink WHERE target_rid = "${sourceRid}" AND created_by = "machine"`
-		if(service_id) cleanupQuery += ` AND service_id = "${service_id}"`
-		if(task) cleanupQuery += ` AND task = "${task}"`
-		await db.sql(cleanupQuery)
+		let whereClause = `target_rid = "${sourceRid}" AND created_by = "machine"`
+		if(service_id) whereClause += ` AND service_id = "${service_id}"`
+		if(task) whereClause += ` AND task = "${task}"`
+		const affected = await db.sql(`SELECT DISTINCT entity_rid AS rid FROM TagLink WHERE ${whereClause}`)
+		await db.sql(`DELETE FROM TagLink WHERE ${whereClause}`)
+		for(const {rid: entityRid} of affected.result || []) {
+			await this.pruneOrphanMachineTag(entityRid)
+		}
 		// The source file itself isn't being deleted here, so its Solr doc(s) survive with now-stale
-		// tag_* fields (\u00a74) — resync them from the TagLink rows that remain after cleanup.
+		// tag_* fields (§4) — resync them from the TagLink rows that remain after cleanup.
 		if(!toDelete.has(sourceRid)) {
 			await this.reindexFileTags(sourceRid, userRID)
 		}
 	}
 
-	// Any file being deleted outright (not just its ner.json provenance) should drop its TagLink rows too.
+	// Any file being deleted outright (not just its ner.json/language.json provenance) should drop its TagLink rows too.
 	if(toDelete.size > 0) {
 		const targetRidList = Array.from(toDelete).map((r) => `"${r}"`).join(',')
+		const affected = await db.sql(`SELECT DISTINCT entity_rid AS rid FROM TagLink WHERE target_rid IN [${targetRidList}]`)
 		await db.sql(`DELETE FROM TagLink WHERE target_rid IN [${targetRidList}]`)
+		for(const {rid: entityRid} of affected.result || []) {
+			await this.pruneOrphanMachineTag(entityRid)
+		}
 	}
 
 	// Solr docs for deleted files become orphans (stale content + tag_* fields) otherwise.
@@ -3110,7 +3159,9 @@ graph.createEntity = async function (data, userRID) {
 		data.color = '#ff8844'
 	}
 	const entity_uuid = uuidv7()
-	var query = `CREATE Vertex Entity set uuid = "${entity_uuid}", type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}"`
+	// created_by distinguishes autotag-created entities (safe to prune once orphaned) from user-made ones.
+	const created_by = data.created_by === 'machine' ? 'machine' : 'user'
+	var query = `CREATE Vertex Entity set uuid = "${entity_uuid}", type = "${data.type}", label = "${data.label}", icon = "${data.icon}", color = "${data.color}", owner = "${userRID}", created_by = "${created_by}"`
 	if(data.description) query += `, description = "${String(data.description).replace(/"/g, '\\"')}"`
 	console.log(query)
 	return await db.sql(query)
@@ -3208,7 +3259,22 @@ graph.unLinkEntity = async function (rid, vid, userRID) {
 	if(!entity) return
 	const deleted = await this.deleteTagLink(rid, vid)
 	await this.reindexFileTags(vid, userRID)
+	await this.pruneOrphanMachineTag(rid)
 	return deleted
+}
+
+// A machine-created tag (Entity.created_by = 'machine') left with zero TagLink rows serves no
+// purpose - unlike user-made tags, which are kept around even unused. Generic across autotag types
+// (language, future classification tags, ...), triggered wherever a TagLink cleanup may zero one out.
+graph.pruneOrphanMachineTag = async function (entity_rid) {
+	if(!entity_rid) return
+	if(!entity_rid.match(/^#/)) entity_rid = '#' + entity_rid
+	const entityResponse = await db.sql(`SELECT created_by FROM Entity WHERE @rid = ${entity_rid}`)
+	const entity = entityResponse.result?.[0]
+	if(!entity || entity.created_by !== 'machine') return
+	const linkResponse = await db.sql(`SELECT count(*) AS count FROM TagLink WHERE entity_rid = "${entity_rid}"`)
+	if((linkResponse.result?.[0]?.count || 0) > 0) return
+	await db.sql(`DELETE FROM Entity WHERE @rid = ${entity_rid}`)
 }
 graph.getTags = async function (userRID) {
 	var query = `SELECT @rid AS rid, label, type, icon, color, description FROM Entity WHERE owner = "${userRID}" AND type = "Tag" ORDER BY label`
@@ -3218,6 +3284,69 @@ graph.getTags = async function (userRID) {
 graph.createTag = async function (label, userRID, description) {
 	if(!label) return
 	return await this.createEntity({type: 'Tag', label, description}, userRID)
+}
+
+// ServiceGroup: admin-managed entity whose id is the canonical value referenced by
+// service.json's `service_groups` array and by User.service_groups (see wiki/service-descriptor-format.md).
+const SERVICE_GROUP_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
+
+graph.getServiceGroups = async function () {
+	const query = `SELECT @rid AS rid, id, name, description, logo, logo_version FROM ServiceGroup ORDER BY id`
+	const response = await db.sql(query)
+	return response.result
+}
+
+graph.getServiceGroup = async function (id) {
+	if(!id) return null
+	const query = `SELECT @rid AS rid, id, name, description, logo, logo_version FROM ServiceGroup WHERE id = "${String(id).replace(/"/g, '\\"')}"`
+	const response = await db.sql(query)
+	return response.result[0] || null
+}
+
+graph.createServiceGroup = async function (data) {
+	const id = String(data?.id || '').trim()
+	if(!id) throw new Error('ServiceGroup id is required')
+	if(!SERVICE_GROUP_ID_PATTERN.test(id)) throw new Error('ServiceGroup id may only contain letters, numbers, "_" and "-"')
+
+	const existing = await db.sql(`SELECT count() AS count FROM ServiceGroup WHERE id = "${id}"`)
+	if(existing.result[0].count > 0) throw new Error(`ServiceGroup "${id}" already exists`)
+
+	const name = data.name ? String(data.name).replace(/"/g, '\\"') : id
+	const fields = [`id = "${id}"`, `name = "${name}"`]
+	if(data.description) fields.push(`description = "${String(data.description).replace(/"/g, '\\"')}"`)
+
+	const query = `CREATE VERTEX ServiceGroup SET ${fields.join(', ')}`
+	const response = await db.sql(query)
+	return response.result[0]
+}
+
+graph.updateServiceGroup = async function (id, patch = {}) {
+	const group = await this.getServiceGroup(id)
+	if(!group) throw new Error(`ServiceGroup "${id}" not found`)
+
+	for(const key of ['name', 'description', 'logo']) {
+		if(patch[key] === undefined) continue
+		await this.setNodeAttribute_old(group.rid, {key, value: String(patch[key])}, 'ServiceGroup')
+	}
+	return await this.getServiceGroup(id)
+}
+
+graph.deleteServiceGroup = async function (id) {
+	const group = await this.getServiceGroup(id)
+	if(!group) throw new Error(`ServiceGroup "${id}" not found`)
+	await db.sql(`DELETE FROM ServiceGroup WHERE @rid = ${group.rid}`)
+	return true
+}
+
+// Bumps logo_version so the admin UI (which polls after upload) can detect the async
+// md-sharp resize result landing on the ServiceGroup node (see routes/service-groups.mjs).
+graph.setServiceGroupLogo = async function (id, logoFilename) {
+	const group = await this.getServiceGroup(id)
+	if(!group) throw new Error(`ServiceGroup "${id}" not found`)
+	const nextVersion = Number(group.logo_version || 0) + 1
+	await this.setNodeAttribute_old(group.rid, {key: 'logo', value: logoFilename}, 'ServiceGroup')
+	await this.setNodeAttribute_old(group.rid, {key: 'logo_version', value: nextVersion}, 'ServiceGroup')
+	return await this.getServiceGroup(id)
 }
 
 // Browsing view for the Tags UI (\u00a76): machine-created tags grouped by the service/task run that

@@ -26,6 +26,8 @@ function parseMessagePayload(payloadMessage) {
     return Promise.resolve(payloadMessage);
 }
 
+export { parseMessagePayload };
+
 function resolveTmpFilePath(payload, message) {
     //console.log('Resolving tmp file path...');
     //console.log('message:', message);
@@ -502,12 +504,14 @@ async function processFilesCore(request, infoFilepath, contentFilepath, message)
             // when the task never autotags - stamp them unconditionally, independent of autotag.
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'service_id', value: message.service?.id || null}, 'File');
             await Graph.setNodeAttribute_old(fileNode['@rid'], {key: 'task', value: message.task?.id || null}, 'File');
-            if (message.task?.autotag) {
-                try {
-                    await Graph.autotagNerFile(fileNode, message.file['@rid'], message);
-                } catch (e) {
-                    console.log('autotag failed (non-fatal), skipping tag creation', {error: e.message, file: fileNode['@rid']});
-                }
+        }
+        // Autotag applies to any output shape (region file or whole-document classification JSON,
+        // see Graph.autotagFile) - not just ner.json - so it isn't gated on fileNode.type.
+        if (!isReferenceOutput && message.task?.autotag) {
+            try {
+                await Graph.autotagFile(fileNode, message.file['@rid'], message);
+            } catch (e) {
+                console.log('autotag failed (non-fatal), skipping tag creation', {error: e.message, file: fileNode['@rid']});
             }
         }
         if(groupedRootSourceRid) {

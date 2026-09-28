@@ -245,7 +245,7 @@ Set combine can be used to combine two or more Sets. No new files are created, j
 Decide where the code lives (backend or adapter).
 - This needs reference File node, so that we do not create duplicate bitstreams.
 
-7. # Replace imaginary with sharp
+7. # Replace imaginary with sharp DONE
 Sharp image library is better choise for thumbnailing and image processing tasks.
 
 Thumbnailer must use direct file access, not rest api. Because of that we can build thumbnailer directly to consumer.
@@ -287,7 +287,7 @@ base-text: join raw is broken
 containers of base services:
 - md-pypdf_fs OK
 - md-thumbnailer OK
-- md-imaginary OK
+- md-sharp OK
 - md-poppler OK
 - md-base-text PROGRESS...
 - md-zip_fs OK

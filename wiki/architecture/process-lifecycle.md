@@ -132,7 +132,6 @@ Adapters translate the queue message into service-specific HTTP calls. Common pa
 
 | Adapter Type | Service Call Pattern |
 |-------------|---------------------|
-| `imaginary` | `POST {service_url}/{task.id}?{params}` with FormData (image) |
 | `elg` / `elg_fs` | `POST {service_url}/process` with multipart (message JSON + content file) |
 | `poppler` | `POST {service_url}/{task.id}` with FormData |
 | `ollama` | `POST {service_url}/api/generate` or `/api/chat` with JSON |

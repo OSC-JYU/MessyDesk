@@ -33,6 +33,7 @@ import roiRoutes from './routes/rois.mjs';
 import nerRoutes from './routes/ner.mjs';
 import tagRoutes from './routes/tags.mjs';
 import helpRoutes from './routes/help.mjs';
+import serviceGroupRoutes from './routes/service-groups.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -214,7 +215,8 @@ const init = async () => {
 		...roiRoutes,
 		...nerRoutes,
 		...tagRoutes,
-		...helpRoutes
+		...helpRoutes,
+		...serviceGroupRoutes
 	]);
 
 	// Start the server
