@@ -19,6 +19,19 @@ function dbBackoffDelay(attempt) {
 	return Math.floor(Math.random() * ceiling)
 }
 
+// got's HTTPError.message is just the generic status text ("Response code 500 ...");
+// the actual ArcadeDB error ("detail") lives in the JSON response body.
+function dbErrorDetail(error) {
+	const body = error?.response?.body
+	if (!body) return null
+	try {
+		const parsed = typeof body === 'string' ? JSON.parse(body) : body
+		return parsed?.detail || parsed?.error || null
+	} catch {
+		return null
+	}
+}
+
 // Only transient errors are worth retrying; permanent errors should fail fast.
 function isTransientDbError(error) {
 	if (!error) return false
@@ -111,7 +124,8 @@ db.createDB = async function() {
 		await this.createVertexType('ErrorNode')
 
 		await this.createDocumentType('Usage')
-		
+		await this.createDocumentType('TagLink')
+
 		await this.createEdgeType('PROCESSED_BY')
 		await this.createEdgeType('PRODUCED')
 		await this.createEdgeType('HAS_ITEM')
@@ -152,28 +166,41 @@ db.ensureIndexes = async function() {
 		'CREATE PROPERTY File.set IF NOT EXISTS STRING',
 		'CREATE PROPERTY Set.project_rid IF NOT EXISTS STRING',
 		'CREATE PROPERTY Entity.owner IF NOT EXISTS STRING',
-		'CREATE PROPERTY Project.label IF NOT EXISTS STRING'
+		'CREATE PROPERTY Project.label IF NOT EXISTS STRING',
+		'CREATE PROPERTY TagLink.target_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY TagLink.entity_rid IF NOT EXISTS STRING',
+		'CREATE PROPERTY TagLink.region_id IF NOT EXISTS STRING',
+		'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING'
 	]
 
 	for(const query of propertyCommands) {
 		try {
-			await this.sql(query)
+			await this.sql(query, {quiet: true})
 		} catch (error) {
-			console.log('Property ensure failed:', query, error?.message || error)
+			const msg = String(error?.message || error || '')
+			if(msg.toLowerCase().includes('already exists')) {
+				continue
+			}
+			console.log('Property ensure failed:', query, msg)
 		}
 	}
 
+	// No "IF NOT EXISTS" here: ArcadeDB 23.7.1 throws a generic NPE-wrapped 500 (not a clean
+	// "already exists" error) from that clause when the index is already present, which the
+	// catch below can't detect by message. Plain CREATE INDEX still gives a clean, matchable error.
 	const indexCommands = [
-		'CREATE INDEX IF NOT EXISTS ON File (project_rid) NOTUNIQUE',
-		'CREATE INDEX IF NOT EXISTS ON File (set) NOTUNIQUE',
-		'CREATE INDEX IF NOT EXISTS ON Set (project_rid) NOTUNIQUE',
-		'CREATE INDEX IF NOT EXISTS ON Entity (owner) NOTUNIQUE',
-		'CREATE INDEX IF NOT EXISTS ON Project (label) NOTUNIQUE'
+		'CREATE INDEX ON File (project_rid) NOTUNIQUE',
+		'CREATE INDEX ON File (set) NOTUNIQUE',
+		'CREATE INDEX ON Set (project_rid) NOTUNIQUE',
+		'CREATE INDEX ON Entity (owner) NOTUNIQUE',
+		'CREATE INDEX ON Project (label) NOTUNIQUE',
+		'CREATE INDEX ON TagLink (target_rid) NOTUNIQUE',
+		'CREATE INDEX ON TagLink (entity_rid) NOTUNIQUE'
 	]
 
 	for(const query of indexCommands) {
 		try {
-			await this.sql(query, {}, 1)
+			await this.sql(query, {quiet: true}, 1)
 		} catch (error) {
 			const msg = String(error?.message || error || '')
 			if(msg.toLowerCase().includes('already exists')) {
@@ -247,7 +274,8 @@ db.deleteMany = async function(rids, retries = DB_WRITE_RETRIES, timeout = 5000)
 						console.log(`Retrying write in ${delay}ms...`)
 						await sleep(delay)
 					} else {
-						throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
+						const detail = dbErrorDetail(lastError)
+						throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}${detail ? ` (${detail})` : ''}`)
 					}
 				}
 			}
@@ -295,15 +323,18 @@ db.sql = async function(query, options, retries = DB_WRITE_RETRIES) {
 		} catch (error) {
 			lastError = error
 			const transient = isTransientDbError(error)
-			console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
-			console.log(gotOptions.json)
+			if(!options.quiet) {
+				console.log(`Write attempt ${attempt} failed${transient ? '' : ' (permanent)'}:`, error.message)
+				console.log(gotOptions.json)
+			}
 
 			if (attempt < retries && transient) {
 				const delay = dbBackoffDelay(attempt)
-				console.log(`Retrying write in ${delay}ms...`)
+				if(!options.quiet) console.log(`Retrying write in ${delay}ms...`)
 				await sleep(delay)
 			} else {
-				throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}`)
+				const detail = dbErrorDetail(lastError)
+				throw new Error(`Failed to execute query after ${attempt} attempt(s). Last error: ${lastError.message}${detail ? ` (${detail})` : ''}`)
 			}
 		}
 	}

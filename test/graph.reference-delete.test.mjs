@@ -19,7 +19,7 @@ describe('Graph.deleteNode reference path safety', () => {
         Graph.getNodeAttributes = async () => ({ '@rid': '#40:1' });
 
         db.sql = async (query) => {
-            if (query.startsWith('SELECT @rid, @type, path, service, ref FROM #40:1')) {
+            if (query.startsWith('SELECT @rid, @type, path, service, ref, type AS file_type, service_id, task FROM #40:1')) {
                 return {
                     result: [
                         {

@@ -1,6 +1,14 @@
 # AutoTag system
 
-Autotag system means that classification or NER data can be directly transformed to tags. 
+**Policy (superseding the original idea below): NER never creates tags.** NER (and NER-like
+structured-extraction) tasks only produce `ner.json`, which is indexed/browsed directly (§6 below,
+`graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions`) — no `Entity`/`TagLink` rows are
+ever written for them, and `service.json` for such tasks must never set `"autotag": true`. Only
+classification-style tasks (whole-document category, e.g. MD-Gliner2's `classify_text`) may still use
+autotag to turn their labels into real, TagLink-backed tags. The rest of this doc, including the
+earlier phases in §8, predates this correction and describes NER using autotag — that part is stale.
+
+Autotag system means that classification data can be directly transformed to tags.
 
 If crucnher has param "autotag" this will happen as soon as json file arrives to MessyDesk.
 But suitable json can be also transformed to tags also via Autotag cruncher afterwards.
@@ -12,7 +20,7 @@ So we can have two type of tags in MessyDesk: user created and machine created. 
 ### Machine created tag.
 For example MD-Gliner has task "classify". If it had autotag setting on, it will create tags on fly and attach them to files.
 
-If we use some NER model, then autotag would create tags with type "person", "location" etc.
+~~If we use some NER model, then autotag would create tags with type "person", "location" etc.~~ Superseded: see policy note above, NER never autotags.
 
 ### Machine tagging
 The same Gliner can be also use existing tags (created by user) and just attach them to files.
@@ -122,10 +130,13 @@ Same shape for both containers — only mutability and the `type` values in use 
 - `roi.json` may additionally carry a free-text `note` per region (user annotation), which gets indexed
   to Solr for search but has no bearing on tagging.
 - Image ROIs keep their existing `type: "rect"` shape unchanged; `type: "text"` is additive.
-- `graph.createImageROIs`/`getImageROIs`/`editImageROIs` become generic container CRUD (they already
-  don't interpret ROI contents) — likely renamed (e.g. `graph.createRegions`) rather than duplicated,
-  plus a new immutable-only creation path for `ner.json` (no edit/upsert endpoint, create-only).
-  Route path is still open — see §7.
+- Decision: keep `graph.createImageROIs`/`getImageROIs`/`editImageROIs`/`deleteImageROIs` and their
+  `/api/images/{rid}/sets/{set_rid}/rois` routes untouched (no frontend risk). `ner.json` gets its own
+  parallel, create-only functions/routes instead of a rename: `graph.createNerRegions`/`getNerRegions`,
+  `POST /api/files/{rid}/sets/{set_rid}/ner` and `GET /api/files/{rid}/ner` (lists every run, since
+  `ner.json` has no upsert — unlike `roi.json`, a source file can have many `ner.json` runs over time).
+  `service_id`/`task` are stored as fields on the `ner.json` File node itself (passed as query params on
+  create) so a run's origin is visible without needing `TagLink` rows to exist yet.
 
 ## 3. `TagLink` — unified tag assignment
 
@@ -153,8 +164,8 @@ Consequences:
   MATCH queries — plain indexed `WHERE`, not graph patterns.
 - Deleting an `Entity` no longer cascades automatically (edges gave this for free) — needs an explicit
   `DELETE FROM TagLink WHERE entity_rid = ...` step.
-- Existing `HAS_ENTITY` edges in production data need a one-time migration into `TagLink` rows (or a
-  read-time fallback during rollout — needs a decision, see §6).
+- No migration of existing `HAS_ENTITY` edge data — old tags are not carried forward, no dual-read
+  fallback needed.
 - Per-mention linking (one `TagLink` per NER hit, not just per distinct label) is no longer
   architecturally risky if ever wanted later, since rows are cheap — it becomes a configuration choice
   for autotag granularity, not a hard constraint.
@@ -167,12 +178,17 @@ Consequences:
   edges.
 - `roi.json` notes get indexed as their own searchable field (`region_note`) so annotations are
   full-text searchable like OCR text already is.
-- Indexing is triggered the same way existing text indexing is triggered: async, via the existing Solr
-  adapter/consumer path (`MD-consumers/src/adapters/solr.mjs`) — no new queue, no SQLite involved
-  (SQLite stays scoped to the job queue only).
-- Reindexing on tag removal/edit follows the existing `solr.dropSetIndex`/`dropProjectIndex` pattern —
-  needs an equivalent partial-update (add/remove just the tag fields on an existing doc) rather than a
-  full delete+reindex, since the underlying file text doc already exists independently of tags.
+- Indexing is triggered via a dedicated `update_tags` task on the existing `md-solr` queue/consumer
+  (`MD-consumers/src/adapters/solr.mjs`) — same queue as text indexing, not a new one, but its own task
+  id so it can be dispatched independently of `index`/`delete`.
+- Writes are a realtime-get + merge + full-document repost per existing Solr doc for the file, not an
+  atomic partial update (`{"set": [...]}`): this Solr version silently rejects atomic `set` on
+  multiValued fields ("multiple values encountered for non multiValued field set") even when the schema
+  correctly reports `multiValued: true`. Atomic updates were the original design and turned out to have
+  never worked in practice — see §8 step 5.
+- Reindexing on tag removal/edit follows the existing `solr.dropSetIndex`/`dropProjectIndex` pattern for
+  dropping the underlying text docs; the tag fields on the recreated docs are restored separately by
+  re-running `graph.reindexFileTags` per file after a project reindex (see §8 step 5).
 
 ## 5. Filtering
 
@@ -186,29 +202,37 @@ Consequences:
   `/memories/repo/tags-implementation-map.md`) — required regardless of this redesign, since the UI
   already expects them.
 
-## 6. Basic NER + Autotag workflow (MVP scope)
+## 6. Basic NER workflow (current, no autotag)
 
 1. User runs an NER cruncher (e.g. MD-Gliner2 `extract_entities`) on a file or set.
 2. Adapter converts the model's raw JSON into `ner.json` (§2), written the same way any cruncher output
-   is written today, in its own output `Set`. No tags exist yet at this point.
-3. If the task/service has `autotag` enabled, MessyDesk (on JSON arrival) creates/reuses one `Entity`
-   per distinct label seen and writes one `TagLink` row per (file or region, label) — not per raw
-   mention — with `created_by: 'machine'`, `service_id`, `task`, `confidence` (§3).
-4. Tag data is indexed into Solr (§4).
-5. User browses results: existing Tags UI/filter lists machine tags per service+task (already scoped by
-   project/set from existing file data), can filter files by tag (§5), and can jump from a tag to the
-   specific region(s) it came from via `TagLink.region_id` → `ner.json`.
+   is written today, in its own output `Set`. **No tags are ever created from this** — `ner.json` is the
+   end state, not an intermediate step toward a `TagLink`.
+3. User browses results directly off `ner.json`, no `Entity`/`TagLink` involved:
+   `graph.getNerLabelGroups(userRID)` scans every `ner.json` run the user owns (via each run's
+   `DERIVED_FROM` source file's project) and groups by `(service_id, task, label)` with counts —
+   the NER equivalent of `graph.getMachineTags`, but with no link table to query.
+   `graph.getNerLabelFiles(service_id, task, label, userRID)` resolves the source files behind one
+   group by reading each matching run's JSON and following its `DERIVED_FROM` edge.
+   `graph.getNerLabelMentions(service_id, task, label, userRID, options)` aggregates actual mention
+   text/hits (paged, searchable) across those files, same shape as `graph.getMachineTagMentions`.
+   Routes: `GET /api/tags/ner/labels`, `GET /api/tags/ner/labels/files`, `GET /api/tags/ner/labels/mentions`.
+4. This is a direct-scan implementation (reads every owned `ner.json` per request) — acceptable at
+   current scale, but not the long-term answer; the Solr indexing route (§4) is the intended eventual
+   home for NER browsing/search, not built yet.
+
+### Classification autotag workflow (still uses TagLink)
+
+1. User runs a classification cruncher (e.g. MD-Gliner2 `classify_text`) with `autotag` enabled in
+   `service.json`.
+2. MessyDesk (on JSON arrival) creates/reuses one `Entity` per distinct label seen and writes one
+   `TagLink` row per (file, label) — with `created_by: 'machine'`, `service_id`, `task`, `confidence` (§3).
+3. Tag data is indexed into Solr (§4).
+4. User browses results via `graph.getMachineTags`/`getMachineTagFiles`/`getMachineTagMentions`
+   (`GET /api/tags/machine`...), which read `TagLink`, not `ner.json`.
 
 ## 7. Open questions
 
-- Should `ner.json`/`roi.json` routes live under the existing `/api/images/{rid}/sets/{set_rid}/rois`
-  path (renamed to be file-type-agnostic) or a new `/api/files/{rid}/sets/{set_rid}/regions` path?
-  Renaming affects the existing image ROI frontend (`ImageROIDisplay.vue`) — needs a decision before
-  touching routes.
-- Migration strategy for existing `HAS_ENTITY` edges: one-time batch migration into `TagLink`, or dual
-  read (check edges, fall back to `TagLink`) during a transition window?
-- Exact Solr partial-update mechanism for tags (atomic update `add`/`remove` on multivalued fields vs.
-  full reindex per file) — needs a quick look at the Solr schema/update API before committing.
 - Autotag trigger point: on JSON arrival for every task that produces entities, or only for tasks/services
   explicitly flagged `autotag: true` in their `service.json`/params? (Original idea implies the latter —
   flagged per-cruncher-run.)
@@ -218,15 +242,79 @@ Consequences:
 
 ## 8. Phased implementation plan
 
-1. Generalize ROI container storage/routes to support `ner.json` (immutable, create-only) alongside
-   `roi.json` (mutable) and the new `type: "text"` region shape (§2), reusing existing image-ROI code
-   paths where possible.
-2. Introduce `TagLink` document type + rewritten `linkEntity`/`unLinkEntity`/`getTags`; migrate existing
-   `HAS_ENTITY` edges (§3, §7).
-3. Implement `/api/tags` GET/POST (pre-existing gap).
-4. Wire MD-Gliner2 adapter to emit `ner.json`, add `autotag` handling on JSON arrival (§6).
-5. Add Solr tag fields + indexing hook, sourced from `TagLink` (§4).
-6. Rewrite `createTagFilterSet` against `TagLink`; update filter UI for region-aware results (§5).
-7. Update Tags UI to browse machine tags per service/task and jump to source regions (§6).
-
+1. ~~Generalize ROI container storage/routes to support `ner.json`~~ **DONE**: parallel
+   `graph.createNerRegions`/`getNerRegions` + `/api/files/{rid}/sets/{set_rid}/ner` (POST),
+   `/api/files/{rid}/ner` (GET), reusing the image-ROI storage pattern. Adapter-side JSON shape
+   (`type: "text"` regions, §2) and autotag wiring on arrival are still open (§4 below).
+2. ~~Introduce `TagLink` document type + rewritten `linkEntity`/`unLinkEntity`/`getTags`~~ **DONE** on
+   `feature/tag-link-model`. Old `HAS_ENTITY` edge data is not migrated — existing tags are considered
+   stale/disposable, no fallback reads needed (§3, §7).
+3. ~~Implement `/api/tags` GET/POST~~ **DONE** on `feature/tag-link-model`.
+4. ~~Wire MD-Gliner2 adapter to emit `ner.json`, add `autotag` handling on JSON arrival~~ **DONE, then
+   REVERTED for NER** (see policy note at top): `api.py`'s `extract_entities` still writes a
+   `*.ner.json` (double-extension \u2192 generic file intake detects `type: "ner.json"` automatically).
+   `service.json`'s `extract_entities` task no longer has `"autotag": true` \u2014 NER never creates
+   `Entity`/`TagLink` rows. `graph.autotagNerFile` still exists and still fires from
+   `processFilesController.mjs` when `message.task?.autotag` is set, but that is now exclusively a
+   classification-task path (e.g. a future `classify_text` autotag setting), not an NER one.
+5. ~~Add Solr tag fields + indexing hook, sourced from `TagLink`~~ **DONE**, then found broken, then
+   fixed onto a queue-based design:
+   - Original design (atomic partial update, called synchronously from `linkEntity`/`unLinkEntity`) had
+     never actually worked: this Solr version rejects atomic `{"set": [...]}` updates on multiValued
+     fields with a 400 error, and `solr.mjs`'s non-fatal catch-and-log error handling meant every prior
+     call had silently failed with zero visible signal.
+     [`tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` schema fields have since been corrected
+     (`multiValued: true`) in the Solr core, but the atomic-update code path itself remains broken for
+     this Solr version regardless of schema.]
+   - Current design: `graph.reindexFileTags` rebuilds `tag_label`/`tag_rid`/`tag_created_by`/
+     `tag_confidence` from current `TagLink` rows, then calls `graph.enqueueTagSync`, which publishes an
+     `update_tags` message to the `md-solr` queue (falls back to the old direct `solr.updateTagsForFile`
+     call only if the consumer hasn't registered the `update_tags` task). The consumer
+     (`MD-consumers/src/adapters/solr.mjs`) looks up every existing Solr doc for the file by `node`
+     (a file can have more than one doc, one per indexing process), and for each does a realtime-get +
+     merge + full-document repost rather than an atomic update, leaving `fulltext`/`description`/etc.
+     untouched.
+   - `reindexFileTags` is called from `linkEntity`/`unLinkEntity` (file-level only, skipped when
+     `region_id` is set), transitively from `autotagNerFile`'s per-label `linkEntity` calls, and now also
+     from `POST /api/projects/{rid}/reindex-search` per file (that route drops and fully recreates every
+     Solr doc for the project via `dropProjectIndex`, which wiped tag fields with no restoration step
+     until this fix). Moving to the queue (rather than staying synchronous) was a deliberate choice: a
+     single autotag run can touch thousands of files, and each Solr write now costs a realtime-get per
+     existing doc, too slow to do inline in the request/file-processing path. `TagLink` remains the
+     source of truth; Solr is eventually consistent, which is fine since the Tags UI reads `TagLink`
+     directly, not Solr. Non-fatal on Solr errors. `region_note` full-text indexing for `roi.json`
+     annotations is still open.
+6. ~~Rewrite `createTagFilterSet` against `TagLink`~~ **DONE**. Region-aware *filtering* (matching by
+   region rather than whole file) is not pursued for now: autotag stays file-level-only by design (one
+   `TagLink` per file+label, `region_id` always null, see §4/§8 step 4), so there is no region-scoped
+   `TagLink` data to filter on. Per-region detail is still fully available by reading `ner.json` on
+   demand (see step 7) \u2014 just not as a `createTagFilterSet` input.
+7. ~~Update Tags UI to browse machine tags per service/task and jump to source regions~~ **DONE, then
+   REWORKED for NER** (see policy note at top and §6): `graph.getMachineTags`/`GET /api/tags/machine`
+   still lists distinct (service_id, task, label) `TagLink` combos, but that is classification-only now.
+   NER browsing lives in `EntitiesMain.vue` (`TagsMain.vue` is dead/unrouted) against
+   `graph.getNerLabelGroups`/`getNerLabelFiles`/`getNerLabelMentions` (§6), which read `ner.json` runs
+   directly \u2014 no `TagLink`, no per-file client-side filtering. Selecting a mention with multiple hits
+   shows a prev/next browser and loads the actual source text inline with the matched span highlighted
+   (offsets straight from `ner.json`'s `start`/`end`), instead of navigating away.
+8. ~~Add a cruncher-side tag picker so a user can restrict a run to existing tags instead of typing free-form
+   categories~~ **DONE**: `Entity` (type `Tag`) now has an optional `description` (`graph.createTag`/
+   `getTags`/`GET,POST /api/tags` all pass it through). In `CruncherList.vue`, any task param with
+   `params_help.<key>.display: "tagpicker"` renders `TagPickerField.vue`, which toggles between "List
+   categories" (the original free-form comma-string textinput, unchanged) and "Pick tags" (multi-select
+   over the user's existing tags, each showing its description, plus an inline "define a new tag"
+   mini-form). In tag-pick mode the param value sent to the queue message is a JSON array of
+   `{label, description}` (not a comma string). This is opted into **per task**, not per service: only
+   `MD-Gliner2`'s `classify_text` task uses `service.json`'s `"display": "tagpicker"` on its `labels`
+   param, because it assigns one whole-document category and existing tags map onto that cleanly.
+   `extract_entities` (NER) deliberately keeps plain `"textinput"` \u2014 it extracts many individual
+   per-mention spans per label rather than one whole-document label, so it cannot sensibly be restricted
+   to/linked with a fixed existing-tag set the same way; `api.py`'s `parse_label_entries()` (which
+   understands the `{label, description}` shape and forwards a `{label: description}` dict to GLiNER2
+   for better zero-shot accuracy) is used only by `run_classify_text`, while `run_extract_entities` keeps
+   using the original `parse_label_list()`. No new backend "restrict autotag to selected tags" logic was
+   needed for the classify_text case: since GLiNER2 only ever returns entities for the labels it was
+   given, and `graph.autotagNerFile` already reuses an existing `Tag` entity by exact
+   `(type, label, owner)` match (`graph.checkEntity`) rather than always creating a new one,
+   pre-creating/picking the tag is sufficient to guarantee the run only ever links back to that same tag.
 

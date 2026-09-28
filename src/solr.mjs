@@ -151,6 +151,24 @@ solr.dropSetIndex = async function(set_rid) {
 	}
   };
 
+// A deleted File node may still have Solr docs (one per indexing process) pointing at its rid via
+// `node`; those become orphans (stale content + tag_* fields) once the graph node is gone.
+solr.dropFileIndex = async function(node_rid) {
+	const url = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`;
+	const escaped = escapeSolrValue(node_rid);
+	try {
+	  const response = await got.post(url, {
+		json: {
+		  delete: { query: `node:"${escaped}"` }
+		},
+		responseType: 'json'
+	  });
+	  return response.body;
+	} catch (e) {
+	  console.error('Solr delete error:', e.response?.body || e.message);
+	}
+  };
+
 solr.dropUserIndex = async function(userRID) {
 	
 	var url = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`
@@ -203,7 +221,61 @@ solr.indexDocuments = async function(data) {
 
 }
 
+// Partial-update the tag_* fields (sourced from TagLink, see MessyDesk tags.md \u00a74) on every existing
+// Solr doc for a file, without touching its fulltext/description fields. A file can have more than one
+// doc (one per indexing process), so docs are looked up by `node` rather than assuming a single id.
+//
+// NOTE: this does a realtime-get + full-doc repost rather than an atomic `{"set": [...]}` partial
+// update. This Solr instance/version rejects atomic `set` on multiValued fields with "multiple values
+// encountered for non multiValued field set" even when the schema correctly reports multiValued:true
+// (reproduced directly against a live probe doc — not a schema config issue on our side) — the
+// realtime-get + full repost path doesn't hit that code path and works reliably.
+solr.updateTagsForFile = async function(node_rid, tagFields) {
+	const escapedNode = escapeSolrValue(node_rid)
+	const selectUrl = `${SOLR_URL}/${SOLR_CORE}/select`
+	const getUrl = `${SOLR_URL}/${SOLR_CORE}/get`
+	let docIds = []
+	try {
+		const selectResponse = await got.get(selectUrl, {
+			searchParams: {q: `node:"${escapedNode}"`, fl: 'id', rows: 1000, wt: 'json'}
+		}).json()
+		docIds = (selectResponse?.response?.docs || []).map((doc) => doc.id).filter(Boolean)
+	} catch(e) {
+		console.log('Solr tag lookup error:', e.message)
+		return null
+	}
+	if(!docIds.length) return null
 
+	const updates = []
+	for(const id of docIds) {
+		try {
+			const getResponse = await got.get(getUrl, {searchParams: {id, wt: 'json'}}).json()
+			const doc = getResponse?.doc
+			if(!doc) continue
+			const merged = {}
+			for(const key of Object.keys(doc)) {
+				if(key.startsWith('_')) continue
+				merged[key] = doc[key]
+			}
+			merged.tag_label = tagFields.tag_label || []
+			merged.tag_rid = tagFields.tag_rid || []
+			merged.tag_created_by = tagFields.tag_created_by || []
+			merged.tag_confidence = tagFields.tag_confidence || []
+			updates.push(merged)
+		} catch(e) {
+			console.log('Solr tag realtime-get error:', e.message)
+		}
+	}
+	if(!updates.length) return null
 
+	const updateUrl = `${SOLR_URL}/${SOLR_CORE}/update?commit=true`
+	try {
+		const response = await got.post(updateUrl, {json: updates}).json()
+		return response
+	} catch(e) {
+		console.log('Solr tag update error:', e.message)
+		return null
+	}
+}
 
 export default solr

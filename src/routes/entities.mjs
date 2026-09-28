@@ -39,7 +39,10 @@ export default [
         method: 'GET',
         path: '/api/entities',
         handler: async (request) => {
-            const result = await Graph.getEntityTypes(request.auth.credentials.user.rid);
+            const result = await Graph.getEntityTypes(request.auth.credentials.user.rid, {
+                project_rid: request.query.project_rid,
+                project_rids: request.query.project_rids ? request.query.project_rids.split(',') : undefined
+            });
             return result;
         }
     },
@@ -55,7 +58,10 @@ export default [
         method: 'GET',
         path: '/api/entities/items',
         handler: async (request) => {
-            const result = await Graph.getEntityItems(request.query.entities, request.auth.credentials.user.rid);
+            const result = await Graph.getEntityItems(request.query.entities, request.auth.credentials.user.rid, {
+                project_rid: request.query.project_rid,
+                project_rids: request.query.project_rids ? request.query.project_rids.split(',') : undefined
+            });
             return result;
         }
     },

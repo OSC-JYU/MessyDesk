@@ -554,8 +554,8 @@ queueDb.claim = function(topic, adapterId) {
   for (const queueName of queues) {
     db.exec('BEGIN IMMEDIATE');
     try {
-      const row = db.prepare(`
-        SELECT id, payload_json, attempts, max_attempts, queue
+      const candidates = db.prepare(`
+        SELECT id, payload_json, attempts, max_attempts, queue, process_rid, set_process_rid
         FROM queue_jobs
         WHERE queue = ?
           AND (
@@ -563,8 +563,35 @@ queueDb.claim = function(topic, adapterId) {
             OR (status = 'running' AND lease_until < ?)
           )
         ORDER BY created_at ASC
-        LIMIT 1
-      `).get(queueName, now, now);
+        LIMIT 50
+      `).all(queueName, now, now);
+
+      let row = null;
+      for (const candidate of candidates) {
+        const isCancelled = this.cancelledBatches.has(candidate.process_rid)
+          || this.cancelledBatches.has(candidate.set_process_rid);
+        if (isCancelled) {
+          // Batch was cancelled after this job was queued/requeued (e.g. it was
+          // running at cancel time and later failed+retried) — finalize it here
+          // instead of letting it get claimed and re-run again.
+          db.prepare(`
+            UPDATE queue_jobs
+            SET status = 'cancelled',
+                lease_until = NULL,
+                claimed_by = NULL,
+                claimed_at = NULL,
+                completed_at = ?,
+                updated_at = ?
+            WHERE id = ?
+          `).run(now, now, candidate.id);
+          continue;
+        }
+        const isPaused = this.pausedBatches.has(candidate.process_rid)
+          || this.pausedBatches.has(candidate.set_process_rid);
+        if (isPaused) continue;
+        row = candidate;
+        break;
+      }
 
       if (!row) {
         db.exec('COMMIT');
@@ -657,11 +684,30 @@ queueDb.fail = async function(jobId, errorMessage, adapterId) {
 
   // Get current state
   const row = db.prepare(`
-    SELECT attempts, max_attempts, set_process_rid, payload_json FROM queue_jobs
+    SELECT attempts, max_attempts, process_rid, set_process_rid, payload_json FROM queue_jobs
     WHERE id = ? AND status = 'running' AND claimed_by = ?
   `).get(jobId, adapterId);
 
   if (!row) return false;
+
+  const isCancelled = this.cancelledBatches.has(row.process_rid)
+    || this.cancelledBatches.has(row.set_process_rid);
+  if (isCancelled) {
+    // Don't requeue a failure from a batch that's already been cancelled —
+    // claim() also guards against this, but finalizing here avoids a pointless
+    // backoff/retry cycle first.
+    db.prepare(`
+      UPDATE queue_jobs
+      SET status = 'cancelled',
+          lease_until = NULL,
+          claimed_by = NULL,
+          claimed_at = NULL,
+          completed_at = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(now, now, jobId);
+    return { ok: true, permanent: false, cancelled: true };
+  }
 
   const attempts = Number(row.attempts || 0);
   const maxAttempts = Number(row.max_attempts || 3);
@@ -785,6 +831,23 @@ queueDb.getActiveJobs = function() {
   // Group by set_process_rid to return batch-level summaries
   const batches = {};
   for (const row of rows) {
+    // A job already 'queued'/'running' when its batch got cancelled (e.g. it was
+    // claimed by a worker that never checked in) would otherwise keep reappearing
+    // as an active job on every SSE reconnect hydrate \u2014 finalize it here too,
+    // same as claim()/fail(), instead of just hiding it from this response.
+    const isCancelled = this.cancelledBatches.has(row.process_rid)
+      || this.cancelledBatches.has(row.set_process_rid);
+    if (isCancelled) {
+      const now = new Date().toISOString();
+      db.prepare(`
+        UPDATE queue_jobs
+        SET status = 'cancelled', lease_until = NULL, claimed_by = NULL,
+            claimed_at = NULL, completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(now, now, row.id);
+      continue;
+    }
+
     // Filter out internal thumbnail jobs from active job list
     try {
       const payload = JSON.parse(row.payload_json);
