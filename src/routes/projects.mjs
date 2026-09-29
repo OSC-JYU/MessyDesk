@@ -140,10 +140,14 @@ export default [
         method: 'DELETE',
         path: '/api/projects/{rid}',
         handler: async (request) => {
-            return await Graph.deleteProject(
+            const deleted = await Graph.deleteProject(
                 Graph.sanitizeRID(request.params.rid),
                 request.auth.credentials.user.rid
             );
+            if (!deleted) {
+                throw Boom.notFound('Project not found or access denied');
+            }
+            return deleted;
         }
     },
     {
