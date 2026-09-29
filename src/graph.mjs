@@ -138,10 +138,11 @@ graph.createProject = async function (data, me_rid) {
 graph.deleteProject = async function (project_rid, user_rid) {
 	const query = `MATCH {as:project, where:(@rid = ${project_rid})}-HAS_OWNER->{type:User, as:user, where:(@rid = ${user_rid})} return project.@rid AS rid`
 	var response = await db.sql(query)
-	if(response.result.length == 1) {
-		await this.deleteNode(response.result[0]['rid'])
-	}
-	return response.result[0]['rid']
+	// Not found, or not owned by this user.
+	if(response.result.length != 1) return null
+	const rid = response.result[0]['rid']
+	await this.deleteNode(rid, user_rid)
+	return rid
 }
 
 graph.createSet = async function (project_rid, data, me_rid) {
