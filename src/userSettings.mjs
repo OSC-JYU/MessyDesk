@@ -1,8 +1,9 @@
 // Per-user UI preferences, saved on the User vertex as `settings` and edited
 // on the Settings page of the UI. Only known keys and values are accepted.
 
-// light/dark/system are Fjord; classic is the original navy and blue look.
-export const THEMES = ['light', 'dark', 'system', 'classic'];
+// light/dark are Fjord and system follows the OS between them; the others
+// are the Navy, Slate and Reading room (warm) themes of the UI.
+export const THEMES = ['light', 'dark', 'system', 'navy', 'navy-dark', 'slate', 'warm', 'warm-dark'];
 export const COOKIE_COLOURS = ['classic', 'chocolate', 'matcha', 'strawberry', 'blueberry'];
 // 'off' stops the UI's playful animations.
 export const MOTION = ['on', 'off'];

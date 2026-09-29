@@ -135,7 +135,7 @@ Backend HTTP endpoints organized by domain. All endpoints are under `/api` unles
 |--------|------|---------|
 | GET | `/api/sso` | SSO endpoint |
 | GET | `/api/me` | Current user identity/access level and UI `settings` (defaults filled in) |
-| PUT | `/api/me/settings` | Save the user's UI settings: `theme` (`light`/`dark`/`system` = Fjord, `classic` = the original navy/blue look), `cookie` (`classic`/`chocolate`/`matcha`/`strawberry`/`blueberry`), `motion` (`on`/`off`); partial updates merge, unknown keys or values give 400. See `src/userSettings.mjs` |
+| PUT | `/api/me/settings` | Save the user's UI settings: `theme` (`light`/`dark`/`system` = Fjord, `navy`, `navy-dark`, `slate`, `warm`, `warm-dark`), `cookie` (`classic`/`chocolate`/`matcha`/`strawberry`/`blueberry`), `motion` (`on`/`off`); partial updates merge, unknown keys or values give 400. See `src/userSettings.mjs` |
 | GET | `/api/users` | **admin** List users |
 | POST | `/api/users` | **admin** Create user |
 | PUT | `/api/users/{rid}/service-groups` | **admin** Replace a user's ServiceGroup membership (`service_groups` string array) |

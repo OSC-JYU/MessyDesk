@@ -20,7 +20,7 @@ describe('User settings', () => {
 
     it('accepts only known keys and values', () => {
         assert.deepEqual(validatePatch({ theme: 'system' }), { theme: 'system' });
-        assert.deepEqual(validatePatch({ theme: 'classic', motion: 'off' }), { theme: 'classic', motion: 'off' });
+        assert.deepEqual(validatePatch({ theme: 'warm-dark', motion: 'off' }), { theme: 'warm-dark', motion: 'off' });
         assert.throws(() => validatePatch({ motion: 'slow' }), /motion must be one of/);
         assert.throws(() => validatePatch({ theme: 'neon' }), /theme must be one of/);
         assert.throws(() => validatePatch({ font: 'x' }), /Unknown setting/);
