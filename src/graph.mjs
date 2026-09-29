@@ -306,6 +306,17 @@ graph.updateUserServiceGroups = async function (userRid, groups) {
 	return response.result[0] || null
 }
 
+// Merges a validated patch (userSettings.validatePatch) into the user's
+// `settings` map and returns the stored map.
+graph.updateUserSettings = async function (userRid, patch) {
+	const rid = this.sanitizeRID(userRid)
+	const current = await db.sql(`SELECT settings FROM User WHERE @rid = ${rid}`)
+	if (!current.result.length) throw new Error('User not found')
+	const settings = { ...(current.result[0].settings || {}), ...patch }
+	await db.sql(`UPDATE User SET settings = :settings WHERE @rid = ${rid}`, { params: { settings } })
+	return settings
+}
+
 graph.initUserData = async function (user) {
 	// create entity (tag) types
 	await this.createEntityTypes(user['@rid'])
@@ -2925,11 +2936,11 @@ graph.createAttributeCypher = async function (attributes) {
 graph.myId = async function (user) {
 	if (!user) return null
 	if(user.startsWith('#')) {
-		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE @rid = ${user}`
+		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active, settings FROM User WHERE @rid = ${user}`
 		var response = await db.sql(query)
 		return response.result[0]
 	} else {
-		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active FROM User WHERE id = "${user}"`
+		var query = `SELECT @rid AS rid, group, access, service_groups, label, id, active, settings FROM User WHERE id = "${user}"`
 		var response = await db.sql(query)
 		return response.result[0]
 	}

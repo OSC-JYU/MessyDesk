@@ -21,7 +21,7 @@ Queries are sent as HTTP POST with JSON body containing the query language and s
 | Type | Key Attributes | Purpose |
 |------|---------------|---------|
 | `Project` | `label`, `created` | Top-level container for all user data |
-| `User` | `id` (email), `label`, `access`, `active` | System user |
+| `User` | `id` (email), `label`, `access`, `active`, `service_groups`, `settings` (map of UI preferences, see `src/userSettings.mjs`) | System user |
 | `File` | `uuid`, `label`, `path`, `type`, `extension`, `metadata`, `project_rid`, `set`, `expand`, `_active` | Data node (document, image, JSON, etc.) |
 | `Set` | `uuid`, `label`, `project_rid`, `path`, `filepath`, `count` | Collection of files |
 | `Process` | `uuid`, `status`, `task`, `service_id`, `project_rid`, `set_process` | Processing job record |

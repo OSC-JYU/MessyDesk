@@ -553,6 +553,10 @@ export default [
         path: '/api/thumbnails/{param*}',
         handler: async (request, h) => {
             const src = await media.getThumbnail(request.params.param);
+            if (!src) {
+                return h.response({ error: 'Thumbnail not ready' }).code(404)
+                    .header('Cache-Control', 'no-store');
+            }
             const response = h.response(src);
             response.type('image/jpeg');
             response.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

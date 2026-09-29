@@ -1,6 +1,7 @@
 import Graph from '../graph.mjs';
 import db from '../db.mjs';
 import Boom from '@hapi/boom';
+import { withDefaults, validatePatch } from '../userSettings.mjs';
 
 const AUTH_NAME = 'displayname';
 
@@ -93,8 +94,23 @@ export default [
                 group: me.group,
                 access: me.access,
                 id: request.auth.credentials.user.id,
-                mode: process.env.MODE || 'production'
+                mode: process.env.MODE || 'production',
+                settings: withDefaults(me.settings)
             };
+        }
+    },
+    {
+        method: 'PUT',
+        path: '/api/me/settings',
+        handler: async (request) => {
+            let patch;
+            try {
+                patch = validatePatch(request.payload);
+            } catch (error) {
+                throw Boom.badRequest(error.message);
+            }
+            const stored = await Graph.updateUserSettings(request.auth.credentials.user.rid, patch);
+            return withDefaults(stored);
         }
     },
     {
