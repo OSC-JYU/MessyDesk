@@ -470,12 +470,13 @@ media.getTextDescription = async function (filePath, file_type) {
 }
 
 
+// Returns a read stream of the thumbnail, or null when there is none yet (the
+// thumbnailer has not run). The route answers 404 and the UI draws its own
+// placeholder.
 media.getThumbnail = async function(filePath) {
 
 	try {
-		if(!filePath) {
-			return fs.createReadStream('images/image_not_found.jpg')
-		}
+		if(!filePath) return null
 		
 		var thumbfile = 'preview.jpg'
 		var base = path.dirname(filePath)
@@ -501,16 +502,14 @@ media.getThumbnail = async function(filePath) {
 				fullPath = path.join(base.replace('/api/thumbnails/', './'), 'preview.jpg')
 				var fileExists = await fse.pathExists(fullPath)
 			}
-			if (!fileExists) {
-				fullPath = path.join('images/image_not_found.jpg')
-			}
+			if (!fileExists) return null
 			
         }
 		return fs.createReadStream(fullPath)
 
 	} catch (err) {
 		console.log('thumbnail not found')
-		return false;
+		return null;
 	}
 }
 
