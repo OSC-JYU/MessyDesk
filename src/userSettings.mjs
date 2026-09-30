@@ -2,8 +2,10 @@
 // on the Settings page of the UI. Only known keys and values are accepted.
 
 // light/dark are Fjord and system follows the OS between them; the others
-// are the Navy, Slate and Reading room (warm) themes of the UI.
-export const THEMES = ['light', 'dark', 'system', 'navy', 'navy-dark', 'slate', 'warm', 'warm-dark'];
+// are the Navy, Slate, Reading room (warm) and MessyDesk classic themes of the UI.
+export const THEMES = [
+    'light', 'dark', 'system', 'navy', 'navy-dark', 'slate', 'warm', 'warm-dark', 'classic',
+];
 export const COOKIE_COLOURS = ['classic', 'chocolate', 'matcha', 'strawberry', 'blueberry'];
 // 'off' stops the UI's playful animations.
 export const MOTION = ['on', 'off'];
