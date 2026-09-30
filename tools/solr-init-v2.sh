@@ -7,7 +7,7 @@
 #   docker compose exec solr solr delete -c messydesk
 #   docker compose restart solr          # solr-precreate recreates it
 
-SOLR_URL="http://localhost:8983/solr/messydesk"
+SOLR_URL="${SOLR_URL:-http://localhost:8983/solr/messydesk}"
 
 # Wait for core to be available
 echo "Waiting for Solr core..."
