@@ -14,11 +14,14 @@ describe('User settings', () => {
         assert.deepEqual(withDefaults({ theme: 'dark', cookie: 'purple', extra: 1 }), {
             theme: 'dark',
             cookie: 'classic',
+            motion: 'on',
         });
     });
 
     it('accepts only known keys and values', () => {
         assert.deepEqual(validatePatch({ theme: 'system' }), { theme: 'system' });
+        assert.deepEqual(validatePatch({ theme: 'warm-dark', motion: 'off' }), { theme: 'warm-dark', motion: 'off' });
+        assert.throws(() => validatePatch({ motion: 'slow' }), /motion must be one of/);
         assert.throws(() => validatePatch({ theme: 'neon' }), /theme must be one of/);
         assert.throws(() => validatePatch({ font: 'x' }), /Unknown setting/);
         assert.throws(() => validatePatch(['dark']), /must be an object/);
@@ -29,7 +32,7 @@ describe('User settings', () => {
         Graph.myId = async () => ({ rid: '#49:0', access: 'user', settings: { cookie: 'matcha' } });
         try {
             const me = await route('GET', '/api/me')({ auth: { credentials } });
-            assert.deepEqual(me.settings, { theme: 'light', cookie: 'matcha' });
+            assert.deepEqual(me.settings, { theme: 'light', cookie: 'matcha', motion: 'on' });
         } finally {
             Graph.myId = original;
         }
@@ -47,7 +50,7 @@ describe('User settings', () => {
                 auth: { credentials },
                 payload: { cookie: 'blueberry' },
             });
-            assert.deepEqual(saved, { theme: 'dark', cookie: 'blueberry' });
+            assert.deepEqual(saved, { theme: 'dark', cookie: 'blueberry', motion: 'on' });
             assert.match(calls[1].query, /^UPDATE User SET settings = :settings WHERE @rid = #49:0/);
             assert.deepEqual(calls[1].options.params.settings, { theme: 'dark', cookie: 'blueberry' });
         } finally {

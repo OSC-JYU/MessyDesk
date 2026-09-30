@@ -1,12 +1,16 @@
 // Per-user UI preferences, saved on the User vertex as `settings` and edited
 // on the Settings page of the UI. Only known keys and values are accepted.
 
-export const THEMES = ['light', 'dark', 'system'];
+// light/dark are Fjord and system follows the OS between them; the others
+// are the Navy, Slate and Reading room (warm) themes of the UI.
+export const THEMES = ['light', 'dark', 'system', 'navy', 'navy-dark', 'slate', 'warm', 'warm-dark'];
 export const COOKIE_COLOURS = ['classic', 'chocolate', 'matcha', 'strawberry', 'blueberry'];
+// 'off' stops the UI's playful animations.
+export const MOTION = ['on', 'off'];
 
-export const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', cookie: 'classic' });
+export const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', cookie: 'classic', motion: 'on' });
 
-const ALLOWED = { theme: THEMES, cookie: COOKIE_COLOURS };
+const ALLOWED = { theme: THEMES, cookie: COOKIE_COLOURS, motion: MOTION };
 
 // Stored settings with defaults filled in; unknown or stale values are dropped.
 export function withDefaults(stored) {
