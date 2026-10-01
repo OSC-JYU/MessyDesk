@@ -128,13 +128,14 @@ export async function registerAuth(server: Server, opts: AuthOptions): Promise<v
             }
             if (opts.development) return h.authenticated({ credentials: { user: (request as any).plugins.devUser, service: true } as any });
             if (opts.legacyMail && mail) {
-                const user = await lookupOrFail(String(mail));
-                if (user.access === 'admin') {
+                const user = await opts.lookup(String(mail)).catch(() => null);
+                if (user?.access === 'admin') {
                     warnLegacy(String(mail), request.path);
                     return h.authenticated({ credentials: { user, service: true } as any });
                 }
             }
-            throw Boom.unauthorized('Service credential required');
+            // A "missing" error (no message) lets routes that also accept `mail` try that next.
+            throw Boom.unauthorized(null, 'Bearer');
         },
     }));
 

@@ -32,7 +32,7 @@ export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, co
         {
             method: 'POST',
             path: '/api/entities/link/{rid}',
-            options: { auth: { strategies: ['mail', 'service'] } },
+            options: { auth: { strategies: ['service', 'mail'] } },
             handler: (r) => {
                 if (!Array.isArray(r.payload)) throw Boom.badRequest('Payload must be an array');
                 return tags.createEntitiesAndLink(r.payload, r.params.rid, currentUser(r).rid);

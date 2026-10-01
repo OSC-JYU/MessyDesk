@@ -61,7 +61,7 @@ function nomadEnabled(): boolean {
 }
 
 export function serviceRoutes({ registry, files, prompts, filters, serviceHelp, nomad, logger }: Deps): ServerRoute[] {
-    const either = { auth: { strategies: ['mail', 'service'] } };
+    const either = { auth: { strategies: ['service', 'mail'] } };
     const serviceOnly = { auth: { strategy: 'service' } };
     return [
         {

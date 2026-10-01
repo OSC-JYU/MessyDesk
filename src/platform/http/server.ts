@@ -5,6 +5,9 @@ import Hapi from '@hapi/hapi';
 import type { Server, ServerRoute } from '@hapi/hapi';
 import Inert from '@hapi/inert';
 import type { Logger } from '../logger.ts';
+import Boom from '@hapi/boom';
+import { ValidationError } from '../../shared/graph-store.ts';
+import { InvalidRidError } from '../ids.ts';
 import { AUTH_HEADER } from './auth.ts';
 
 export async function createServer(port: number, publicDir: string): Promise<Server> {
@@ -20,6 +23,10 @@ export async function createServer(port: number, publicDir: string): Promise<Ser
 export function registerErrorLogging(server: Server, logger: Logger): void {
     server.ext('onPreResponse', (request, h) => {
         const response = request.response as any;
+        // Invalid input that reached the data layer is the caller's error, not a 500.
+        if (response instanceof ValidationError || response instanceof InvalidRidError) {
+            return Boom.badRequest(response.message);
+        }
         if (response && response.isBoom) {
             const status = response.output?.statusCode;
             const entry = {

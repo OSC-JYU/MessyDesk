@@ -81,7 +81,7 @@ export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, a
         {
             method: 'GET',
             path: '/api/files/{rid}',
-            options: { auth: { strategies: ['mail', 'service'] } },
+            options: { auth: { strategies: ['service', 'mail'] } },
             handler: async (request, h) => {
                 const creds = credentials(request);
                 const fileRid = tryRid(request.params.rid);
@@ -207,7 +207,7 @@ export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, a
             return {
                 method,
                 path,
-                options: { auth: { strategies: ['mail', 'service'] } },
+                options: { auth: { strategies: ['service', 'mail'] } },
                 handler: async (request, h) => {
                     const user = currentUser(request);
                     const setRid = rid(request.params.rid);
