@@ -69,6 +69,15 @@ export interface AuthOptions {
 }
 
 export async function registerAuth(server: Server, opts: AuthOptions): Promise<void> {
+    // Consumers poll several times a second; warn about the legacy header once an hour per sender.
+    const warned = new Map<string, number>();
+    function warnLegacy(mail: string, path: string): void {
+        const last = warned.get(mail) || 0;
+        if (Date.now() - last < 3600 * 1000) return;
+        warned.set(mail, Date.now());
+        opts.logger.warn('Consumer authenticated with the legacy mail header; set SERVICE_TOKEN in MD-consumers', { path, mail });
+    }
+
     async function lookupOrFail(mail: string): Promise<UserRecord> {
         let user: UserRecord | null;
         try {
@@ -121,7 +130,7 @@ export async function registerAuth(server: Server, opts: AuthOptions): Promise<v
             if (opts.legacyMail && mail) {
                 const user = await lookupOrFail(String(mail));
                 if (user.access === 'admin') {
-                    opts.logger.warn('Consumer authenticated with the legacy mail header; set SERVICE_TOKEN in MD-consumers', { path: request.path, mail });
+                    warnLegacy(String(mail), request.path);
                     return h.authenticated({ credentials: { user, service: true } as any });
                 }
             }
