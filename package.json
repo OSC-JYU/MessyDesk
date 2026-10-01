@@ -1,0 +1,33 @@
+{
+  "name": "messydesk",
+  "version": "0.2.0",
+  "description": "MessyDesk backend: desktop for digital humanities",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/src/main.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test 'dist/test/unit/**/*.test.js'",
+    "test:contract": "npm run build && node --test --test-concurrency=1 --test-timeout=30000 'dist/test/contract/**/*.test.js'",
+    "build:help": "npm run build && node dist/tools/build-help.js"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "@hapi/hapi": "^21.4.10",
+    "@hapi/inert": "^7.1.2",
+    "image-size": "^1.2.1",
+    "marked": "^18.0.14",
+    "tar": "^7.5.22",
+    "winston": "^3.19.0",
+    "winston-daily-rotate-file": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}

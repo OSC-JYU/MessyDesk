@@ -1,0 +1,90 @@
+# Decisions
+
+Decided by Ari on 2026-10-01 for the questions in [questions.md](questions.md). Where Ari gave
+no answer, the recommendation in questions.md applies, as Ari asked.
+
+## A. Whole rewrite
+
+| # | Decision |
+|---|---|
+| A1 | TypeScript, run with Node's type stripping; `tsc --noEmit` as a check |
+| A2 | Stay on Hapi 21 |
+| A3 | Drop the legacy-edge fallbacks (`HAS_ITEM`, `CONTAINS`, `PROCESSED_BY`/`PRODUCED`, `HAS_FILE`, `HAS_SOURCE`). Ship a check script that counts such edges before cutover |
+| A4 | Switch over at once, after the contract tests and the UI Playwright run pass |
+
+## B. Security: fix all of them
+
+The paths stay the same; only requests that should not succeed change.
+
+| # | Fix |
+|---|---|
+| B1 | `POST`/`DELETE /api/graph/edges/{rid}`: ownership check on both ends of the edge |
+| B2 | `GET /api/files/{rid}/ner`, `/api/files/{rid}/source`, `/api/errors/{rid}`: ownership check, 404 otherwise |
+| B3 | `GET /api/thumbnails/{path}`: path must resolve inside `DATA_DIR`, and the file node it belongs to must be the caller's |
+| B4 | `/api/queue/{topic}/flush`: admin only. `/api/queue/jobs/active`: only the caller's jobs (admins see all). Batch pause/resume/cancel and job dismiss: caller must own the batch |
+| B5 | `GET`/`DELETE /api/permissions/request`: admin only |
+| B6 | `POST /api/services/register` and `/api/services/{id}/help/ingest`: service credential (B8) or admin only |
+| B7 | Bound parameters for every query |
+| B8 | Separate service credential for consumers, see below |
+
+### B8. Service credentials for consumers
+
+- New env var `SERVICE_TOKEN` (one shared secret to start with; a list of named tokens if needed later).
+- Consumers send `Authorization: Bearer <token>`. A second Hapi auth strategy, `service`, accepts it.
+- Routes that only consumers call accept only the `service` strategy: queue claim/heartbeat/
+  complete/fail, `/api/nomad/process/*` callbacks, `/api/services/register`,
+  `/api/services/{id}/adapter/{adapter_id}` (POST and DELETE), `/api/services/{id}/help/ingest`,
+  `/api/entities/link/{rid}`.
+- Routes both call (`GET /api/files/{rid}`, `GET /api/services/{id}`, `DELETE /api/services/{id}`,
+  `/api/nomad/service/{name}`) accept either a user (with the existing checks) or the service token.
+  With the service token, file downloads act on behalf of the message's `userId`, which must own the file.
+- **Transition:** MD-consumers send only the `mail` header today and changing them is outside this
+  rewrite. `SERVICE_AUTH_LEGACY_MAIL=true` (default `true` until MD-consumers are updated) lets the
+  `service` routes also accept the old `mail: local.user@localhost` header; it logs a warning on
+  every such request. Updating MD-consumers to send the token is listed in section F as follow-up.
+
+## C. Response shapes
+
+| # | Decision (recommendation) |
+|---|---|
+| C1–C4 | Keep exactly |
+| C5 | Store new prompts as typed (clean); existing prompts untouched. Check the LLM adapters before cutover |
+| C6 | Return 400/409 with a `message` instead of the generic 500 |
+
+## D. Broken today (recommendations)
+
+| # | Decision |
+|---|---|
+| D1 | Fix: error callbacks create the error node and `error.json` |
+| D2 | Serve the repo's `public/` as static files |
+| D3 | Keep: node drag positions are not stored |
+| D4 | Fix the `GET /api/files/{rid}/source` path |
+| D5 | Drop `GET /api/entities/{rid}`, `DELETE /api/filters/{type}/files/{rid}`, `GET /api/projects/{rid}/files`; stop computing project `paths` from `HAS_FILE` |
+| D6 | Allow several SSE connections per user |
+| D7 | Consumer liveness expires 90 s after the last heartbeat |
+| D8 | Persist paused/cancelled batches in the queue SQLite file |
+| D9 | Keep: the `roi` segment is ignored |
+| D10 | Check for files before creating many-to-one nodes |
+| D11 | Keep the pause behaviour |
+
+## E. Dead and debug routes
+
+| # | Decision |
+|---|---|
+| E1 | Drop `GET /events/test`, `POST /events/test/message` |
+| E2 | Drop every route listed in E2: `POST /api/pipeline/files/{rid}/{roi?}`, `GET /api/queue/{topic}/drain/{rid?}`, `GET /api/queue/drain/{rid}`, `GET /api/queue/{topic}/status`, `POST /api/queue/cleanup`, `GET /api/queue/sweeper/summary`, `PUT /api/files/{rid}`, `POST /api/files/{rid}/sets/{set_rid}/ner`, `GET /api/tags/machine/{rid}/files`, `GET /api/tags/machine/{rid}/mentions`, `GET /api/tags/ner/labels/files`, `GET /api/graph/vertices/{rid}`, `GET /api/nomad/status`, `POST /api/nomad/process/csv/append`. The queue sweeper itself keeps running; only its HTTP routes go |
+| E3 | Update the wiki in MessyDesk-new to match the code |
+
+## F. MD-consumers follow-up (can be fixed later)
+
+Not part of this rewrite. To fix later in MD-consumers:
+
+1. Send the service token (B8) instead of `mail: local.user@localhost`, then set `SERVICE_AUTH_LEGACY_MAIL=false`.
+2. Report failures through `/api/queue/{id}/fail` instead of `complete`, so queue retries and batch auto-abort work.
+3. Invalid-payload errors post to a wrong URL (`…/files/api/nomad/process/files/error`); error objects serialise to `{}`.
+4. `elg` expects `GET /api/sets/{rid}/files/zip` to return a zip; it now returns a 202 job.
+5. `gemini-ai` (double JSON parse), `dspace7` (missing `cld`), `annif` (uploads `'test'`), `json-tagger` (legacy payload) are broken; `paddleocr` sends no auth header.
+6. Shutdown deletes the whole service registration even when other instances share the topic.
+7. The pause/resume/cancel control server is never consulted and registers a `localhost` URL.
+
+Details: [consumer-calls.md §7](consumer-calls.md).
