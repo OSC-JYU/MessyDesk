@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - PDF Handling</title>
+  <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a class="active" href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>PDF Handling</h1>
+<p>MessyDesk treats PDF as a container of pages.</p>
+<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> When PDF is imported to MessyDesk, it is automatically splitted to one-page PDF files and original file is REMOVED.</p>
+</blockquote>
+<p>There are couple of reasons for this. First reason is technical. PDF files can be very large, especially when it includes digitised content. Processing large files requires lot of memory and may lead corrupted results in some cases. Splitting file to smaller units resolves this problem.</p>
+<p>Second reason is semantic. In many fields that work with digitized information, a PDF file is often used as a package that bundles multiple documents together. The reason them being in same file might be that they located in paper folder. Because of this, it makes more sense to treat individual pages as the basic processing unit rather than the entire file, while still preserving the connection to the original document.</p>
+<p>MessyDesk does exactly this. When working with PDF files that contain hundreds of pages, splitting the file into separate single-page PDFs allows processing and classification to happen at the page level.</p>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>Individual pages are still connected to original file name.</p></div><h1>What is inside a PDF file?</h1>
+<p>A PDF file can contain many different kinds of content, ranging from images and forms to interactive elements and even games.</p>
+<p>A PDF may contain:</p>
+<ul>
+<li>only text</li>
+<li>only images</li>
+<li>both text and images</li>
+<li>images with invisible OCR text behind them</li>
+<li>hidden images layered beneath visible content</li>
+</ul>
+<p>It can even contain images that appear tiny on screen but are actually hundreds of megabytes in size.</p>
+<p>In other words, what you see is not necessarily what a machine sees.</p>
+<p>This is especially important when processing PDF files with machine learning models. You need to understand what the AI actually &quot;sees,&quot; because it may differ significantly from what is visually shown to the user.</p>
+<hr>
+<h2>How to extract content from PDF files</h2>
+<p>There are three main ways to extract content from PDF files.</p>
+<h3>1. Extract text objects from the PDF</h3>
+<p>If you create a document in a text editor and save it as a PDF, the text remains embedded inside the file and can be extracted directly.</p>
+<p>The same applies to scanned documents that contain OCR text. In these cases, the OCR text can usually be extracted even if it is invisible to the user and only the scanned image is shown visually.</p>
+<p>In MessyDesk, this can be done using the <strong>Poppler</strong> cruncher with the task <strong>&quot;Extract text&quot;</strong>.</p>
+<hr>
+<h3>2. Extract image objects from the PDF</h3>
+<p>Extracting images from a PDF retrieves all embedded image objects, including both visible and hidden images.</p>
+<p>The extracted images preserve their original resolution and quality from when they were added to the PDF.</p>
+<hr>
+<h3>3. Render the PDF page as an image</h3>
+<p>Rendering converts a PDF page into an image, essentially creating a screenshot of the page.</p>
+<p>This method captures exactly what is visually shown to the user.</p>
+<p>It is also the safest method when you want to ensure that hidden layers, invisible OCR text, or concealed content are not included in the extracted result.</p>
+
+    </article>
+  </main>
+</body>
+</html>

@@ -1,0 +1,41 @@
+
+version: "3"
+services:
+
+  arcadedb:
+    image: arcadedata/arcadedb:23.7.1
+    container_name: md-arcadedb
+    ports:
+      - 2480:2480
+    environment:
+      - JAVA_OPTS=-Darcadedb.server.rootPassword=node_master
+    volumes:
+      - arcadedata_md:/home/arcadedb/databases
+
+  solr:
+    image: solr:9.7
+    container_name: md-solr
+    ports:
+      - 8983:8983
+    restart: unless-stopped
+    volumes:
+      - solrdata_md:/var/solr
+    command: ["solr-precreate", "messydesk"]
+
+  solr-init:
+    image: alpine:3.20
+    container_name: md-solr-init
+    depends_on:
+      - solr
+    environment:
+      - SOLR_URL=http://solr:8983/solr/messydesk
+    volumes:
+      - ./tools/solr-init-v2.sh:/solr-init.sh:ro
+    entrypoint: ["sh", "-c", "apk add --no-cache bash curl >/dev/null && bash /solr-init.sh"]
+    restart: "no"
+
+
+volumes:
+  arcadedata_md: {}
+  solrdata_md: {}
+

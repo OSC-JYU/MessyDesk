@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - Design Principles</title>
+  <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a class="active" href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>Design Principles</h1>
+<p>MessyDesk is built specifically to support academic research, which introduces unique requirements for data handling, reproducibility, and methodology. The platform&#39;s architecture is guided by three core principles.</p>
+<h2>Accessible, Not Dummified</h2>
+<p>The ultimate goal of MessyDesk is to let you run rapid, iterative experiments on your own data. However, making a tool accessible does not mean turning it into an opaque &quot;one-click&quot; solution. </p>
+<p>Researchers must maintain active agency over their pipelines. Instead of hiding the underlying mechanics behind oversimplified wizards, MessyDesk provides an intuitive visual interface that still requires you to make deliberate methodological choices about how your data is filtered, split, and processed.</p>
+<h2>Absolute Transparency</h2>
+<p>In scientific and humanities research, you must be able to understand—and defend—how your source material was processed. MessyDesk relies entirely on trusted, open-source tools (such as Apache Solr, Poppler, and Python) and purposely does not obscure them. </p>
+<p>By keeping these technologies fully visible, MessyDesk allows you to:</p>
+<ul>
+<li>Dig deep into the exact algorithms transforming your data.</li>
+<li>Cite specific, version-controlled library outputs in your publications.</li>
+<li>Ensure your entire digital workflow is completely transparent and reproducible by peer reviewers.</li>
+</ul>
+<h2>Strict Human–Machine Separation</h2>
+<p>Data integrity relies on knowing who—or what—created a piece of information. MessyDesk strictly enforces a clean separation between human-generated actions and machine-generated outputs:</p>
+<ul>
+<li><strong>Human Actions:</strong> Your manual annotations, custom metadata tags, drawn polygon ROIs, and explicitly chosen pipeline configurations are treated as primary, authoritative research data.</li>
+<li><strong>Machine Products:</strong> Automated outputs—such as OCR text transcriptions, machine-translated sequences, or AI-detected face polygons—are strictly flagged as algorithmic derivatives.</li>
+</ul>
+<p>This guarantees that machine errors or algorithmic biases never silently contaminate your hand-curated research findings.</p>
+
+    </article>
+  </main>
+</body>
+</html>

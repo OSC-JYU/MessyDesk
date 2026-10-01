@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MessyDesk Help - Regions of Interest (ROIs)</title>
+  <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+  <main class="page">
+    <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a class="active" href="/help/rois">ROIs</a><a href="/help/search">Search</a><a href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
+    <article class="content">
+      <h1>Regions of Interest (ROIs)</h1>
+<p>As the name implies, a <strong>Region of Interest (ROI)</strong> is a specific segment of an image or text file that a researcher flags for further analysis or targeted processing.</p>
+<h2>Image ROIs (Polygons)</h2>
+<p>Image ROIs allow you to draw shapes over specific areas of a visual node to isolate them. Instead of permanently cropping or altering your original file, MessyDesk treats these polygons as abstract layer markings. </p>
+<p>For storage, MessyDesk keeps ROI polygons in a single JSON file per image file (inside the active ROI set). Editing ROIs updates that same JSON, and if all ROIs are removed, the ROI JSON file is deleted.</p>
+<p>Because ROIs exist as independent metadata layers rather than destructive edits, they can be utilized in several distinct ways:</p>
+<ul>
+<li><strong>Targeted Processing:</strong> You can instruct a cruncher to process <em>only</em> the data contained within a specific ROI (e.g., running OCR on a single column of an ancient manuscript page).</li>
+<li><strong>Metadata &amp; Annotations:</strong> You can attach unique labels, metadata tags, and descriptive research notes to individual ROIs without affecting the parent node.</li>
+<li><strong>Pipeline Routing:</strong> An ROI can be extracted to create a new downstream data node while preserving the original image&#39;s context.</li>
+</ul>
+<h2>AI-Assisted ROIs <em>(Planned Feature)</em></h2>
+<p>When dealing with massive visual archives, manually drawing polygons becomes impossible. Future updates will introduce automated computer vision crunchers to do the heavy lifting:</p>
+<ul>
+<li><strong>Object &amp; Face Detection:</strong> For example, an object-detection pipeline can scan thousands of images to identify human faces, structural elements, or historical artifacts, automatically generating bounded ROIs for every match.</li>
+<li><strong>Batch Annotation:</strong> These machine-generated ROIs can then be filtered, reviewed, and fed into subsequent analysis pipelines.</li>
+</ul>
+<h2>Text ROIs <em>(Planned Feature)</em></h2>
+<p>While image ROIs deal with geometric polygons, Text ROIs handle highlighted strings and sequences within textual documents. </p>
+<h3>Named Entity Recognition (NER)</h3>
+<p>Text ROIs will integrate natively with Named Entity Recognition workflows. When an NER cruncher processes a text, it automatically generates a collection of precision-mapped text ROIs. </p>
+<p>Each generated ROI retains:</p>
+<ul>
+<li>The exact character start and end points of the sequence.</li>
+<li>The extracted text snippet.</li>
+<li>The entity classification (e.g., <em>Person</em>, <em>Location</em>, <em>Organization</em>, or <em>Date</em>).</li>
+</ul>
+
+    </article>
+  </main>
+</body>
+</html>

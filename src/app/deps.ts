@@ -1,0 +1,67 @@
+// The object graph built once in main.ts and handed to every route module.
+
+import type { Config } from '../config.ts';
+import type { ArcadeClient } from '../platform/arcade/client.ts';
+import type { Logger } from '../platform/logger.ts';
+import type { NomadClient } from '../platform/nomad/nomad.ts';
+import type { SolrClient } from '../platform/solr/solr.ts';
+import type { SseHub } from '../platform/sse/hub.ts';
+import type { DataLayout } from '../platform/storage/layout.ts';
+import type { GraphStore } from '../shared/graph-store.ts';
+import type { AccessService } from '../modules/access/access.ts';
+import type { BatchState } from '../modules/batches/batch-state.ts';
+import type { FilesService } from '../modules/files/files.ts';
+import type { FiltersService } from '../modules/filters/filters.ts';
+import type { GraphService } from '../modules/graph/graph.ts';
+import type { ImportPipeline } from '../modules/import/import.ts';
+import type { NodesService } from '../modules/nodes/nodes.ts';
+import type { ProcessingService } from '../modules/processing/processing.ts';
+import type { DeskGraph } from '../modules/projects/desk-graph.ts';
+import type { ProjectsService } from '../modules/projects/projects.ts';
+import type { PromptsService } from '../modules/prompts/prompts.ts';
+import type { Publisher } from '../modules/queue/publisher.ts';
+import type { JobQueue } from '../modules/queue/queue.ts';
+import type { ResultsService } from '../modules/results/results.ts';
+import type { RoisService } from '../modules/rois/rois.ts';
+import type { ServiceGroupsService } from '../modules/service-groups/service-groups.ts';
+import type { ServiceHelp } from '../modules/service-help/bundle.ts';
+import type { ServiceRegistry } from '../modules/services/registry.ts';
+import type { ZipJobs } from '../modules/sets/zip-jobs.ts';
+import type { NerService } from '../modules/tags/ner.ts';
+import type { TagsService } from '../modules/tags/tags.ts';
+import type { ThumbnailService } from '../modules/thumbnails/thumbnails.ts';
+import type { UsersService } from '../modules/users/users.ts';
+
+export interface Deps {
+    config: Config;
+    logger: Logger;
+    db: ArcadeClient;
+    store: GraphStore;
+    layout: DataLayout;
+    sse: SseHub;
+    solr: SolrClient;
+    nomad: NomadClient;
+    queue: JobQueue;
+    publisher: Publisher;
+    access: AccessService;
+    users: UsersService;
+    projects: ProjectsService;
+    deskGraph: DeskGraph;
+    nodes: NodesService;
+    graph: GraphService;
+    files: FilesService;
+    thumbnails: ThumbnailService;
+    zipJobs: ZipJobs;
+    importPipeline: ImportPipeline;
+    registry: ServiceRegistry;
+    serviceHelp: ServiceHelp;
+    processing: ProcessingService;
+    batches: BatchState;
+    results: ResultsService;
+    tags: TagsService;
+    ner: NerService;
+    filters: FiltersService;
+    rois: RoisService;
+    prompts: PromptsService;
+    serviceGroups: ServiceGroupsService;
+}

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>MessyDesk Help - md-sharp Help</title>
+    <link rel="stylesheet" href="/api/help/styles/help.css" />
+</head>
+<body>
+        <main class="page">
+                <article class="content">
+                        <div class="service-meta">Service: md-thumbnailer</div>
+                        <h1>md-sharp Help</h1>
+<h2>Endpoints</h2>
+<ul>
+<li>GET /health: Returns service health status.</li>
+<li>GET /config: Returns the service descriptor from service.json.</li>
+<li>GET /help: Returns this help markdown.</li>
+<li>POST /process: Executes an image task.<ul>
+<li>API mode: <code>message</code> + <code>content</code> multipart -&gt; downloadable output.</li>
+<li>Disk mode (requires <code>MD_PATH</code>): <code>message</code> only (file.path resolved on shared volume) -&gt; output written to MessyDesk&#39;s shared tmp directory.</li>
+</ul>
+</li>
+<li>GET /files/{dir}/{file}: Downloads a generated file (API mode only; deleted after download).</li>
+</ul>
+<h2>Tasks</h2>
+<ul>
+<li>thumbnail: Generate an 800px preview + 200px thumbnail (dual output). Invoked automatically; not user-selectable.</li>
+<li>resize: Resize by width, keeping aspect ratio.</li>
+<li>fit: Resize to fit inside a width x height box, keeping aspect ratio.</li>
+<li>flip: Flip image vertically.</li>
+<li>rotate: Rotate image by a given angle.</li>
+<li>blur: Gaussian blur by amount (0-100%, scaled to image size).</li>
+<li>convert: Convert image to another format (jpeg/png/webp).</li>
+</ul>
+<p>Task parameters are defined in service.json.</p>
+
+                </article>
+        </main>
+</body>
+</html>

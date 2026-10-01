@@ -1,0 +1,112 @@
+// Progress of a batch, stored on its SetProcess (or Process) node: status, counters, timing, ETA.
+
+import type { ArcadeClient } from '../../platform/arcade/client.ts';
+import { toRid, tryRid } from '../../platform/ids.ts';
+import type { GraphStore } from '../../shared/graph-store.ts';
+
+function round(value: number, decimals = 2): number {
+    const f = 10 ** decimals;
+    return Math.round(value * f) / f;
+}
+
+export class BatchState {
+    private readonly db: ArcadeClient;
+    private readonly store: GraphStore;
+
+    constructor(db: ArcadeClient, store: GraphStore) {
+        this.db = db;
+        this.store = store;
+    }
+
+    async get(processRid: string): Promise<any | null> {
+        const rid = tryRid(processRid);
+        if (!rid) return null;
+        return await this.db.first('SELECT FROM SetProcess WHERE @rid = :rid LIMIT 1', { rid })
+            || await this.db.first('SELECT FROM Process WHERE @rid = :rid LIMIT 1', { rid });
+    }
+
+    static status(batch: any): string | undefined {
+        return batch?.status || batch?.state;
+    }
+
+    async update(processRid: string, patch: Record<string, unknown>): Promise<any | null> {
+        const node = await this.get(processRid);
+        if (!node) return null;
+        await this.store.setAttributes(node['@rid'], patch);
+        return { ...node, ...patch };
+    }
+
+    init(processRid: string, attrs: Record<string, unknown> = {}): Promise<any | null> {
+        const now = new Date().toISOString();
+        return this.update(processRid, {
+            status: 'running',
+            processed_files: 0,
+            failed_files: 0,
+            total_time_sec: 0,
+            avg_sec_per_file: 0,
+            eta_sec: null,
+            started_at: now,
+            updated_at: now,
+            ...attrs,
+        });
+    }
+
+    /** One more input processed; marks the batch done when all are. */
+    async incrementProcessed(processRid: string, responseTime: unknown, totalFiles: unknown): Promise<any | null> {
+        const batch = await this.get(processRid);
+        if (!batch) return null;
+        const now = new Date().toISOString();
+        const processed = Number(batch.processed_files || 0) + 1;
+        const total = Number(totalFiles || batch.total_files || 0);
+        const delta = Number(responseTime || 0);
+        const totalTime = Number(batch.total_time_sec || 0) + (Number.isFinite(delta) ? delta : 0);
+        const avg = processed > 0 ? round(totalTime / processed, 3) : 0;
+        const remaining = total > 0 ? Math.max(total - processed, 0) : 0;
+        const patch: Record<string, unknown> = {
+            processed_files: processed,
+            failed_files: Number(batch.failed_files || 0),
+            total_files: total || batch.total_files || 0,
+            total_time_sec: round(totalTime, 3),
+            avg_sec_per_file: avg,
+            eta_sec: total > 0 && avg > 0 ? Math.round(remaining * avg) : null,
+            updated_at: now,
+        };
+        if (total > 0 && processed >= total) {
+            patch.status = 'done';
+            patch.finished_at = now;
+            patch.eta_sec = 0;
+        }
+        return this.update(batch['@rid'], patch);
+    }
+
+    async incrementFailed(processRid: string): Promise<any | null> {
+        const batch = await this.get(processRid);
+        if (!batch) return null;
+        return this.update(batch['@rid'], { failed_files: Number(batch.failed_files || 0) + 1, updated_at: new Date().toISOString() });
+    }
+
+    /** Input files that already have an output in this batch (for resume). */
+    async processedInputs(processRid: string): Promise<string[]> {
+        const rows = await this.db.rows('SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE process_rid = :rid', { rid: toRid(processRid) });
+        return rows.map((r) => r.rid).filter(Boolean);
+    }
+
+    /** An existing output of a process for a given source (guards grouped many-to-one retries). */
+    async outputFor(processRid: string, sourceRid: string, outputSet: string | null): Promise<any | null> {
+        const rows = await this.db.rows('SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = :p AND @in = :s LIMIT 10', { p: toRid(processRid), s: toRid(sourceRid) });
+        for (const row of rows) {
+            const node = await this.store.getNode(row.rid);
+            if (!node || node['@type'] !== 'File') continue;
+            if (outputSet && tryRid(node.set) !== toRid(outputSet)) continue;
+            return node;
+        }
+        return null;
+    }
+
+    /** The process that produced a set (from the set's DERIVED_FROM edge). */
+    async processOfSet(setRid: string): Promise<any | null> {
+        const row = await this.db.first('SELECT process_rid FROM DERIVED_FROM WHERE @out = :rid AND process_rid IS NOT NULL LIMIT 1', { rid: toRid(setRid) });
+        if (!row?.process_rid) return null;
+        return this.store.getNode(row.process_rid);
+    }
+}
