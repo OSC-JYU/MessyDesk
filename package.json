@@ -13,7 +13,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test 'dist/test/unit/**/*.test.js'",
     "test:contract": "npm run build && node --test --test-concurrency=1 --test-timeout=30000 'dist/test/contract/**/*.test.js'",
-    "build:help": "npm run build && node dist/tools/build-help.js"
+    "build:help": "node tools/build-help.mjs"
   },
   "license": "ISC",
   "dependencies": {
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.3",
+    "fs-extra": "^11.4.1",
     "typescript": "^7.0.2"
   }
 }
