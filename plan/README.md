@@ -1,6 +1,6 @@
 # MessyDesk backend rewrite: plan
 
-Status: decisions made 2026-10-01 (see [decisions.md](decisions.md)). No code yet.
+Status: implemented 2026-10-01 (see [decisions.md](decisions.md) and ../wiki/architecture/backend-structure.md).
 
 The new backend lives in `MessyDesk-new`. The old `MessyDesk`, `MessyDesk-UI` and `MD-consumers`
 repositories are not touched. The new backend must be a drop-in replacement: same HTTP API, same
