@@ -120,7 +120,7 @@ async function main(): Promise<void> {
         config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users,
         projects: new ProjectsService(db, store, layout, access, { expirationDays: config.projectExpirationDays, quotaGb: config.diskQuotaGb }),
         deskGraph, nodes, graph, files, thumbnails,
-        zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs),
+        zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs, registry),
         importPipeline, registry,
         serviceHelp: new ServiceHelp({ dir: path.join(config.helpDir, 'services'), bundleMaxFiles: config.help.bundleMaxFiles, archiveMaxBytes: config.help.archiveMaxBytes, archiveMaxEntries: config.help.archiveMaxEntries }),
         processing, batches,
