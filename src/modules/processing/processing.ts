@@ -296,7 +296,8 @@ export class ProcessingService {
     /**
      * whole-set: one job carries every file of the set (`files`), for services that must see the
      * whole corpus at once (vector indexes, clustering, topics). The run is a many-to-one run with a
-     * single job, so results, batch progress and lineage work unchanged.
+     * single job, so results, batch progress and lineage work unchanged. A task with
+     * `output: "file"` instead gets a plain Process and one result file derived from the set.
      */
     private async dispatchWholeSet(args: { topic: string; service: any; task: any; set: any; files: any[]; payload: any; userRid: string }): Promise<string> {
         const { topic, service, task, set, files, payload, userRid } = args;
@@ -310,6 +311,16 @@ export class ProcessingService {
         }
         if (!entries.length) throw Boom.badRequest('Set has no files to process');
         const taskName = task?.name || task?.id || topic;
+        if (service.tasks?.[task.id]?.output === 'file') {
+            // One result file derived from the set (e.g. a vector index), no output set.
+            const msg: any = { service, task, file: set, files: entries, process: null, output_set: null, set_rid: rid, input_set: rid, whole_set: true, userId: userRid };
+            msg.process = await this.nodes.createProcess(msg);
+            await ensureDir(msg.process.path);
+            await writeJson(path.dirname(msg.process.path), 'params.json', payload);
+            this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: msg.process });
+            await this.publisher.publish(`${topic}_batch`, msg);
+            return rid;
+        }
         const processNode = await this.nodes.createManyToOneProcess(taskName, service, task, set);
         const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: rid, label: `${taskName} output`, project_rid: set.project_rid });
         await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, total_files: 1 });

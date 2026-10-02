@@ -384,6 +384,7 @@ export class JobQueue {
             let payload: any = null;
             try { payload = JSON.parse(row.payload_json); } catch { /* ignore */ }
             if (payload && isThumbnailPayload(payload)) continue;
+            if (payload?.role === 'semantic_search') continue; // searches are not jobs for the jobs panel
             if (userRid && payload?.userId !== userRid) continue;
             let serviceId = payload?.service?.id || payload?.topic?.id || row.queue || '';
             serviceId = String(serviceId).replace(/_batch$/, '');

@@ -2,6 +2,7 @@ import Boom from '@hapi/boom';
 import type { ServerRoute } from '@hapi/hapi';
 import fsp from 'node:fs/promises';
 import type { Deps } from '../../app/deps.ts';
+import { SEMANTIC_ROLE } from '../semantic/semantic.ts';
 
 const SERVICE_ONLY = { strategy: 'service' };
 
@@ -13,7 +14,7 @@ async function parseMessage(part: any): Promise<any> {
     return part;
 }
 
-export function resultRoutes({ results, logger }: Deps): ServerRoute[] {
+export function resultRoutes({ results, semantic, logger }: Deps): ServerRoute[] {
     const filePayload = (maxBytes: number) => ({ maxBytes, output: 'file' as const, parse: true, multipart: { output: 'file' as const } });
     return [
         {
@@ -54,7 +55,9 @@ export function resultRoutes({ results, logger }: Deps): ServerRoute[] {
             path: '/api/nomad/process/files/done',
             options: { auth: SERVICE_ONLY },
             handler: async (request) => {
-                if (request.payload) await results.handleDone(request.payload);
+                const payload = request.payload as any;
+                if (payload?.role === SEMANTIC_ROLE) await semantic.deliver(payload);
+                else if (payload) await results.handleDone(payload);
                 return [];
             },
         },
@@ -64,7 +67,8 @@ export function resultRoutes({ results, logger }: Deps): ServerRoute[] {
             options: { auth: SERVICE_ONLY },
             handler: async (request) => {
                 const payload = (request.payload || {}) as any;
-                if (payload.error && payload.message) await results.handleError(payload.error, payload.message);
+                if (payload.message?.role === SEMANTIC_ROLE) semantic.fail(payload.message, payload.error);
+                else if (payload.error && payload.message) await results.handleError(payload.error, payload.message);
                 else logger.error('Error processing files', { error: payload });
                 return [];
             },
