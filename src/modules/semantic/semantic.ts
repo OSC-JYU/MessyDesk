@@ -122,6 +122,16 @@ export class SemanticSearch {
         return DEFAULT_SERVICE;
     }
 
+    /** A set's label; unlabelled output sets are named after the process that made them. */
+    private async setLabel(setRid: string): Promise<string | null> {
+        const set = await this.d.db.first(`SELECT label FROM ${toRid(setRid)}`);
+        if (set?.label) return String(set.label);
+        const edge = await this.d.db.first('SELECT process_rid FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(setRid) });
+        const processRid = tryRid(edge?.process_rid);
+        const process = processRid ? await this.d.db.first(`SELECT label FROM ${processRid}`) : null;
+        return process?.label ? `${process.label} output` : null;
+    }
+
     /** The user's vector indexes, for the Search tab. */
     async indexes(userRid: string): Promise<IndexInfo[]> {
         const projects = await this.d.db.rows(
@@ -140,14 +150,14 @@ export class SemanticSearch {
             const meta = await this.indexMeta(file.path);
             const edge = await this.d.db.first('SELECT @in AS source FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(file.rid) });
             const sourceRid = tryRid(edge?.source);
-            const source = sourceRid ? await this.d.db.first(`SELECT label FROM ${sourceRid}`) : null;
+            const source = sourceRid ? await this.setLabel(sourceRid) : null;
             out.push({
                 rid: file.rid,
                 label: file.label,
                 project_rid: String(file.project_rid),
                 project_label: projectLabels.get(String(file.project_rid)) ?? null,
                 source_set: sourceRid,
-                source_set_label: source?.label ?? null,
+                source_set_label: source,
                 service_id: await this.serviceOf(file.rid),
                 kind: 'file',
                 model: meta.model,
@@ -255,6 +265,7 @@ export class SemanticSearch {
                 rid,
                 label: node.node.label ?? match.doc_label ?? null,
                 type: node.node.type ?? null,
+                path: node.node.path ?? null,
                 project_rid: node.projectRid,
                 similarity: Number(match.similarity),
                 chunk: match.chunk ?? null,
