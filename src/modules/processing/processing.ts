@@ -42,6 +42,22 @@ export function queueName(service: any, task: any, topic: string): string {
     return id && service?.tasks?.[id]?.always_batch ? `${topic}_batch` : topic;
 }
 
+/**
+ * Replaces the model id the UI sent (`task.model` as an id or `{ id }`) with the model's entry in
+ * the descriptor, for every service that lists `models`. An unknown id is dropped, except for LLM
+ * services (`external_tasks`), which keep what they were sent as before.
+ */
+export function resolveModel(service: any, task: any): void {
+    if (!task?.model) return;
+    const modelId = typeof task.model === 'string' ? task.model : task.model.id;
+    if (service?.models && modelId && service.models[modelId]) {
+        task.model = structuredClone(service.models[modelId]);
+        task.model.id = modelId;
+    } else if (!service?.external_tasks) {
+        delete task.model;
+    }
+}
+
 export class ProcessingService {
     private readonly db: ArcadeClient;
     private readonly store: GraphStore;
@@ -87,15 +103,9 @@ export class ProcessingService {
      */
     private prepareTask(service: any, requested: any, singleFile: boolean): any {
         const task = structuredClone(requested || {});
+        resolveModel(service, task);
         if (service.external_tasks) {
             if (singleFile) task.params = task.system_params;
-            if (service.models && task.model) {
-                const modelId = typeof task.model === 'string' ? task.model : task.model.id;
-                if (modelId && service.models[modelId]) {
-                    task.model = structuredClone(service.models[modelId]);
-                    task.model.id = modelId;
-                }
-            }
             return task;
         }
         const def = service.tasks?.[task.id];
@@ -214,6 +224,10 @@ export class ProcessingService {
         const behaviour = resolveBehaviour(service, task);
         const taskName = task?.name || task?.id || topic;
 
+        if (!service.external_tasks && behaviour === 'whole-set') {
+            return this.dispatchWholeSet({ topic, service, task, set, files, payload, userRid });
+        }
+
         if (!service.external_tasks && behaviour === 'many-to-one') {
             if (!files.length) throw Boom.badRequest('Set has no files to process');
             const searchOutput = isSearchOutputTask(service, task);
@@ -276,6 +290,50 @@ export class ProcessingService {
         });
         this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: nodes.process, output: nodes.set });
         await this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length });
+        return rid;
+    }
+
+    /**
+     * whole-set: one job carries every file of the set (`files`), for services that must see the
+     * whole corpus at once (vector indexes, clustering, topics). The run is a many-to-one run with a
+     * single job, so results, batch progress and lineage work unchanged.
+     */
+    private async dispatchWholeSet(args: { topic: string; service: any; task: any; set: any; files: any[]; payload: any; userRid: string }): Promise<string> {
+        const { topic, service, task, set, files, payload, userRid } = args;
+        const rid = set['@rid'];
+        if (!files.length) throw Boom.badRequest('Set has no files to process');
+        const entries: any[] = [];
+        for (const f of files) {
+            const meta = await this.files.metadata(f['@rid'], userRid);
+            if (!meta?.path) continue;
+            entries.push({ '@rid': meta['@rid'], label: meta.label, path: meta.path, type: meta.type, extension: meta.extension });
+        }
+        if (!entries.length) throw Boom.badRequest('Set has no files to process');
+        const taskName = task?.name || task?.id || topic;
+        const processNode = await this.nodes.createManyToOneProcess(taskName, service, task, set);
+        const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: rid, label: `${taskName} output`, project_rid: set.project_rid });
+        await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, total_files: 1 });
+        this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: processNode, output: outputSet });
+        await writeJson(path.dirname(processNode.path), 'params.json', payload);
+        await this.publisher.publish(`${topic}_batch`, {
+            task,
+            process: processNode,
+            project_rid: set.project_rid,
+            set_rid: rid,
+            input_set: rid,
+            output_set: outputSet['@rid'],
+            behaviour: 'many-to-one',
+            whole_set: true,
+            set_process: processNode['@rid'],
+            total_files: 1,
+            current_file: 1,
+            batch_total_files: 1,
+            batch_current_file: 1,
+            userId: userRid,
+            // The set stands in for `file`: adapters echo it back, so the output derives from the set.
+            file: set,
+            files: entries,
+        });
         return rid;
     }
 
@@ -358,17 +416,11 @@ export class ProcessingService {
         if (service.external_tasks) {
             task.name = task.name || task.id;
             task.params = task.system_params || task.params || {};
-            if (service.models && task.model) {
-                const modelId = typeof task.model === 'string' ? task.model : task.model.id;
-                if (modelId && service.models[modelId]) {
-                    task.model = structuredClone(service.models[modelId]);
-                    task.model.id = modelId;
-                }
-            }
         } else {
             if (!service.tasks?.[task.id]) throw Boom.badRequest('Task not found in service');
             task.name = service.tasks[task.id].name;
         }
+        resolveModel(service, task);
         const listing = await this.files.setFiles(batch.input_set, userRid, { limit: 10000 });
         const done = new Set(await this.batches.processedInputs(rid));
         const pending = listing.files.filter((f: any) => !done.has(f['@rid']));

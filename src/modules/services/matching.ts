@@ -52,7 +52,7 @@ function pickTasks(service: any, extensions: string[], types: string[], filter: 
         const behaviour = resolveBehaviour(service, { ...task, id: name });
         if (task.service_groups && !task.service_groups.some((g: string) => userGroups.includes(g))) continue;
         if (nodeType === 'Set' && task.set_disabled) continue;
-        if (nodeType !== 'Set' && (task.set_only || behaviour === 'many-to-one')) continue;
+        if (nodeType !== 'Set' && (task.set_only || behaviour === 'many-to-one' || behaviour === 'whole-set')) continue;
         let matches = false;
         if (task.supported_types?.length) matches = task.supported_types.some((t: string) => types.includes(t));
         else if (task.supported_formats?.length) matches = task.supported_formats.some((f: string) => extensions.includes(f));
