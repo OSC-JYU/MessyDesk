@@ -93,3 +93,27 @@ Documents are indexed via the Solr adapter in MD-consumers:
 |----------|---------|
 | `POST /api/search` | Full-text search with query, project filter, pagination |
 | `GET /api/search/info` | Search statistics (document counts per project) |
+
+## Semantic search (vector indexes)
+
+**[verified]** from `src/modules/semantic/`:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/search/semantic/indexes` | The caller's vector indexes (File nodes of type `vector_index`): model, rows and file count from the index file's header, the indexed set, the desk, and `large` above 200 000 rows |
+| `POST /api/search/semantic` | `{ index, query, k, level: chunk\|doc }` → 202 `{ search_id }` |
+| `GET /api/search/semantic/{id}` | `queued` / `done` (with `hits`) / `failed` (with `error`); kept 10 minutes, only for the searcher |
+
+A search is a job on the **single-file queue** of the service that built the index (the
+producing process's `service_id`, default `md-embeddings`), with `role: semantic_search`,
+`search_id` and `task: {id: 'search'}`. Consumers claim the single-file queue before the batch
+queue, so a search waits at most for the job a consumer is already running. The service answers
+with `response.type = "results"`; the consumer reports it with `/api/nomad/process/files/done`,
+and the backend routes it to `SemanticSearch.deliver` instead of the results module. Hits are
+checked with `AccessService.findOwned` for the user of the pending search (never the message's
+`userId`), given labels and snippets from the source text, and announced with the SSE event
+`{ command: 'semantic_results', search_id, status }`. Failed searches arrive through `/error`.
+Search jobs are not shown in the jobs panel.
+
+Another vector backend (e.g. a vector database service) answers the same job with the same
+results, so the routes and the UI stay the same.
