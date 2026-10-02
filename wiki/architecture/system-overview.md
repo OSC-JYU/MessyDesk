@@ -28,6 +28,10 @@ MessyDesk is a document processing platform built around a graph database. Users
 
 ## Component Interaction Diagram
 
+![MessyDesk architecture](architecture.svg)
+
+([PNG](architecture.png))
+
 ```
 ┌─────────────────────────────────┐
 │  MessyDesk-UI (Vue 3, :3000)   │
