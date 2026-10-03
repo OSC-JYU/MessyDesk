@@ -294,6 +294,27 @@ export class ProcessingService {
     }
 
     /**
+     * Adds `source` ({@rid, label, path, type}) to whole-set entries whose file was derived from
+     * another file, e.g. the text an embeddings file was computed from (topic models need it).
+     */
+    private async attachSources(entries: any[]): Promise<void> {
+        const rids = entries.map((e) => e['@rid']).filter(Boolean);
+        for (let i = 0; i < rids.length; i += 500) {
+            const chunk = rids.slice(i, i + 500);
+            const edges = await this.db.rows('SELECT @out AS out, @in AS src FROM DERIVED_FROM WHERE @out IN :rids', { rids: chunk });
+            const sources = [...new Set(edges.map((e: any) => String(e.src)).filter(Boolean))];
+            if (!sources.length) continue;
+            const files = await this.db.rows('SELECT @rid AS rid, label, path, type FROM File WHERE @rid IN :rids', { rids: sources });
+            const byRid = new Map(files.map((f: any) => [String(f.rid), f]));
+            const sourceOf = new Map(edges.map((e: any) => [String(e.out), byRid.get(String(e.src))]));
+            for (const entry of entries) {
+                const source = sourceOf.get(String(entry['@rid']));
+                if (source?.path) entry.source = { '@rid': source.rid, label: source.label, path: source.path, type: source.type };
+            }
+        }
+    }
+
+    /**
      * whole-set: one job carries every file of the set (`files`), for services that must see the
      * whole corpus at once (vector indexes, clustering, topics). The run is a many-to-one run with a
      * single job, so results, batch progress and lineage work unchanged. A task with
@@ -310,6 +331,7 @@ export class ProcessingService {
             entries.push({ '@rid': meta['@rid'], label: meta.label, path: meta.path, type: meta.type, extension: meta.extension });
         }
         if (!entries.length) throw Boom.badRequest('Set has no files to process');
+        await this.attachSources(entries);
         const taskName = task?.name || task?.id || topic;
         if (service.tasks?.[task.id]?.output === 'file') {
             // One result file derived from the set (e.g. a vector index), no output set.
