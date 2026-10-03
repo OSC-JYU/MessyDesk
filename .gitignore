@@ -3,3 +3,6 @@ data
 *.log
 dist
 public/help/services/
+
+# local compose secrets
+local/.env

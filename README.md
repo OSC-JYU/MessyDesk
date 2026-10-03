@@ -8,7 +8,10 @@ the old `MessyDesk` backend, so MessyDesk-UI and MD-consumers work against it un
 
 ## Run locally
 
-Needs Node.js >= 22.5, ArcadeDB and Solr (`docker compose up -d` starts both).
+To try the whole thing (backend, UI and the base services) in containers, see
+[local/README.md](local/README.md).
+
+For backend development: needs Node.js >= 22.5, ArcadeDB and Solr (`docker compose up -d` starts both).
 
 ```bash
 npm install
