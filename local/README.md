@@ -15,6 +15,8 @@ git clone https://github.com/OSC-JYU/MD-pypdf_fs.git
 git clone https://github.com/OSC-JYU/MD-zip_fs.git
 git clone https://github.com/OSC-JYU/MD-text-base_fs.git
 git clone https://github.com/OSC-JYU/MD-tesseract.git
+git clone https://github.com/OSC-JYU/MD-lingua.git
+git clone https://github.com/OSC-JYU/MD-LibreTranslate.git
 # and this repository as MessyDesk-new
 ```
 
@@ -36,12 +38,15 @@ The first build takes a while; later starts are quick.
 | `backend` | The API, with the UI built into it (one port for both) |
 | `arcadedb`, `solr`, `solr-init` | Graph database and search index (the schema is created on first start) |
 | `md-sharp`, `md-poppler`, `md-pypdf`, `md-zip`, `md-text-base`, `md-tesseract` | Base services |
-| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler` and `md-poppler_fs` (md-poppler), `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-solr` (Solr directly) |
-| `data-init` | Gives the shared data volume to uid 1000 before anything writes to it |
+| `md-lingua`, `libretranslate` | Language detection, and machine translation (the upstream LibreTranslate image; MD-LibreTranslate only supplies its descriptor) |
+| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler` and `md-poppler_fs` (md-poppler), `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
 
 Each consumer finds its service by `DEV_URL`, so Nomad is not needed. Everything shares the `md-data`
 volume: the backend sees it as `data/` and the services and consumers as `$MD_PATH/data`, so the `_fs`
 services read and write files on disk.
+
+LibreTranslate loads only `LIBRETRANSLATE_LANGUAGES` (default `en,fi,sv,de`). Their models are downloaded
+on the first start, so translation is unavailable for a few minutes; they are kept in a volume after that.
 
 `MODE=development` means there is no login: every request is `DEV_USER`.
 

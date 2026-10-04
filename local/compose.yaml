@@ -155,6 +155,29 @@ services:
       <<: *service-env
       SERVICE_LOCAL_URL: http://md-tesseract:8400
 
+  # ---- language services ----------------------------------------------------------------------
+
+  md-lingua:
+    <<: *service
+    image: localhost/messydesk/md-lingua:local
+    build: ../../MD-lingua
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-lingua:9011
+      OUTPUT_DIR: /tmp/output
+
+  # The upstream image: MessyDesk talks to its API directly (MD-LibreTranslate holds only the
+  # descriptor). Models for LIBRETRANSLATE_LANGUAGES are downloaded on the first start, which
+  # takes a few minutes, and kept in a volume.
+  libretranslate:
+    image: docker.io/libretranslate/libretranslate:v1.9.6
+    restart: unless-stopped
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,fi,sv,de}
+      LT_UPDATE_MODELS: "true"
+    volumes:
+      - libretranslate-models:/home/libretranslate/.local
+
   # ---- consumers: one per queue topic ---------------------------------------------------------
 
   consumer-thumbnailer:
@@ -223,7 +246,29 @@ services:
       SERVICE_JSON_PATH: /src/src/descriptors/md-solr/service.json
       REQUIRE_DEV_URL_UP: "false"
 
+  consumer-lingua:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-lingua
+      DEV_URL: http://md-lingua:9011
+
+  # LibreTranslate serves no /config, so the descriptor comes from the MD-LibreTranslate checkout.
+  consumer-libretranslate:
+    <<: *consumer
+    depends_on: [backend, libretranslate]
+    volumes:
+      - md-data:/md/data
+      - ../../MD-LibreTranslate/service.json:/descriptors/md-libretranslate/service.json:ro,Z
+    environment:
+      <<: *consumer-env
+      TOPIC: md-libretranslate
+      DEV_URL: http://libretranslate:5000
+      SERVICE_JSON_PATH: /descriptors/md-libretranslate/service.json
+      REQUIRE_DEV_URL_UP: "false"
+
 volumes:
   md-data: {}
   arcadedb-data: {}
   solr-data: {}
+  libretranslate-models: {}
