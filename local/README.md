@@ -65,8 +65,9 @@ podman-compose --profile linguistics --profile machine_learning up -d --build   
 ```
 
 Pass the same `--profile` flags to `down`, `logs` and `ps` as well, or podman-compose leaves those
-containers out. MD-Gliner2 downloads its model from Hugging Face on the first job (about a minute on CPU) and keeps
-it in a volume.
+containers out. MD-Gliner2's model is part of its image: the first build downloads it (the image
+is about 2.5 GB), and the service then runs without network access. The old `gliner2-models`
+volume is no longer used; `podman volume rm messydesk_gliner2-models` frees its space.
 
 ## Day to day
 

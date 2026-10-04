@@ -199,7 +199,7 @@ services:
   # Not started by default: podman-compose --profile machine_learning up -d
 
   # Works over HTTP (the consumer moves the files), so it needs no shared volume. The model is
-  # downloaded from Hugging Face on the first request and kept in a volume.
+  # part of the image (downloaded when it is built, about 2.5 GB in all).
   md-gliner2:
     profiles: [machine_learning]
     image: localhost/messydesk/md-gliner2:local
@@ -208,9 +208,6 @@ services:
     environment:
       SERVICE_LOCAL_URL: http://md-gliner2:9010
       DEVICE: cpu
-      HF_HOME: /models
-    volumes:
-      - gliner2-models:/models
 
   # ---- consumers: one per queue topic ---------------------------------------------------------
 
@@ -317,4 +314,3 @@ volumes:
   arcadedb-data: {}
   solr-data: {}
   libretranslate-models: {}
-  gliner2-models: {}
