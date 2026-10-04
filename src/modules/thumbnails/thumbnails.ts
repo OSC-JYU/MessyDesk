@@ -1,7 +1,7 @@
 // Thumbnails: the jobs that make them and serving them.
 //
 // A file's previews live next to it: <file dir>/preview.jpg (large) and thumbnail.jpg (small).
-// Images go to the md-thumbnailer topic, PDFs to md-poppler (uploads, versions) or md-poppler_fs
+// Images go to the md-thumbnailer topic, PDFs to md-poppler (uploads, versions and split pages;
 // (split pages). Each job variant keeps the exact fields the old backend sent, because consumers
 // and the result handler recognise them by role / process.kind / topic.
 
@@ -130,8 +130,8 @@ export class ThumbnailService {
 
     /** For a page produced by the PDF splitter. */
     async forSplitPage(fileNode: any, message: any): Promise<void> {
-        await this.publisher.publish(SERVICE.POPPLER_FS, {
-            service: { id: SERVICE.POPPLER_FS },
+        await this.publisher.publish(SERVICE.POPPLER, {
+            service: { id: SERVICE.POPPLER },
             task: { id: 'thumbnail', params: { ...PDF_THUMBNAIL_PARAMS, task: 'thumbnail' } },
             file: fileNode,
             process: message.process,

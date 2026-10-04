@@ -235,13 +235,6 @@ services:
       TOPIC: md-poppler
       DEV_URL: http://md-poppler:8300
 
-  consumer-poppler-fs:
-    <<: *consumer
-    environment:
-      <<: *consumer-env
-      TOPIC: md-poppler_fs
-      DEV_URL: http://md-poppler:8300
-
   consumer-pypdf:
     <<: *consumer
     environment:

@@ -6,9 +6,9 @@ export const SERVICE = {
     THUMBNAILER: 'md-thumbnailer',
     /** Image operations (EXIF rotation, service-group logos). */
     SHARP: 'md-sharp',
-    /** PDF thumbnails for uploads and versions. */
+    /** PDF thumbnails (uploads, versions, split pages) and the Poppler crunchers. */
     POPPLER: 'md-poppler',
-    /** PDF thumbnails for split pages. */
+    /** Former second Poppler topic (split-page thumbnails); still recognised in callbacks. */
     POPPLER_FS: 'md-poppler_fs',
     /** PDF splitter used by the import pipeline. */
     PDF_SPLITTER: 'md-pypdf_fs',
