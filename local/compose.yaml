@@ -2,6 +2,7 @@
 #
 #   cp .env.example .env
 #   podman-compose up -d --build      (or: docker compose up -d --build)
+#   podman-compose --profile machine_learning up -d --build    (adds the ML services)
 #
 # Open http://localhost:8200. Build contexts point at sibling checkouts (../../MD-sharp and so on),
 # so clone the repositories next to MessyDesk-new first.
@@ -178,6 +179,23 @@ services:
     volumes:
       - libretranslate-models:/home/libretranslate/.local
 
+  # ---- machine learning (profile machine_learning) --------------------------------------------
+  # Not started by default: podman-compose --profile machine_learning up -d
+
+  # Works over HTTP (the consumer moves the files), so it needs no shared volume. The model is
+  # downloaded from Hugging Face on the first request and kept in a volume.
+  md-gliner2:
+    profiles: [machine_learning]
+    image: localhost/messydesk/md-gliner2:local
+    build: ../../MD-Gliner2
+    restart: unless-stopped
+    environment:
+      SERVICE_LOCAL_URL: http://md-gliner2:9010
+      DEVICE: cpu
+      HF_HOME: /models
+    volumes:
+      - gliner2-models:/models
+
   # ---- consumers: one per queue topic ---------------------------------------------------------
 
   consumer-thumbnailer:
@@ -267,8 +285,18 @@ services:
       SERVICE_JSON_PATH: /descriptors/md-libretranslate/service.json
       REQUIRE_DEV_URL_UP: "false"
 
+  consumer-gliner2:
+    <<: *consumer
+    profiles: [machine_learning]
+    depends_on: [backend, md-gliner2]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-gliner2
+      DEV_URL: http://md-gliner2:9010
+
 volumes:
   md-data: {}
   arcadedb-data: {}
   solr-data: {}
   libretranslate-models: {}
+  gliner2-models: {}

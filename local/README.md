@@ -39,6 +39,7 @@ The first build takes a while; later starts are quick.
 | `arcadedb`, `solr`, `solr-init` | Graph database and search index (the schema is created on first start) |
 | `md-sharp`, `md-poppler`, `md-pypdf`, `md-zip`, `md-text-base`, `md-tesseract` | Base services |
 | `md-lingua`, `libretranslate` | Language detection, and machine translation (the upstream LibreTranslate image; MD-LibreTranslate only supplies its descriptor) |
+| `md-gliner2` | Only with `--profile machine_learning`: zero-shot entity extraction and classification |
 | `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler` and `md-poppler_fs` (md-poppler), `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
 
 Each consumer finds its service by `DEV_URL`, so Nomad is not needed. Everything shares the `md-data`
@@ -49,6 +50,18 @@ LibreTranslate loads only `LIBRETRANSLATE_LANGUAGES` (default `en,fi,sv,de`). Th
 on the first start, so translation is unavailable for a few minutes; they are kept in a volume after that.
 
 `MODE=development` means there is no login: every request is `DEV_USER`.
+
+## Machine learning services
+
+Heavier services are behind the `machine_learning` profile and do not start by default:
+
+```bash
+podman-compose --profile machine_learning up -d --build
+```
+
+Pass the same `--profile` to `down`, `logs` and `ps` as well, or podman-compose leaves those containers
+out. MD-Gliner2 downloads its model from Hugging Face on the first job (about a minute on CPU) and keeps
+it in a volume.
 
 ## Day to day
 
