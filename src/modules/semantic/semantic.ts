@@ -1,8 +1,9 @@
-// Semantic search over vector indexes (Search tab).
+// Semantic search over vector indexes (Search tab), and similarity search over TF-IDF indexes
+// (Search tab and the index file's viewer, where a pasted text is compared with the index).
 //
 // A search is a short job on the single-file queue of the service that built the index (the
-// file-based index is searched by md-embeddings itself; another backend, e.g. a vector database
-// service, answers the same job). The service sends its hits back with /done; they are checked
+// file-based index is searched by md-embeddings or md-gensim itself; another backend, e.g. a
+// vector database service, answers the same job). The service sends its hits back with /done; they are checked
 // against the user's ownership, given labels and snippets, kept here for a few minutes and
 // announced over SSE. The UI polls GET /api/search/semantic/{id} (or reacts to the SSE event).
 
@@ -21,7 +22,11 @@ import type { ServiceRegistry } from '../services/registry.ts';
 
 export const SEMANTIC_ROLE = 'semantic_search';
 export const INDEX_TYPE = 'vector_index';
-const DEFAULT_SERVICE = 'md-embeddings';
+export const SIMILARITY_INDEX_TYPE = 'similarity_index';
+export const INDEX_TYPES = [INDEX_TYPE, SIMILARITY_INDEX_TYPE];
+const DEFAULT_SERVICE: Record<string, string> = { [INDEX_TYPE]: 'md-embeddings', [SIMILARITY_INDEX_TYPE]: 'md-gensim' };
+/** A similarity index is also queried with whole pasted texts (text reuse). */
+const MAX_QUERY_CHARS: Record<string, number> = { [INDEX_TYPE]: 2000, [SIMILARITY_INDEX_TYPE]: 50000 };
 const KEEP_MS = 10 * 60 * 1000;
 const MAX_K = 100;
 const SNIPPET_CHARS = 400;
@@ -32,6 +37,7 @@ interface PendingSearch {
     id: string;
     userRid: string;
     indexRid: string;
+    indexType: string;
     query: string;
     level: string;
     k: number;
@@ -40,12 +46,15 @@ interface PendingSearch {
     finished?: number;
     hits?: any[];
     model?: any;
+    /** How the service compared the texts (passage length, overlap, query passages matched). */
+    comparison?: any;
     error?: string;
 }
 
 export interface IndexInfo {
     rid: string;
     label: string;
+    type: string;
     project_rid: string;
     project_label: string | null;
     source_set: string | null;
@@ -112,14 +121,14 @@ export class SemanticSearch {
     }
 
     /** The service that built an index (its producing process), and that therefore searches it. */
-    private async serviceOf(indexRid: string): Promise<string> {
+    private async serviceOf(indexRid: string, indexType: string): Promise<string> {
         const edge = await this.d.db.first('SELECT @in AS source, process_rid FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(indexRid) });
         const processRid = tryRid(edge?.process_rid);
         if (processRid) {
             const process = await this.d.db.first(`SELECT service_id FROM ${processRid}`);
             if (process?.service_id) return String(process.service_id);
         }
-        return DEFAULT_SERVICE;
+        return DEFAULT_SERVICE[indexType] || DEFAULT_SERVICE[INDEX_TYPE];
     }
 
     /** A set's label; unlabelled output sets are named after the process that made them. */
@@ -132,7 +141,7 @@ export class SemanticSearch {
         return process?.label ? `${process.label} output` : null;
     }
 
-    /** The user's vector indexes, for the Search tab. */
+    /** The user's vector and similarity indexes, for the Search tab. */
     async indexes(userRid: string): Promise<IndexInfo[]> {
         const projects = await this.d.db.rows(
             'MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project} RETURN project.@rid AS rid, project.label AS label',
@@ -141,8 +150,8 @@ export class SemanticSearch {
         if (!projects.length) return [];
         const projectLabels = new Map(projects.map((p: any) => [String(p.rid), p.label ?? null]));
         const files = await this.d.db.rows(
-            'SELECT @rid AS rid, label, path, project_rid, created FROM File WHERE type = :type AND project_rid IN :projects',
-            { type: INDEX_TYPE, projects: projects.map((p: any) => p.rid) },
+            'SELECT @rid AS rid, label, type, path, project_rid, created FROM File WHERE type IN :types AND project_rid IN :projects',
+            { types: INDEX_TYPES, projects: projects.map((p: any) => p.rid) },
         );
         const out: IndexInfo[] = [];
         for (const file of files) {
@@ -154,11 +163,12 @@ export class SemanticSearch {
             out.push({
                 rid: file.rid,
                 label: file.label,
+                type: file.type || INDEX_TYPE,
                 project_rid: String(file.project_rid),
                 project_label: projectLabels.get(String(file.project_rid)) ?? null,
                 source_set: sourceRid,
                 source_set_label: source,
-                service_id: await this.serviceOf(file.rid),
+                service_id: await this.serviceOf(file.rid, file.type || INDEX_TYPE),
                 kind: 'file',
                 model: meta.model,
                 rows: meta.rows,
@@ -182,21 +192,28 @@ export class SemanticSearch {
         this.prune();
         const query = String(body?.query || '').trim();
         if (!query) throw Boom.badRequest('Query is empty');
-        if (query.length > 2000) throw Boom.badRequest('Query is too long');
         const indexRid = tryRid(body?.index);
-        if (!indexRid) throw Boom.badRequest('index must be a vector index rid');
+        if (!indexRid) throw Boom.badRequest('index must be an index rid');
         const owned = await this.d.access.findOwned(indexRid, userRid);
-        if (!owned || owned.node['@type'] !== 'File' || owned.node.type !== INDEX_TYPE) throw Boom.notFound('Vector index not found');
+        if (!owned || owned.node['@type'] !== 'File' || !INDEX_TYPES.includes(owned.node.type)) throw Boom.notFound('Index not found');
+        const indexType = String(owned.node.type);
+        if (query.length > MAX_QUERY_CHARS[indexType]) throw Boom.badRequest(`Query is too long (at most ${MAX_QUERY_CHARS[indexType]} characters)`);
         const k = Math.max(1, Math.min(Number.parseInt(String(body?.k ?? 20), 10) || 20, MAX_K));
         const level = body?.level === 'doc' ? 'doc' : 'chunk';
-        const serviceId = await this.serviceOf(indexRid);
+        const params: any = { query, top_k: k, level };
+        if (body?.threshold !== undefined && body?.threshold !== null && body?.threshold !== '') {
+            const threshold = Number(body.threshold);
+            if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) throw Boom.badRequest('threshold must be between 0 and 1');
+            params.threshold = threshold;
+        }
+        const serviceId = await this.serviceOf(indexRid, indexType);
         if (!this.d.registry.hasActiveConsumer(serviceId)) throw Boom.serverUnavailable(`The search service (${serviceId}) is not running`);
 
         const id = randomUUID();
-        this.pending.set(id, { id, userRid, indexRid, query, level, k, status: 'queued', created: Date.now() });
+        this.pending.set(id, { id, userRid, indexRid, indexType, query, level, k, status: 'queued', created: Date.now() });
         await this.d.publisher.publish(serviceId, {
             service: { id: serviceId },
-            task: { id: 'search', params: { query, top_k: k, level } },
+            task: { id: 'search', params },
             file: { ...owned.node, project_rid: owned.projectRid },
             project_rid: owned.projectRid,
             userId: userRid,
@@ -216,8 +233,10 @@ export class SemanticSearch {
             status: search.status,
             query: search.query,
             index: search.indexRid,
+            index_type: search.indexType,
             level: search.level,
             model: search.model ?? null,
+            comparison: search.comparison ?? null,
             hits: search.hits ?? [],
             error: search.error ?? null,
             took_ms: search.finished ? search.finished - search.created : null,
@@ -271,11 +290,22 @@ export class SemanticSearch {
                 chunk: match.chunk ?? null,
                 start_char: start,
                 end_char: end,
+                // where the match is in the query (similarity indexes compare whole texts)
+                query_start_char: match.query_start_char ?? null,
+                query_end_char: match.query_end_char ?? null,
+                query_start_token: match.query_start_token ?? null,
                 snippet: match.chunk === -1 ? await this.snippet(node.node.path, 0, SNIPPET_CHARS, texts) : await this.snippet(node.node.path, start, end, texts),
             });
         }
         search.hits = hits;
         search.model = results.model ?? null;
+        search.comparison = {
+            window_size: results.window_size ?? null,
+            overlap: results.overlap ?? null,
+            threshold: results.threshold ?? null,
+            query_windows: results.query_windows ?? null,
+            matched_windows: results.matched_windows ?? null,
+        };
         search.status = 'done';
         search.finished = Date.now();
         this.d.sse.send(search.userRid, { command: 'semantic_results', search_id: search.id, status: 'done', count: hits.length });

@@ -22,6 +22,7 @@ function fakes(dir: string) {
     const nodes: Record<string, any> = {
         '#10:1': { node: { '@rid': '#10:1', '@type': 'File', type: 'vector_index', path: path.join(dir, 'i.safetensors') }, projectRid: '#1:0' },
         '#10:2': { node: { '@rid': '#10:2', '@type': 'File', type: 'text', label: 'a.txt', path: text }, projectRid: '#1:0' },
+        '#10:3': { node: { '@rid': '#10:3', '@type': 'File', type: 'similarity_index', path: path.join(dir, 't.safetensors') }, projectRid: '#1:0' },
     };
     const deps: any = {
         db: { first: async () => null, rows: async () => [] },
@@ -72,4 +73,26 @@ test('a failed search reports its error', async () => {
     const { search_id } = await search.start('#16:0', { index: '#10:1', query: 'x' });
     search.fail({ search_id }, { message: 'model missing' });
     assert.equal(search.get(search_id, '#16:0').error, 'model missing');
+});
+
+test('a similarity index takes a pasted text and goes to md-gensim', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'md-sem-'));
+    const { search, published } = fakes(dir);
+    const pasted = 'The ship reached the harbour. '.repeat(200); // 6000 characters
+    await assert.rejects(search.start('#16:0', { index: '#10:1', query: pasted }), /too long/);
+    await assert.rejects(search.start('#16:0', { index: '#10:3', query: 'ship', threshold: 2 }), /threshold/);
+    const { search_id } = await search.start('#16:0', { index: '#10:3', query: pasted, threshold: 0.5 });
+    assert.equal(published[0].topic, 'md-gensim');
+    assert.equal(published[0].msg.task.params.threshold, 0.5);
+
+    await search.deliver({
+        search_id,
+        response: { results: { doc_map: ['#10:2'], model: { id: 'tf-idf' }, window_size: 15, overlap: 5, threshold: 0.5, query_windows: 600, matched_windows: 1,
+            chunk_similarities: [{ similarity: 0.9, doc_index: 0, chunk: 3, text_start_char: 4, text_end_char: 30, query_start_char: 0, query_end_char: 26, query_start_token: 0 }] } },
+    });
+    const result = search.get(search_id, '#16:0');
+    assert.equal(result.index_type, 'similarity_index');
+    assert.deepEqual(result.comparison, { window_size: 15, overlap: 5, threshold: 0.5, query_windows: 600, matched_windows: 1 });
+    assert.equal(result.hits[0].query_end_char, 26);
+    assert.equal(result.hits[0].query_start_token, 0);
 });
