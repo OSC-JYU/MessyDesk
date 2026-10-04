@@ -166,9 +166,9 @@ services:
       SERVICE_LOCAL_URL: http://md-lingua:9011
       OUTPUT_DIR: /tmp/output
 
-  # The upstream image: MessyDesk talks to its API directly (MD-LibreTranslate holds only the
-  # descriptor). Models for LIBRETRANSLATE_LANGUAGES are downloaded on the first start, which
-  # takes a few minutes, and kept in a volume.
+  # The upstream image, with no MessyDesk wrapper: consumer-libretranslate calls its API
+  # (MD-LibreTranslate holds only the descriptor). Models for LIBRETRANSLATE_LANGUAGES are
+  # downloaded on the first start, which takes a few minutes, and kept in a volume.
   libretranslate:
     image: docker.io/libretranslate/libretranslate:v1.9.6
     restart: unless-stopped
