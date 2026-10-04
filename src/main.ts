@@ -34,6 +34,8 @@ import { Publisher } from './modules/queue/publisher.ts';
 import { JobQueue } from './modules/queue/queue.ts';
 import { ResultsService } from './modules/results/results.ts';
 import { resultRoutes } from './modules/results/routes.ts';
+import { SemanticSearch } from './modules/semantic/semantic.ts';
+import { semanticRoutes } from './modules/semantic/routes.ts';
 import { RoisService } from './modules/rois/rois.ts';
 import { ServiceGroupsService } from './modules/service-groups/service-groups.ts';
 import { ServiceHelp } from './modules/service-help/bundle.ts';
@@ -120,7 +122,8 @@ async function main(): Promise<void> {
         config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users,
         projects: new ProjectsService(db, store, layout, access, { expirationDays: config.projectExpirationDays, quotaGb: config.diskQuotaGb }),
         deskGraph, nodes, graph, files, thumbnails,
-        zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs),
+        semantic: new SemanticSearch({ db, access, registry, publisher, sse, layout, logger }),
+        zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs, registry),
         importPipeline, registry,
         serviceHelp: new ServiceHelp({ dir: path.join(config.helpDir, 'services'), bundleMaxFiles: config.help.bundleMaxFiles, archiveMaxBytes: config.help.archiveMaxBytes, archiveMaxEntries: config.help.archiveMaxEntries }),
         processing, batches,
@@ -152,6 +155,7 @@ async function main(): Promise<void> {
         ...graphRoutes(deps),
         ...processingRoutes(deps),
         ...resultRoutes(deps),
+        ...semanticRoutes(deps),
         ...serviceRoutes(deps),
         ...tagRoutes(deps),
     ]);

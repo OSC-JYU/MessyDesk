@@ -8,7 +8,7 @@ import { enrichMessage } from '../../src/modules/queue/publisher.ts';
 import { normalizeDescriptor, resolveBehaviour, DescriptorError } from '../../src/modules/services/registry.ts';
 import { servicesForNode, filterMatchesNode } from '../../src/modules/services/matching.ts';
 import { sortFiles } from '../../src/modules/processing/grouping.ts';
-import { isSearchOutputTask, queueName } from '../../src/modules/processing/processing.ts';
+import { isSearchOutputTask, queueName, resolveModel } from '../../src/modules/processing/processing.ts';
 import { detectType, contentTypeFor } from '../../src/modules/files/metadata.ts';
 import { normalizeJsonSchema } from '../../src/modules/prompts/prompts.ts';
 import { validatePatch, withDefaults } from '../../src/modules/users/settings.ts';
@@ -147,4 +147,31 @@ test('user settings', () => {
 
 test('cypher string literals escape quotes and backslashes', () => {
     assert.equal(cypherString('a"b\\c'), '"a\\"b\\\\c"');
+});
+
+test('whole-set tasks are offered only for sets', () => {
+    assert.equal(resolveBehaviour({ tasks: { t: { behaviour: 'whole-set' } } }, { id: 't' }), 'whole-set');
+    const services = {
+        'md-embeddings': {
+            id: 'md-embeddings', consumers: ['a'], supported_formats: ['json'],
+            tasks: { index: { behaviour: 'whole-set' }, embed: { supported_formats: ['txt'] } },
+        },
+    };
+    const file = servicesForNode(services, { '@type': 'File', type: 'json', extension: 'json' }, undefined, {}, []);
+    assert.equal(file.for_format.length, 0);
+    const set = servicesForNode(services, { '@type': 'Set', types: ['json'], extensions: ['json'] }, undefined, {}, []);
+    assert.deepEqual(Object.keys(set.for_format[0].tasks), ['index']);
+});
+
+test('resolveModel fills the chosen model from the descriptor', () => {
+    const service = { models: { small: { dims: 384, version: '1' } } };
+    const task: any = { id: 'embed', model: 'small' };
+    resolveModel(service, task);
+    assert.deepEqual(task.model, { dims: 384, version: '1', id: 'small' });
+    const unknown: any = { id: 'embed', model: 'nope' };
+    resolveModel(service, unknown);
+    assert.equal(unknown.model, undefined);
+    const llm: any = { model: { id: 'custom' } };
+    resolveModel({ external_tasks: true, models: {} }, llm);
+    assert.deepEqual(llm.model, { id: 'custom' });
 });

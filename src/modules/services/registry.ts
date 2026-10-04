@@ -8,7 +8,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-export const ALLOWED_BEHAVIOURS = ['one-to-one', 'one-to-many', 'many-to-one'] as const;
+export const ALLOWED_BEHAVIOURS = ['one-to-one', 'one-to-many', 'many-to-one', 'whole-set'] as const;
 export type Behaviour = (typeof ALLOWED_BEHAVIOURS)[number];
 // The four tool categories plus `system`, for internal services never offered to users.
 export const ALLOWED_CATEGORIES = ['preparation', 'linguistic', 'ml', 'generative', 'system'];

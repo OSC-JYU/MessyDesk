@@ -11,6 +11,7 @@ import type { DataLayout } from '../../platform/storage/layout.ts';
 import { SERVICE } from '../../shared/service-ids.ts';
 import type { FilesService } from '../files/files.ts';
 import type { Publisher } from '../queue/publisher.ts';
+import type { ServiceRegistry } from '../services/registry.ts';
 
 export interface ZipJob {
     id: string;
@@ -27,12 +28,14 @@ export class ZipJobs {
     private readonly files: FilesService;
     private readonly publisher: Publisher;
     private readonly ttlMs: number;
+    private readonly registry: ServiceRegistry | null;
 
-    constructor(layout: DataLayout, files: FilesService, publisher: Publisher, ttlMs: number) {
+    constructor(layout: DataLayout, files: FilesService, publisher: Publisher, ttlMs: number, registry: ServiceRegistry | null = null) {
         this.layout = layout;
         this.files = files;
         this.publisher = publisher;
         this.ttlMs = ttlMs;
+        this.registry = registry;
     }
 
     private jobPath(id: string): string {
@@ -49,6 +52,10 @@ export class ZipJobs {
         if (!listing.files.length) throw Boom.notFound('No files found in set');
         const files = listing.files.filter((f: any) => f.path);
         if (!files.length) throw Boom.notFound('No valid file paths found');
+        // Without a consumer the job would sit in the queue and its pollers wait until they time out.
+        if (this.registry && !this.registry.hasActiveConsumer(SERVICE.ZIP)) {
+            throw Boom.serverUnavailable(`Set ZIP needs the ${SERVICE.ZIP} service, which is not running`);
+        }
         const id = randomUUID();
         const name = `files_${stripHash(setRid).replace(':', '_')}_${id.slice(0, 8)}.zip`;
         const job: ZipJob = { id, set_rid: setRid, user_rid: userRid, status: 'queued', requested_at: Date.now(), zip_output_name: name, zip_path: path.resolve(this.layout.tmpDir, name) };

@@ -317,6 +317,7 @@ export class TagsService {
      */
     async autotag(outputPath: string, sourceRid: string, message: any, entityType = 'Tag'): Promise<any[]> {
         const parsed = await readJsonOrEmpty(outputPath);
+        if (parsed.file_tags && typeof parsed.file_tags === 'object') return this.autotagFiles(parsed.file_tags, message, entityType);
         let regions: any[];
         if (parsed.rois) regions = Object.values(parsed.rois);
         else if (parsed.result && parsed.result.category !== undefined) {
@@ -342,6 +343,34 @@ export class TagsService {
             if (!entityRid) continue;
             await this.link(entityRid, sourceRid, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence });
             linked.push({ entity_rid: entityRid, label, confidence });
+        }
+        return linked;
+    }
+
+    /**
+     * Tags for several files at once ({file_tags: {"<file rid>": [{label, confidence}]}}), e.g. the
+     * topic of each page from a whole-set run. `link` checks that each file is the user's.
+     */
+    private async autotagFiles(fileTags: Record<string, any>, message: any, entityType: string): Promise<any[]> {
+        const userRid = message.userId;
+        const entities = new Map<string, string | null>();
+        const linked = [];
+        for (const [target, tags] of Object.entries(fileTags)) {
+            if (!tryRid(target) || !Array.isArray(tags)) continue;
+            for (const tag of tags) {
+                const label = typeof tag?.label === 'string' ? tag.label.trim() : '';
+                if (!label) continue;
+                if (!entities.has(label)) {
+                    let entity = await this.findEntity(entityType, label, userRid);
+                    if (!entity) entity = (await this.createEntity({ type: entityType, label, created_by: 'machine' }, userRid))?.result?.[0];
+                    entities.set(label, entity?.['@rid'] || null);
+                }
+                const entityRid = entities.get(label);
+                if (!entityRid) continue;
+                const confidence = Number.isFinite(Number(tag.confidence)) ? Number(tag.confidence) : null;
+                const done = await this.link(entityRid, target, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence });
+                if (done) linked.push({ entity_rid: entityRid, target_rid: target, label, confidence });
+            }
         }
         return linked;
     }

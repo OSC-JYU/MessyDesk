@@ -65,8 +65,9 @@ Resolution order: task definition → service definition → default `one-to-one
 | `one-to-one` | 1 input file → 1 Process → output file(s) in same context | Rotate image, OCR |
 | `one-to-many` | 1 input file → 1 Process → multiple output files in new Set | Split PDF into pages |
 | `many-to-one` | N input files → 1 SetProcess → 1 aggregated output | Merge documents |
+| `whole-set` | N input files → 1 SetProcess → **one job** with every file in `files` (`[{@rid, label, path, type, extension}]`); `file` is the input Set, so outputs derive from it | Vector index (md-embeddings), clustering |
 
-**Non-obvious**: a many-to-one task of a Solr/FAISS service (or one with `search_output: true`) writes its output into a search Set (`isSearchOutputTask`). **[verified]**
+**Non-obvious**: a `whole-set` job is published to `<service>_batch` as a many-to-one run with `total_files: 1` and `whole_set: true`, so results and batch progress need no special case; it is offered only on sets. A many-to-one task of a Solr/FAISS service (or one with `search_output: true`) writes its output into a search Set (`isSearchOutputTask`). **[verified]**
 
 ### Output Set Creation
 

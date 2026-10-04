@@ -165,6 +165,8 @@ export class NodesService {
         const attrs: Record<string, unknown> = { label: task.name, path: '', service: service.name };
         if (input.project_rid) attrs.project_rid = input.project_rid;
         if (task.info) attrs.info = task.info;
+        if (task.model?.id) attrs.model = task.model.id;
+        if (task.model?.version) attrs.model_version = task.model.version;
         const processNode = await this.store.createVertex('SetProcess', attrs);
         const projectRid = input.project_rid || await this.store.projectRidOf(input['@rid']);
         if (projectRid) await this.store.connect(processNode['@rid'], EDGE.BELONGS_TO, projectRid);
@@ -189,6 +191,8 @@ export class NodesService {
         if (input.project_rid) attrs.project_rid = input.project_rid;
         if (task.info) attrs.info = task.info;
         else if (task.description) attrs.info = task.description;
+        if (task.model?.id) attrs.model = task.model.id;
+        if (task.model?.version) attrs.model_version = task.model.version;
         const node = await this.store.createVertex('SetProcess', attrs);
         const processPath = this.layout.processFilesDir(input.project_rid, node.uuid || node['@rid']);
         await ensureDir(processPath);
