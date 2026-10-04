@@ -2,6 +2,7 @@
 #
 #   cp .env.example .env
 #   podman-compose up -d --build      (or: docker compose up -d --build)
+#   podman-compose --profile linguistics up -d --build         (adds the text analysis services)
 #   podman-compose --profile machine_learning up -d --build    (adds the ML services)
 #
 # Open http://localhost:8200. Build contexts point at sibling checkouts (../../MD-sharp and so on),
@@ -179,6 +180,21 @@ services:
     volumes:
       - libretranslate-models:/home/libretranslate/.local
 
+  # ---- text analysis (profile linguistics) ----------------------------------------------------
+  # Not started by default: podman-compose --profile linguistics up -d
+
+  # Word counts, TF-IDF similarity indexes (text reuse) and topic models.
+  md-gensim:
+    <<: *service
+    profiles: [linguistics]
+    image: localhost/messydesk/md-gensim:local
+    build: ../../MD-gensim
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-gensim:9009
+      # /app is not writable for uid 1000; outputs go to the data volume, this is only scratch.
+      GENSIM_STORE_DIR: /tmp/store
+
   # ---- machine learning (profile machine_learning) --------------------------------------------
   # Not started by default: podman-compose --profile machine_learning up -d
 
@@ -284,6 +300,15 @@ services:
       DEV_URL: http://libretranslate:5000
       SERVICE_JSON_PATH: /descriptors/md-libretranslate/service.json
       REQUIRE_DEV_URL_UP: "false"
+
+  consumer-gensim:
+    <<: *consumer
+    profiles: [linguistics]
+    depends_on: [backend, md-gensim]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-gensim
+      DEV_URL: http://md-gensim:9009
 
   consumer-gliner2:
     <<: *consumer

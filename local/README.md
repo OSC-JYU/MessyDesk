@@ -17,6 +17,8 @@ git clone https://github.com/OSC-JYU/MD-text-base_fs.git
 git clone https://github.com/OSC-JYU/MD-tesseract.git
 git clone https://github.com/OSC-JYU/MD-lingua.git
 git clone https://github.com/OSC-JYU/MD-LibreTranslate.git
+git clone https://github.com/OSC-JYU/MD-gensim.git          # only for --profile linguistics
+git clone https://github.com/OSC-JYU/MD-Gliner2.git         # only for --profile machine_learning
 # and this repository as MessyDesk-new
 ```
 
@@ -39,6 +41,7 @@ The first build takes a while; later starts are quick.
 | `arcadedb`, `solr`, `solr-init` | Graph database and search index (the schema is created on first start) |
 | `md-sharp`, `md-poppler`, `md-pypdf`, `md-zip`, `md-text-base`, `md-tesseract` | Base services |
 | `md-lingua`, `libretranslate` | Language detection, and machine translation (the upstream LibreTranslate image; MD-LibreTranslate only supplies its descriptor) |
+| `md-gensim` | Only with `--profile linguistics`: word counts, TF-IDF similarity indexes (text reuse) and topic models (LDA, NMF, LSI, HDP, k-means) |
 | `md-gliner2` | Only with `--profile machine_learning`: zero-shot entity extraction and classification |
 | `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler` and `md-poppler_fs` (md-poppler), `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
 
@@ -51,16 +54,18 @@ on the first start, so translation is unavailable for a few minutes; they are ke
 
 `MODE=development` means there is no login: every request is `DEV_USER`.
 
-## Machine learning services
+## Optional services
 
-Heavier services are behind the `machine_learning` profile and do not start by default:
+Text analysis services are behind the `linguistics` profile and heavier ones behind
+`machine_learning`; neither starts by default:
 
 ```bash
-podman-compose --profile machine_learning up -d --build
+podman-compose --profile linguistics up -d --build
+podman-compose --profile linguistics --profile machine_learning up -d --build    # both
 ```
 
-Pass the same `--profile` to `down`, `logs` and `ps` as well, or podman-compose leaves those containers
-out. MD-Gliner2 downloads its model from Hugging Face on the first job (about a minute on CPU) and keeps
+Pass the same `--profile` flags to `down`, `logs` and `ps` as well, or podman-compose leaves those
+containers out. MD-Gliner2 downloads its model from Hugging Face on the first job (about a minute on CPU) and keeps
 it in a volume.
 
 ## Day to day
