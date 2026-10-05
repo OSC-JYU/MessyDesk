@@ -64,6 +64,7 @@ export class TagsService {
     private readonly db: ArcadeClient;
     private readonly access: AccessService;
     private tagSync: TagSync | null = null;
+    private readonly creating = new Map<string, Promise<any | null>>();
 
     constructor(db: ArcadeClient, access: AccessService) {
         this.db = db;
@@ -187,6 +188,24 @@ export class TagsService {
     async createTag(label: unknown, userRid: string, description?: unknown): Promise<ArcadeEnvelope | undefined> {
         if (!label) return undefined;
         return this.createEntity({ type: 'Tag', label, description }, userRid);
+    }
+
+    /**
+     * The user's machine-made tag with this type and label, created when missing. Parallel autotag
+     * callbacks with the same new label each created their own copy (162 duplicates in one run of
+     * 1 000 files, perf/results/tags.md), so creation is serialised per tag in this process.
+     */
+    private findOrCreateMachineEntity(type: string, label: string, userRid: string): Promise<any | null> {
+        const key = `${userRid}\u0000${type}\u0000${label}`;
+        const pending = this.creating.get(key);
+        if (pending) return pending;
+        const work = (async () => {
+            const found = await this.findEntity(type, label, userRid);
+            if (found) return found;
+            return (await this.createEntity({ type, label, created_by: 'machine' }, userRid))?.result?.[0] ?? null;
+        })().finally(() => this.creating.delete(key));
+        this.creating.set(key, work);
+        return work;
     }
 
     private async findEntity(type: string, label: string, userRid: string): Promise<any | null> {
@@ -429,11 +448,7 @@ export class TagsService {
         }
         const linked = [];
         for (const [label, confidence] of best) {
-            let entity = await this.findEntity(entityType, label, userRid);
-            if (!entity) {
-                const created = await this.createEntity({ type: entityType, label, created_by: 'machine' }, userRid);
-                entity = created?.result?.[0];
-            }
+            const entity = await this.findOrCreateMachineEntity(entityType, label, userRid);
             const entityRid = entity?.['@rid'];
             if (!entityRid) continue;
             await this.link(entityRid, sourceRid, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence, defer_reindex: true });
@@ -458,8 +473,7 @@ export class TagsService {
                 const label = typeof tag?.label === 'string' ? tag.label.trim() : '';
                 if (!label) continue;
                 if (!entities.has(label)) {
-                    let entity = await this.findEntity(entityType, label, userRid);
-                    if (!entity) entity = (await this.createEntity({ type: entityType, label, created_by: 'machine' }, userRid))?.result?.[0];
+                    const entity = await this.findOrCreateMachineEntity(entityType, label, userRid);
                     entities.set(label, entity?.['@rid'] || null);
                 }
                 const entityRid = entities.get(label);
