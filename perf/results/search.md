@@ -5,25 +5,28 @@ Scenario S8 of [plan/performance-testing.md](../../plan/performance-testing.md):
 OCR-like pages of generated text (`perf/s8-search.ts`: dictionary words with a Zipf distribution,
 2 500 characters per page, 20 desks), and searched exactly as the backend does
 (`SolrClient.search`: edismax over `fulltext_exact`, the n-gram `fulltext`, label and description,
-with highlighting). Same laptop as before. Raw results: `s8-search.run.json`.
+with highlighting). Same laptop as before. Raw results: `s8-search.run2.json`, `s8-light.json`.
+
+**Update:** Ari decided the three questions (highlighting, a lighter index, md-solr commits); see
+"Decisions and follow-up" at the end. The size numbers below were re-measured after fixing the text
+generator, whose first version used only ~3 000 different words.
 
 ## Index size
 
 | Text | Pages | Index on disk | Index ÷ text | Per page |
 |---|---|---|---|---|
-| 11 MB | 4 500 | 74 MB | 6.9× | 17 KB |
-| 50 MB | 21 000 | 345 MB | 6.9× | 17 KB |
-| 201 MB | 84 000 | 1.26 GB | 6.3× | 16 KB |
-| 1 000 MB | 419 000 | 6.3 GB | 6.3× | 16 KB |
+| 11 MB | 4 500 | 85 MB | 7.9× | 19 KB |
+| 201 MB | 84 000 | 1.52 GB | 7.6× | 19 KB |
+| 1 000 MB | 419 000 | 7.1 GB | 7.1× | 17.7 KB |
 
-The index is about **6.3 times the text**, mostly because `fulltext` is indexed as every 2–15
+The index is about **7 times the text**, mostly because `fulltext` is indexed as every 2–15
 character n-gram (for substring search) and the text is stored twice (`fulltext` and its copy
-`fulltext_exact`). Extrapolated at 16 KB per page:
+`fulltext_exact`). Extrapolated at 17.7 KB per page:
 
 | Amount | Text | Index |
 |---|---|---|
-| A 100 000-page desk | ~250 MB | **~1.6 GB** |
-| 10 million pages (the database target) | ~25 GB | **~160 GB** |
+| A 100 000-page desk | ~250 MB | **~1.8 GB** |
+| 10 million pages (the database target) | ~25 GB | **~175 GB** |
 
 Solr's memory stayed at 1.2 GB with the 1 GB-of-text index; disk is the limit at 10 million pages.
 
@@ -33,9 +36,9 @@ Median (p95) of 20 searches (common and rare words, prefixes, phrases), each twi
 
 | Text in index | All desks | One desk | 10 searches at once |
 |---|---|---|---|
-| 11 MB | 142 ms (273) | 8 ms (255) | 182 ms (463) |
-| 201 MB | 160 ms (305) | 123 ms (297) | 280 ms (442) |
-| 1 000 MB | 163 ms (330) | 160 ms (307) | 267 ms (528) |
+| 11 MB | 64 ms (244) | 6 ms (209) | 93 ms (423) |
+| 201 MB | 156 ms (249) | 47 ms (241) | 290 ms (429) |
+| 1 000 MB | 127 ms (262) | 115 ms (244) | 225 ms (444) |
 
 Search time hardly grows with the index: it is spent **highlighting**. On the 1 GB index:
 
@@ -54,17 +57,56 @@ falls back to `fulltext`; the `fulltext` highlight is only needed for substring 
 
 ## Indexing speed
 
-md-solr posts each page with `commit=true`: **70 ms per page** (p95 112 ms) at 1 GB, about 14
+md-solr posts each page with `commit=true`: **67–70 ms per page** at 1 GB, about 14
 pages a second per consumer. A 100 000-page desk takes about 2 hours to index with one consumer;
 10 million pages would take about 8 days. Bulk loading without per-page commits ran at 640 pages a
 second.
 
-## For Ari
+## Decisions and follow-up
 
-1. **Highlight only `fulltext_exact`** (and fall back to `fulltext` only when that is empty)? Search
-   on the UI's search page would go from ~300 ms to ~70 ms and half the response size; substring and
-   prefix hits would show no snippet unless the fallback is done.
-2. **Index size**: storing the text once (not storing the n-gram copy) and a smaller n-gram range
-   (e.g. 3–10) would shrink the index; both need a re-index. Worth measuring?
-3. **md-solr commits per page**: committing every second or so (Solr `commitWithin`) instead of per
-   page would make indexing many times faster. That is a change in MD-consumers, outside this rewrite.
+Ari: (1) highlight whole words first; (2) not at the cost of finding OCR misspellings, but two
+indexing options, today's and a much lighter one, could be offered; (3) change md-solr.
+
+**1. Highlighting (done, backend).** Whole-word snippets first; only hits without one (matched by a
+word fragment) are highlighted on the n-gram field, in a second request for just those hits. The
+backend's search with 500 hits on the 1 GB index: p50 316 → 157 ms, p95 636 → 455 ms, response
+1.35 → 1.1 MB, and every hit still has a snippet.
+
+**3. md-solr commits (done, MD-consumers branch `solr-commit-within`).** Pages and tag changes are
+posted with `commitWithin=1000` (env `SOLR_COMMIT_WITHIN_MS`) instead of `commit=true`: 74 → 1.6 ms
+per page on the 1 GB index, so a 100 000-page desk indexes in minutes instead of two hours. Search
+sees a page up to a second later.
+
+**2. Light index and OCR misspellings (measured, not built).** The same 200 MB of pages, with 3 % of
+words misread the way OCR misreads them (m↔rn, l→1, e→c, o→0…), indexed both ways: "full" is
+today's documents, "light" puts the text only in the whole-word field. 40 words, searched as the
+backend searches:
+
+| Way of searching | Index | Pages with the word found | Pages with only a misread form found | Other pages per search | p50 / p95 |
+|---|---|---|---|---|---|
+| Full index (today) | 1 446 MB | 100 % | **0.6 %** | 118 | 24 / 150 ms |
+| Full index, fuzzy `word~1` | 1 446 MB | 99.9 % | 85.6 % | 1 889 | 173 / 629 ms |
+| Light index | **188 MB** | 100 % | 0 % | 0 | 19 / 115 ms |
+| Light index, fuzzy `word~1` | 188 MB | 100 % | **88.8 %** | 284 | 132 / 624 ms |
+| Light index, fuzzy `word~2` | 188 MB | 100 % | 94.4 % | 1 203 | 2 990 / 6 472 ms |
+
+What this shows:
+
+- **Today's n-gram index does not find misspellings.** It finds word fragments (`tion`, `abandon`
+  inside `abandoned`), but a whole word only matches pages where OCR got it right: 0.6 % of the
+  misread-only pages. The query side is not split into n-grams, so `governments` never matches a
+  page that says `govemments`.
+- **Fuzzy search finds them**, on either index: 86–89 % of misread-only pages with `~1` (one edit),
+  94 % with `~2` but far too slow (3–6 s). Fuzzy works best on the light index (fewer unrelated hits).
+- **The light index is 7.7 times smaller** (188 MB vs 1 446 MB for 200 MB of text; at 10 million
+  pages ~23 GB instead of ~175 GB). What it loses is fragment search inside words.
+
+My recommendation:
+
+1. Add **"include OCR misspellings"** to search (fuzzy `~1` on whole words), as an option in the
+   search box. It needs no re-index and works on today's index; it is slower (~130–170 ms median, up
+   to ~600 ms), so it should be a choice, not the default.
+2. Offer **two index options** in md-solr's index task: **full** (today: fragment search, ~7× the
+   text) and **light** (whole words only, ~1× the text). Both get fuzzy search for OCR errors. The
+   search query already covers both fields, so both kinds of documents are found by the same search.
+   Light could be the default for very large desks.
