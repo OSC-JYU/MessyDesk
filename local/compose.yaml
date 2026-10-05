@@ -15,6 +15,9 @@
 # SELinux (RHEL, Fedora): every mount carries a relabel option, ignored where SELinux is off.
 # :z on the shared md-data volume, which many containers use at once; :Z on mounts that belong to
 # one container only. A new mount needs one of them too, or the container gets "permission denied".
+# Each container also gets its own random SELinux categories, and the files it creates carry them,
+# so a file one service writes to md-data would be off limits to the backend. Every container on
+# md-data therefore runs with the same level (x-shared-label).
 
 name: messydesk
 
@@ -24,6 +27,9 @@ x-service-env: &service-env
   DB_NAME: ${DB_NAME:-messydesk}
   MD_URL: http://backend:8200
 
+x-shared-label: &shared-label
+  - label=level:s0:c100,c200
+
 x-consumer: &consumer
   image: localhost/messydesk/md-consumer:local
   build: ../../MD-consumers
@@ -31,6 +37,7 @@ x-consumer: &consumer
   depends_on: [backend]
   volumes:
     - md-data:/md/data:z
+  security_opt: *shared-label
   # The consumer keeps scratch files in ./data, and /src is not writable for its node user.
   tmpfs:
     - /src/data:mode=1777
@@ -51,6 +58,7 @@ x-service: &service
   depends_on: [backend]
   volumes:
     - md-data:/md/data:z
+  security_opt: *shared-label
 
 services:
 
@@ -106,6 +114,7 @@ services:
       API_URL: http://localhost:${MD_PORT:-8200}/
     volumes:
       - md-data:/src/data:z
+    security_opt: *shared-label
 
   # ---- base services --------------------------------------------------------------------------
 
