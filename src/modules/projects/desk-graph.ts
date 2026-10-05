@@ -27,11 +27,21 @@ export class DeskGraph {
     }
 
     async forProject(projectRid: string, userRid: string): Promise<VueFlowGraph> {
-        const query = `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()
-            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND $depth > 0), while:($depth < 20)}
-            RETURN node, node.outE() AS edges`;
-        const response = await this.db.sql(query, { user: toRid(userRid), project: toRid(projectRid) }, { serializer: 'studio' });
-        const graph = await this.toVueFlow(response.result as any);
+        const match = `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()
+            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND $depth > 0), while:($depth < 20)}`;
+        const params = { user: toRid(userRid), project: toRid(projectRid) };
+        let result: { vertices?: any[]; edges?: any[] };
+        if (this.db.legacy) {
+            result = (await this.db.sql(`${match} RETURN node, node.outE() AS edges`, params, { serializer: 'studio' })).result as any;
+        } else {
+            // Newer servers have no `node.outE()` in MATCH; the nodes' outgoing edges are read
+            // separately, in the same shape as the studio serializer gives them.
+            const vertices = ((await this.db.sql(`${match} RETURN node`, params, { serializer: 'studio' })).result as any)?.vertices || [];
+            const edges = (await this.db.edgesOf<any>('out', '', vertices.map((v: any) => v.r), ['@type AS t', 'process_rid', 'process_id', 'cruncher', 'task']))
+                .map((e) => ({ r: e.rid, t: e.t, i: e.source, o: e.target, p: { process_rid: e.process_rid, process_id: e.process_id, cruncher: e.cruncher, task: e.task } }));
+            result = { vertices, edges };
+        }
+        const graph = await this.toVueFlow(result);
         await this.decorateSets(graph);
         return graph;
     }

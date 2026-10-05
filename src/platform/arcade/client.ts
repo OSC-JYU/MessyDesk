@@ -218,13 +218,13 @@ export class ArcadeClient {
     }
 
     /**
-     * The edges of one type that end (`in`) or start (`out`) at the given records, found from the
+     * The edges of one type ('' for every type) that end (`in`) or start (`out`) at the given records, found from the
      * records themselves instead of by scanning the edge type. Each row has the edge's `rid`,
      * `target` (@out: the derived node), `source` (@in) and the requested edge properties.
      */
     async edgesOf<T = any>(direction: 'in' | 'out' | 'both', edge: string, rids: Iterable<unknown>, properties: string[] = [], where?: string, params?: Record<string, unknown>): Promise<T[]> {
         const fields = ['@rid AS rid', '@out AS target', '@in AS source', ...properties].join(', ');
-        return this.readByRids<T>(rids, (target) => `SELECT ${fields} FROM (SELECT expand(${direction}E("${edge}")) FROM ${target})${where ? ` WHERE ${where}` : ''}`, params);
+        return this.readByRids<T>(rids, (target) => `SELECT ${fields} FROM (SELECT expand(${direction}E(${edge ? `"${edge}"` : ''})) FROM ${target})${where ? ` WHERE ${where}` : ''}`, params);
     }
 
     private async readByRids<T>(rids: Iterable<unknown>, statement: (target: string) => string, params?: Record<string, unknown>): Promise<T[]> {

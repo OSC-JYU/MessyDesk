@@ -285,7 +285,7 @@ export class TagsService {
             : await this.db.first('SELECT @rid AS rid FROM TagLink WHERE entity_rid = :e AND target_rid = :t AND region_id IS NULL', { e: entityRid, t: targetRid });
         if (existing) return existing;
         return this.db.sql(
-            "INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :r, owner = :owner, created_by = :createdBy, service_id = :serviceId, task = :taskId, confidence = :conf, project_rid = :project, created = sysdate('YYYY-MM-DD HH:MM:SS')",
+            `INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :r, owner = :owner, created_by = :createdBy, service_id = :serviceId, task = :taskId, confidence = :conf, project_rid = :project, created = ${this.db.legacy ? "sysdate('YYYY-MM-DD HH:MM:SS')" : "sysdate().format('YYYY-MM-DD HH:MM:SS')"}`,
             {
                 project: meta.project_rid ? toRid(meta.project_rid) : null,
                 e: entityRid,

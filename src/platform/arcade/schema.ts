@@ -18,13 +18,23 @@ export const EDGE_TYPES = [
     'DERIVED_FROM', 'HAS_OWNER', 'HAS_SOURCE',
 ] as const;
 
-const CREATED_PROPERTIES = [
-    "CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
-    "CREATE PROPERTY Project.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY Process.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY SetProcess.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY File.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-];
+const CREATED_TYPES = ['Project', 'Process', 'SetProcess', 'File'] as const;
+
+/**
+ * `created` timestamps default to the time of insert. 23.7.1 takes `sysdate(format)`; ArcadeDB 26
+ * reads that argument as a time zone and fails every insert, so the current mode uses plain
+ * `sysdate()` (the property is a DATETIME either way).
+ */
+function createdDefault(legacy: boolean): string {
+    return legacy ? "sysdate('YYYY-MM-DD HH:MM:SS')" : 'sysdate()';
+}
+
+function createdProperties(legacy: boolean): string[] {
+    return [
+        "CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
+        ...CREATED_TYPES.map((type) => `CREATE PROPERTY ${type}.created IF NOT EXISTS DATETIME (readonly, default ${createdDefault(legacy)})`),
+    ];
+}
 
 const PROPERTIES = [
     'CREATE PROPERTY File.project_rid IF NOT EXISTS STRING',
@@ -96,7 +106,7 @@ async function quietly(fn: () => Promise<unknown>, log: (m: string) => void, lab
 export async function ensureDatabase(db: ArcadeClient, log: (m: string) => void): Promise<boolean> {
     if (await db.databaseExists()) return false;
     await db.createDatabase();
-    for (const statement of CREATED_PROPERTIES) {
+    for (const statement of createdProperties(db.legacy)) {
         // Types must exist before their properties.
         const type = statement.split(' ')[2].split('.')[0];
         await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
@@ -111,4 +121,9 @@ export async function ensureSchema(db: ArcadeClient, log: (m: string) => void): 
     for (const type of EDGE_TYPES) await quietly(() => db.sql(`CREATE EDGE TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
     for (const statement of PROPERTIES) await quietly(() => db.sql(statement, undefined, { quiet: true }), log, statement);
     for (const [type, property, kind] of INDEXES) await quietly(() => db.ensureIndex(type, property, kind), log, `${type}.${property}`);
+    if (!db.legacy) {
+        // A database created by 23.7.1 keeps its sysdate(format) defaults, which newer servers
+        // cannot evaluate: every Project/Process/SetProcess/File insert would fail.
+        for (const type of CREATED_TYPES) await quietly(() => db.sql(`ALTER PROPERTY ${type}.created DEFAULT ${createdDefault(false)}`, undefined, { quiet: true }), log, `${type}.created default`);
+    }
 }
