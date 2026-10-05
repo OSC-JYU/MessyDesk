@@ -47,8 +47,14 @@ is now serialised per user, type and label.
 
 Everything is gone afterwards in all three: nodes, tag links, Solr docs and directories.
 
-## For Ari
+## In the background (decision G5)
 
-**A big desk delete takes minutes inside one request** (217 s for 100 000 pages with their outputs),
-past any proxy timeout; the UI then shows an error although the delete finishes. Like starting a
-batch (G2), it could answer at once and delete in the background, with an SSE event when done.
+Deletes now answer at once and finish in the background: the request checks ownership, marks the
+node `_deleting` (gone for the user from then on: reads give 404, a desk's content too, the desk
+list and desk graph leave it out), records it so a restart resumes it, and returns. The UI reloads
+the desk or desk list on the `delete_finished` / `delete_failed` event (MessyDesk-UI branch
+`tags-api`).
+
+| | Before | After |
+|---|---|---|
+| `DELETE /api/projects/{rid}`, desk with 100 000 pages, 200 000 outputs, 200 000 tag links | 217 s in the request | **13 ms**; finished in the background after ~230 s |

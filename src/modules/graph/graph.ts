@@ -109,9 +109,10 @@ export class GraphService {
      * deleted process (process_rid on edges), members of a deleted set and processes of a deleted
      * set process. Sources upstream are kept. Search docs, TagLinks and directories go too.
      */
-    async deleteNode(rid: string, userRid: string): Promise<{ path: string | null; deleted: number }> {
+    /** `checked`: the caller already checked access (background deletes hide the node first). */
+    async deleteNode(rid: string, userRid: string, checked = false): Promise<{ path: string | null; deleted: number }> {
         const root = toRid(rid);
-        if (!(await this.access.canRead(root, userRid))) throw Boom.notFound('Node not found');
+        if (!checked && !(await this.access.canRead(root, userRid))) throw Boom.notFound('Node not found');
         const queue: string[] = [root];
         const visited = new Set<string>();
         const toDelete = new Set<string>();

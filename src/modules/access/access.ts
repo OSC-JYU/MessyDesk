@@ -31,7 +31,7 @@ export class AccessService {
         const user = toRid(userRid);
         let projects: Array<{ rid: string; owners: unknown }>;
         try {
-            projects = await this.db.rows(`SELECT @rid AS rid, out('HAS_OWNER').@rid AS owners FROM (TRAVERSE out() FROM ${clean} MAXDEPTH 40) WHERE @type = 'Project'`);
+            projects = await this.db.rows(`SELECT @rid AS rid, out('HAS_OWNER').@rid AS owners FROM (TRAVERSE out() FROM ${clean} MAXDEPTH 40) WHERE @type = 'Project' AND _deleting IS NULL`);
         } catch (error) {
             if (/not found/i.test(`${(error as Error)?.message} ${(error as any)?.detail}`)) return null;
             throw error;
@@ -39,7 +39,8 @@ export class AccessService {
         const project = projects.find((p) => Array.isArray(p.owners) && p.owners.map(String).includes(user));
         if (!project) return null;
         const node = await this.db.first(`SELECT FROM ${clean}`);
-        if (!node) return null;
+        // Being deleted in the background (graph/deletes.ts): already gone for the user.
+        if (!node || node._deleting) return null;
         return { node, projectRid: project.rid };
     }
 
@@ -58,7 +59,7 @@ export class AccessService {
         const clean = tryRid(projectRid);
         if (!clean) return false;
         const row = await this.db.first(
-            `MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type:User, as:p, where:(@rid = :user)} RETURN project.@rid AS rid`,
+            `MATCH {type:Project, as:project, where:(@rid = :rid AND _deleting IS NULL)}-HAS_OWNER->{type:User, as:p, where:(@rid = :user)} RETURN project.@rid AS rid`,
             { rid: clean, user: toRid(userRid) },
         );
         return Boolean(row?.rid);

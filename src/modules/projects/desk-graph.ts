@@ -28,7 +28,7 @@ export class DeskGraph {
 
     async forProject(projectRid: string, userRid: string): Promise<VueFlowGraph> {
         const match = `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()
-            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND $depth > 0), while:($depth < 20)}`;
+            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND _deleting IS NULL AND $depth > 0), while:($depth < 20)}`;
         const params = { user: toRid(userRid), project: toRid(projectRid) };
         let result: { vertices?: any[]; edges?: any[] };
         if (this.db.legacy) {
