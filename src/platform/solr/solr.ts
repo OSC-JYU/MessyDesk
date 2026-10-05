@@ -60,25 +60,41 @@ export class SolrClient {
         if (projects.length === 1) fq.push(`project:"${escapeSolrValue(projects[0])}"`);
         else if (projects.length > 1) fq.push(`(${projects.map((rid) => `project:"${escapeSolrValue(rid)}"`).join(' OR ')})`);
         if (!query) return [];
-        return this.postJson('/query', {
-            params: {
-                q: query,
-                rows,
-                defType: 'edismax',
-                qf: 'fulltext_exact^10 fulltext^2 label^3 description^1',
-                pf: 'fulltext_exact^20',
-                pf2: 'fulltext_exact^5',
-                hl: true,
-                'hl.fl': 'fulltext_exact,fulltext',
-                'hl.simple.pre': '<em>',
-                'hl.simple.post': '</em>',
-                'hl.snippets': 3,
-                'hl.fragsize': 100,
-                wt: 'json',
-                fl: 'description,label,id,node,process,project,set,owner,score,type,path',
-                fq,
-            },
-        });
+        const params = {
+            q: query,
+            rows,
+            defType: 'edismax',
+            qf: 'fulltext_exact^10 fulltext^2 label^3 description^1',
+            pf: 'fulltext_exact^20',
+            pf2: 'fulltext_exact^5',
+            hl: true,
+            'hl.fl': 'fulltext_exact',
+            'hl.simple.pre': '<em>',
+            'hl.simple.post': '</em>',
+            'hl.snippets': 3,
+            'hl.fragsize': 100,
+            wt: 'json',
+            fl: 'description,label,id,node,process,project,set,owner,score,type,path',
+            fq,
+        };
+        // Highlighting the n-gram field took most of the search time (~300 ms of 320 for 500 hits,
+        // perf/results/search.md). Whole-word snippets come first; only hits without one (matched
+        // by a word fragment) are highlighted on the n-gram field, in a second, smaller request.
+        const response = await this.postJson('/query', { params });
+        const docs: any[] = response?.response?.docs || [];
+        const highlighting = response?.highlighting || {};
+        const missing = docs.map((d) => d.id).filter((id) => !(highlighting[id]?.fulltext_exact?.length));
+        if (missing.length) {
+            const ids = missing.map((id) => `"${escapeSolrValue(id)}"`).join(' OR ');
+            const fragments = await this.postJson('/query', {
+                params: { ...params, rows: missing.length, fl: 'id', 'hl.fl': 'fulltext', fq: [...fq, `id:(${ids})`] },
+            }).catch(() => null);
+            for (const [id, hl] of Object.entries<any>(fragments?.highlighting || {})) {
+                if (hl?.fulltext?.length) highlighting[id] = { ...(highlighting[id] || {}), fulltext: hl.fulltext };
+            }
+            if (response) response.highlighting = highlighting;
+        }
+        return response;
     }
 
     async projectDocCounts(userRid: string): Promise<any> {
