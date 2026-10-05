@@ -11,6 +11,10 @@
 # No Nomad: every service runs as a plain container and its consumer reaches it by DEV_URL.
 # Services and consumers share one data volume, mounted as the backend's data/ and as data/
 # under MD_PATH everywhere else, so files move on disk instead of over HTTP.
+#
+# SELinux (RHEL, Fedora): every mount carries a relabel option, ignored where SELinux is off.
+# :z on the shared md-data volume, which many containers use at once; :Z on mounts that belong to
+# one container only. A new mount needs one of them too, or the container gets "permission denied".
 
 name: messydesk
 
@@ -26,7 +30,7 @@ x-consumer: &consumer
   restart: unless-stopped
   depends_on: [backend]
   volumes:
-    - md-data:/md/data
+    - md-data:/md/data:z
   # The consumer keeps scratch files in ./data, and /src is not writable for its node user.
   tmpfs:
     - /src/data:mode=1777
@@ -46,7 +50,7 @@ x-service: &service
   # that owner when the backend mounts it first.
   depends_on: [backend]
   volumes:
-    - md-data:/md/data
+    - md-data:/md/data:z
 
 services:
 
@@ -58,14 +62,14 @@ services:
     environment:
       JAVA_OPTS: -Darcadedb.server.rootPassword=${DB_PASSWORD:?set DB_PASSWORD in .env}
     volumes:
-      - arcadedb-data:/home/arcadedb/databases
+      - arcadedb-data:/home/arcadedb/databases:Z
 
   solr:
     image: docker.io/library/solr:9.7
     restart: unless-stopped
     command: ["solr-precreate", "messydesk"]
     volumes:
-      - solr-data:/var/solr
+      - solr-data:/var/solr:Z
 
   solr-init:
     image: docker.io/library/alpine:3.20
@@ -101,7 +105,7 @@ services:
       SERVICE_AUTH_LEGACY_MAIL: "false"
       API_URL: http://localhost:${MD_PORT:-8200}/
     volumes:
-      - md-data:/src/data
+      - md-data:/src/data:z
 
   # ---- base services --------------------------------------------------------------------------
 
@@ -178,7 +182,7 @@ services:
       LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,fi,sv,de}
       LT_UPDATE_MODELS: "true"
     volumes:
-      - libretranslate-models:/home/libretranslate/.local
+      - libretranslate-models:/home/libretranslate/.local:Z
 
   # ---- text analysis (profile linguistics) ----------------------------------------------------
   # Not started by default: podman-compose --profile linguistics up -d
@@ -199,7 +203,7 @@ services:
   # Not started by default: podman-compose --profile machine_learning up -d
 
   # Works over HTTP (the consumer moves the files), so it needs no shared volume. The model is
-  # downloaded from Hugging Face on the first request and kept in a volume.
+  # part of the image (downloaded when it is built, about 2.5 GB in all).
   md-gliner2:
     profiles: [machine_learning]
     image: localhost/messydesk/md-gliner2:local
@@ -208,9 +212,6 @@ services:
     environment:
       SERVICE_LOCAL_URL: http://md-gliner2:9010
       DEVICE: cpu
-      HF_HOME: /models
-    volumes:
-      - gliner2-models:/models
 
   # ---- consumers: one per queue topic ---------------------------------------------------------
 
@@ -233,13 +234,6 @@ services:
     environment:
       <<: *consumer-env
       TOPIC: md-poppler
-      DEV_URL: http://md-poppler:8300
-
-  consumer-poppler-fs:
-    <<: *consumer
-    environment:
-      <<: *consumer-env
-      TOPIC: md-poppler_fs
       DEV_URL: http://md-poppler:8300
 
   consumer-pypdf:
@@ -292,7 +286,7 @@ services:
     <<: *consumer
     depends_on: [backend, libretranslate]
     volumes:
-      - md-data:/md/data
+      - md-data:/md/data:z
       - ../../MD-LibreTranslate/service.json:/descriptors/md-libretranslate/service.json:ro,Z
     environment:
       <<: *consumer-env
@@ -324,4 +318,3 @@ volumes:
   arcadedb-data: {}
   solr-data: {}
   libretranslate-models: {}
-  gliner2-models: {}

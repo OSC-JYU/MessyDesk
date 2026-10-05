@@ -43,7 +43,7 @@ The first build takes a while; later starts are quick.
 | `md-lingua`, `libretranslate` | Language detection, and machine translation (the upstream LibreTranslate image; MD-LibreTranslate only supplies its descriptor) |
 | `md-gensim` | Only with `--profile linguistics`: word counts, TF-IDF similarity indexes (text reuse) and topic models (LDA, NMF, LSI, HDP, k-means) |
 | `md-gliner2` | Only with `--profile machine_learning`: zero-shot entity extraction and classification |
-| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler` and `md-poppler_fs` (md-poppler), `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
+| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler`, `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
 
 Each consumer finds its service by `DEV_URL`, so Nomad is not needed. Everything shares the `md-data`
 volume: the backend sees it as `data/` and the services and consumers as `$MD_PATH/data`, so the `_fs`
@@ -65,8 +65,9 @@ podman-compose --profile linguistics --profile machine_learning up -d --build   
 ```
 
 Pass the same `--profile` flags to `down`, `logs` and `ps` as well, or podman-compose leaves those
-containers out. MD-Gliner2 downloads its model from Hugging Face on the first job (about a minute on CPU) and keeps
-it in a volume.
+containers out. MD-Gliner2's model is part of its image: the first build downloads it (the image
+is about 2.5 GB), and the service then runs without network access. The old `gliner2-models`
+volume is no longer used; `podman volume rm messydesk_gliner2-models` frees its space.
 
 ## Day to day
 

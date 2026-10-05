@@ -288,7 +288,8 @@ export class ResultsService {
         if (!refRid && message.file.type === 'image' && this.d.registry.hasActiveConsumer(SERVICE.THUMBNAILER)) {
             await this.d.thumbnails.forOutputImage(fileNode, message);
         }
-        if (!refRid && isSplitPdfOutput(message, fileNode) && this.d.registry.hasActiveConsumer(SERVICE.POPPLER_FS)) {
+        if (!refRid && isSplitPdfOutput(message, fileNode)) await this.reportFailedPages(message, processRid);
+        if (!refRid && isSplitPdfOutput(message, fileNode) && this.d.registry.hasActiveConsumer(SERVICE.POPPLER)) {
             await this.d.thumbnails.forSplitPage(fileNode, message);
         }
         if (!refRid && fileNode?.type === 'pdf' && !isSplitPdfOutput(message, fileNode)) {
@@ -298,6 +299,24 @@ export class ResultsService {
             if (service === SERVICE.ZIP) await this.d.importPipeline.afterFileCreated(fileNode, { userId: message.userId, delete_original: true });
         }
         if (message.userId) await this.notifyOutput(message, fileNode, processRid);
+    }
+
+    /**
+     * Pages the splitter could not write come with every page of the split (response.failed_pages,
+     * [{page, error}]); they are recorded once on the import process and shown in its info.
+     */
+    private async reportFailedPages(message: any, processRid: string): Promise<void> {
+        const failed = Array.isArray(message?.response?.failed_pages) ? message.response.failed_pages : [];
+        if (!failed.length || !processRid) return;
+        const node = await this.d.store.getNode(processRid);
+        if (Array.isArray(node?.failed_pages) && node.failed_pages.length) return;
+        const total = Number(message.response.page_count || 0);
+        const pages = failed.map((f: any) => Number(f?.page)).filter(Number.isFinite);
+        const shown = pages.slice(0, 20).join(', ') + (pages.length > 20 ? ', …' : '');
+        const reason = String(failed[0]?.error || '').slice(0, 200);
+        const info = `${pages.length}${total ? ` of ${total}` : ''} pages could not be split and are missing: ${shown}${reason ? ` (${reason})` : ''}`;
+        await this.d.store.setAttributes(processRid, { failed_pages: failed.slice(0, 1000), info });
+        if (message.userId) this.d.sse.send(message.userId, { command: 'update', target: processRid, node: { info, failed_pages: failed.length } });
     }
 
     private batchSummary(batch: any, fallbackProcessed: number, fallbackTotal: number, grouped: boolean, finished: boolean): any {
@@ -398,6 +417,7 @@ export class ResultsService {
             return;
         }
         logger.error('Error processing files', { error, message });
+        if (role === ROLE.IMPORT || lower(message?.process?.role) === ROLE.IMPORT) await this.failImport(error, message);
         let target = tryRid(message?.process?.['@rid']) || tryRid(message?.target);
         if (message.output_set) {
             const setProcess = await batches.processOfSet(message.output_set);
@@ -426,6 +446,16 @@ export class ResultsService {
         if (!message.output_set) {
             sse.send(message.userId, { command: 'add', input: message.process['@rid'], type: 'error', process: { '@rid': message.process['@rid'], status: 'finished' }, node });
         }
+    }
+
+    /** A failed split: the PDF is no longer "importing", and the import process says why. */
+    private async failImport(error: any, message: any): Promise<void> {
+        const sourceRid = tryRid(message?.file?.['@rid']);
+        const processRid = tryRid(message?.process?.['@rid']);
+        const reason = String(error?.details || error?.message || error || 'unknown error').slice(0, 500);
+        if (sourceRid) await this.d.store.setAttribute(sourceRid, '_status', 'import_failed');
+        if (processRid) await this.d.store.setAttributes(processRid, { status: 'failed', info: `The PDF could not be split into pages: ${reason}` });
+        if (message.userId && sourceRid) this.d.sse.send(message.userId, { command: 'update', target: sourceRid, node: { _status: 'import_failed' } });
     }
 
     /** /metadata: AI usage figures; `response` files are stored but are not graph nodes. */

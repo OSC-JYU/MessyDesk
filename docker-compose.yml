@@ -10,7 +10,7 @@ services:
     environment:
       - JAVA_OPTS=-Darcadedb.server.rootPassword=node_master
     volumes:
-      - arcadedata_md:/home/arcadedb/databases
+      - arcadedata_md:/home/arcadedb/databases:Z
 
   solr:
     image: solr:9.7
@@ -19,7 +19,7 @@ services:
       - 8983:8983
     restart: unless-stopped
     volumes:
-      - solrdata_md:/var/solr
+      - solrdata_md:/var/solr:Z
     command: ["solr-precreate", "messydesk"]
 
   solr-init:
@@ -30,7 +30,7 @@ services:
     environment:
       - SOLR_URL=http://solr:8983/solr/messydesk
     volumes:
-      - ./tools/solr-init-v2.sh:/solr-init.sh:ro
+      - ./tools/solr-init-v2.sh:/solr-init.sh:ro,Z
     entrypoint: ["sh", "-c", "apk add --no-cache bash curl >/dev/null && bash /solr-init.sh"]
     restart: "no"
 
