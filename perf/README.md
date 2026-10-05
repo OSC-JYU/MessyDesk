@@ -45,3 +45,20 @@ node dist/perf/profile.js --db perf_profile --label x --only grouping
 
 Results: `perf/results/<db>.profile.<label>.json`. The findings so far are in
 [results/step1-query-profile.md](results/step1-query-profile.md).
+
+## Load scenarios against a running backend
+
+Start the backend on a test database, for example
+`DB_PASSWORD=perf_master DB_PORT=2481 DB_NAME=perf_run LEGACY_ARCADEDB=false SERVICE_TOKEN=perf-token DATA_DIR=/tmp/perf-data node dist/src/main.js`,
+then with `SERVICE_TOKEN=perf-token` (and `BASE_URL` if not `http://localhost:8200`):
+
+```bash
+# S1: upload into one set like the UI (chunks of 20, 3 in parallel); prints the set rid
+node dist/perf/s1-upload.js --files 10000
+# S5: one-to-one batch over that set with 16 instant fake consumers; --late starts them after the
+# start request returns, to time it alone
+node dist/perf/s5-batch.js --db perf_run --set '#145:0' --workers 16 [--late]
+```
+
+`fake-consumer.ts` is the consumer used by S5; it registers a service with one-to-one, one-to-many
+and many-to-one tasks and answers every job at once. Findings: [results/upload-and-batch.md](results/upload-and-batch.md).

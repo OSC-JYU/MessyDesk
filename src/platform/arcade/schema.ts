@@ -66,6 +66,12 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['User', 'id', 'NOTUNIQUE'],
 ];
 
+// Buckets per type. ArcadeDB 23.7.1 gave every type 8 buckets by default; 25.x gives one, and
+// with one bucket concurrent inserts (parallel uploads, parallel consumer callbacks) conflict on
+// the same pages: on 25.3.1 that lost uploads and corrupted records (perf/results/upload-and-batch.md).
+// Only types created from now on get it; existing types keep their buckets.
+const BUCKETS = 8;
+
 async function quietly(fn: () => Promise<unknown>, log: (m: string) => void, label: string): Promise<void> {
     try {
         await fn();
@@ -82,16 +88,16 @@ export async function ensureDatabase(db: ArcadeClient, log: (m: string) => void)
     for (const statement of CREATED_PROPERTIES) {
         // Types must exist before their properties.
         const type = statement.split(' ')[2].split('.')[0];
-        await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
+        await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
         await quietly(() => db.sql(statement, undefined, { quiet: true }), log, statement);
     }
     return true;
 }
 
 export async function ensureSchema(db: ArcadeClient, log: (m: string) => void): Promise<void> {
-    for (const type of VERTEX_TYPES) await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
-    for (const type of DOCUMENT_TYPES) await quietly(() => db.sql(`CREATE DOCUMENT TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
-    for (const type of EDGE_TYPES) await quietly(() => db.sql(`CREATE EDGE TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
+    for (const type of VERTEX_TYPES) await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
+    for (const type of DOCUMENT_TYPES) await quietly(() => db.sql(`CREATE DOCUMENT TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
+    for (const type of EDGE_TYPES) await quietly(() => db.sql(`CREATE EDGE TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
     for (const statement of PROPERTIES) await quietly(() => db.sql(statement, undefined, { quiet: true }), log, statement);
     for (const [type, property, kind] of INDEXES) await quietly(() => db.ensureIndex(type, property, kind), log, `${type}.${property}`);
 }
