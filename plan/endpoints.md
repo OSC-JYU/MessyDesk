@@ -157,7 +157,8 @@ checked in the handler, `open` = `auth: false`.
 
 | Method | Path | Auth | Callers | Notes |
 |---|---|---|---|---|
-| GET | `/api/entities` | user | UI | grouped by type |
+| GET | `/api/entities` | user | UI | tag types with counts `[{type, count, icon, color}]`; `project_rid(s)`, `created_by`, `search` (decision G3) |
+| GET | `/api/entities/by-type/{type}` | user | UI | one page of a type's tags by label: `{type, total, skip, limit, items}`; `skip`, `limit` (≤ 1000, default 200), same filters (G3) |
 | POST | `/api/entities` | user | UI | returns raw ArcadeDB envelope |
 | GET | `/api/entities/types` | user | UI | |
 | GET | `/api/entities/items` | user | UI | `entities` comma list |

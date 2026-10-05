@@ -8,6 +8,7 @@ import type { ArcadeClient, ArcadeEnvelope } from '../../platform/arcade/client.
 import { toRid, tryRid, uuidv7 } from '../../platform/ids.ts';
 import { readJsonOrEmpty } from '../../platform/storage/fsutil.ts';
 import type { AccessService } from '../access/access.ts';
+import { GraphStore } from '../../shared/graph-store.ts';
 
 export const ENTITY_TYPES = [
     { type: 'Tag', icon: 'tag', color: 'blue', label: 'Tag' },
@@ -29,10 +30,20 @@ export interface TagFields {
 /** Sends tag fields to the search index (queued through md-solr, or directly). */
 export type TagSync = (fileRid: string, userRid: string, fields: TagFields) => Promise<unknown>;
 
+export interface EntityListOptions {
+    project_rid?: unknown;
+    project_rids?: unknown;
+    created_by?: unknown;
+    search?: unknown;
+    type?: unknown;
+}
+
 export interface LinkMeta {
     region_id?: string | null;
     /** The caller re-syncs the file's search tags itself, once for many links. */
     defer_reindex?: boolean;
+    /** The desk of the target, stored on the link so desk filters can use an index. */
+    project_rid?: string | null;
     created_by?: 'user' | 'machine';
     service_id?: string | null;
     task?: string | null;
@@ -77,31 +88,77 @@ export class TagsService {
 
     // ---- entities ------------------------------------------------------------------------
 
-    /** Entities grouped by type, optionally only those linked to files of the given projects. */
-    async groupedEntities(userRid: string, options: { project_rid?: unknown; project_rids?: unknown } = {}): Promise<any[]> {
-        const projects = projectRidsFrom(options);
-        const select = 'SELECT type, count(type) AS count, LIST(label) AS labels, icon, color, LIST(@this) AS items FROM Entity';
-        if (!projects.length) return this.db.rows(`${select} WHERE owner = :owner GROUP BY type ORDER BY count DESC`, { owner: userRid });
-        const files = await this.db.rows('SELECT @rid AS rid FROM File WHERE project_rid IN :projects', { projects });
-        const fileRids = files.map((r) => r.rid).filter(Boolean);
-        if (!fileRids.length) return [];
-        const links = await this.db.rows('SELECT DISTINCT entity_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: fileRids, owner: userRid });
-        const entityRids = links.map((r) => r.entity_rid).filter(Boolean);
-        if (!entityRids.length) return [];
-        // Read by RID and grouped here: `@rid IN :list` checked every entity against the list.
-        const entities = await this.db.rowsByRids('', entityRids, "@type = 'Entity' AND owner = :owner", { owner: userRid });
-        const groups = new Map<string, any>();
-        for (const entity of entities) {
-            let group = groups.get(entity.type);
-            if (!group) {
-                group = { type: entity.type, count: 0, labels: [], icon: entity.icon, color: entity.color, items: [] };
-                groups.set(entity.type, group);
-            }
-            group.count += 1;
-            group.labels.push(entity.label);
-            group.items.push(entity);
+    /** Filters shared by the tag lists: desks, who made the tag, and a label search. */
+    private entityFilter(userRid: string, options: EntityListOptions): { where: string; params: Record<string, unknown> } {
+        const clauses = ["@type = 'Entity'", 'owner = :owner'];
+        const params: Record<string, unknown> = { owner: userRid };
+        if (options.created_by === 'user' || options.created_by === 'machine') {
+            clauses.push('created_by = :createdBy');
+            params.createdBy = options.created_by;
         }
-        return [...groups.values()].sort((a, b) => b.count - a.count);
+        const search = String(options.search ?? '').trim().toLowerCase();
+        if (search) {
+            clauses.push('label.toLowerCase() LIKE :search');
+            params.search = `%${search.replace(/[%_]/g, '')}%`;
+        }
+        if (options.type) {
+            clauses.push('type = :type');
+            params.type = String(options.type);
+        }
+        return { where: clauses.join(' AND '), params };
+    }
+
+    /** Entities linked to files of the given desks (TagLink.project_rid, indexed). */
+    private async entityRidsInProjects(userRid: string, projects: string[]): Promise<string[]> {
+        const rows = await this.db.rows('SELECT DISTINCT entity_rid FROM TagLink WHERE project_rid IN :projects AND owner = :owner', { projects, owner: userRid });
+        return rows.map((r) => r.entity_rid).filter(Boolean);
+    }
+
+    /**
+     * GET /api/entities: the user's tag types with how many tags each has, optionally only tags
+     * used on the given desks, made by users or machines, or matching a label search. The tags
+     * themselves come from entitiesOfType (plan/decisions.md G3: returning every tag was 21 MB at
+     * 100 000 tags).
+     */
+    async groupedEntities(userRid: string, options: EntityListOptions = {}): Promise<Array<{ type: string; count: number; icon: unknown; color: unknown }>> {
+        const projects = projectRidsFrom(options);
+        const { where, params } = this.entityFilter(userRid, { ...options, type: undefined });
+        let counts: Array<{ type: string; count: number }>;
+        if (!projects.length) {
+            counts = await this.db.rows(`SELECT type, count(*) AS count FROM Entity WHERE ${where.replace("@type = 'Entity' AND ", '')} GROUP BY type`, params);
+        } else {
+            const entities = await this.db.rowsByRids<{ type: string }>('type', await this.entityRidsInProjects(userRid, projects), where, params);
+            const byType = new Map<string, number>();
+            for (const e of entities) byType.set(e.type, (byType.get(e.type) || 0) + 1);
+            counts = [...byType.entries()].map(([type, count]) => ({ type, count }));
+        }
+        const schema = new Map((await this.entityTypeSchema(userRid)).map((t: any) => [t.type, t]));
+        const groups = [];
+        for (const row of counts) {
+            if (!row.type || !Number(row.count)) continue;
+            let look: any = schema.get(row.type);
+            if (!look) look = await this.db.first('SELECT icon, color FROM Entity WHERE owner = :owner AND type = :type LIMIT 1', { owner: userRid, type: row.type });
+            groups.push({ type: row.type, count: Number(row.count), icon: look?.icon ?? null, color: look?.color ?? null });
+        }
+        return groups.sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+    }
+
+    /** GET /api/entities/by-type/{type}: one page of a type's tags, sorted by label. */
+    async entitiesOfType(userRid: string, type: string, options: EntityListOptions & { skip?: unknown; limit?: unknown } = {}): Promise<{ type: string; total: number; skip: number; limit: number; items: any[] }> {
+        const skip = Math.max(0, Number.parseInt(String(options.skip ?? 0), 10) || 0);
+        const limit = Math.min(1000, Math.max(1, Number.parseInt(String(options.limit ?? 200), 10) || 200));
+        const projects = projectRidsFrom(options);
+        const { where, params } = this.entityFilter(userRid, { ...options, type });
+        const fields = '@rid, @type, label, type, icon, color, created_by, description';
+        if (!projects.length) {
+            const local = where.replace("@type = 'Entity' AND ", '');
+            const total = Number((await this.db.first(`SELECT count(*) AS c FROM Entity WHERE ${local}`, params))?.c || 0);
+            const items = await this.db.rows(`SELECT ${fields} FROM Entity WHERE ${local} ORDER BY label SKIP :skip LIMIT :limit`, { ...params, skip, limit });
+            return { type, total, skip, limit, items };
+        }
+        const all = await this.db.rowsByRids(fields, await this.entityRidsInProjects(userRid, projects), where, params);
+        all.sort((a, b) => (String(a.label ?? '') < String(b.label ?? '') ? -1 : String(a.label ?? '') > String(b.label ?? '') ? 1 : 0));
+        return { type, total: all.length, skip, limit, items: all.slice(skip, skip + limit) };
     }
 
     async createEntity(data: any, userRid: string): Promise<ArcadeEnvelope | undefined> {
@@ -228,8 +285,9 @@ export class TagsService {
             : await this.db.first('SELECT @rid AS rid FROM TagLink WHERE entity_rid = :e AND target_rid = :t AND region_id IS NULL', { e: entityRid, t: targetRid });
         if (existing) return existing;
         return this.db.sql(
-            "INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :r, owner = :owner, created_by = :createdBy, service_id = :serviceId, task = :taskId, confidence = :conf, created = sysdate('YYYY-MM-DD HH:MM:SS')",
+            "INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :r, owner = :owner, created_by = :createdBy, service_id = :serviceId, task = :taskId, confidence = :conf, project_rid = :project, created = sysdate('YYYY-MM-DD HH:MM:SS')",
             {
+                project: meta.project_rid ? toRid(meta.project_rid) : null,
                 e: entityRid,
                 t: targetRid,
                 r: region === null ? null : String(region),
@@ -248,8 +306,10 @@ export class TagsService {
         const t = tryRid(targetRid);
         if (!e || !t) return undefined;
         const entity = await this.db.firstByRid('@rid', e, "@type = 'Entity' AND owner = :owner", { owner: userRid });
-        if (!entity || !(await this.access.canRead(t, userRid))) return undefined;
-        const linked = await this.createTagLink(e, t, userRid, meta);
+        if (!entity) return undefined;
+        const owned = await this.access.findOwned(t, userRid);
+        if (!owned) return undefined;
+        const linked = await this.createTagLink(e, t, userRid, { ...meta, project_rid: owned.projectRid });
         if (!meta.region_id && !meta.defer_reindex) await this.reindexFileTags(t, userRid);
         return linked;
     }
@@ -318,6 +378,29 @@ export class TagsService {
         } catch {
             return null;
         }
+    }
+
+    /**
+     * Fills TagLink.project_rid on links made before it was stored (or by the old backend), in
+     * the background at startup. Links whose target has no desk get '' so they are not read again.
+     */
+    async backfillLinkProjects(log: (message: string) => void): Promise<number> {
+        if (!(await this.db.first('SELECT @rid FROM TagLink WHERE project_rid IS NULL LIMIT 1'))) return 0;
+        // One scan for the targets, then one indexed update per target (target_rid is indexed).
+        const targets = (await this.db.rows('SELECT DISTINCT target_rid FROM TagLink WHERE project_rid IS NULL')).map((r) => r.target_rid).filter(Boolean);
+        const known = new Map((await this.db.rowsByRids<any>('@rid AS rid, project_rid', targets)).map((r) => [String(r.rid), r.project_rid]));
+        const store = new GraphStore(this.db);
+        let done = 0;
+        for (const target of targets) {
+            let project = known.get(String(target)) as string | undefined;
+            if (!project && tryRid(target)) project = (await store.projectRidOf(toRid(target))) || undefined;
+            const value = project && tryRid(project) ? toRid(project) : '';
+            await this.db.sql('UPDATE TagLink SET project_rid = :p WHERE target_rid = :t AND project_rid IS NULL', { p: value, t: target });
+            done += 1;
+            if (done % 1000 === 0) log(`TagLink desks: ${done}/${targets.length} files`);
+        }
+        log(`TagLink desks filled for ${targets.length} files`);
+        return targets.length;
     }
 
     // ---- Autotag -------------------------------------------------------------------------

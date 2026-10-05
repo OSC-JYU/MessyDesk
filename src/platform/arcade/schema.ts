@@ -43,6 +43,7 @@ const PROPERTIES = [
     'CREATE PROPERTY Process.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY SetProcess.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY User.id IF NOT EXISTS STRING',
+    'CREATE PROPERTY TagLink.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.type IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.label IF NOT EXISTS STRING',
 ];
@@ -72,6 +73,8 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     // TagLink (owner, created_by) index was tried and left out: on ArcadeDB 25.3.1 queries on
     // `owner` alone then returned 24 times too many rows.
     ['Entity', 'owner, type, label', 'NOTUNIQUE'],
+    // The desk filter of the tag lists reads links by desk (plan/decisions.md G4).
+    ['TagLink', 'project_rid', 'NOTUNIQUE'],
 ];
 
 // Buckets per type. ArcadeDB 23.7.1 gave every type 8 buckets by default; 25.x gives one, and

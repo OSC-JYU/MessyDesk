@@ -114,6 +114,8 @@ async function main(): Promise<void> {
     const batches = new BatchState(db, store);
     const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
+    // Links made before TagLink.project_rid existed get their desk in the background.
+    tags.backfillLinkProjects((m) => logger.info(m)).catch((error) => logger.error(`TagLink desk backfill failed: ${(error as Error).message}`));
     const graph = new GraphService(db, store, access, tags, solr, layout);
     const filters = new FiltersService(db, store, layout, access, nodes);
     filters.setFilters(await loadFilters(config.filtersDir, (m) => logger.warn(m)));

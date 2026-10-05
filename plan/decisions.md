@@ -97,3 +97,5 @@ Decided by Ari after the upload and batch tests ([../perf/results/upload-and-bat
 |---|---|
 | G1 | `set.json` is written once, not for every added file: when the set has had no new files for 5 s, when a batch finishes, and on shutdown. Nothing in the backend, UI or consumers reads it |
 | G2 | Starting a set batch (`POST /api/queue/{topic}/sets/{rid}`) and resuming one answer as soon as the batch node exists; the jobs are published in the background. A dispatch failure is logged and stored on the batch as `dispatch_error` |
+| G3 | `GET /api/entities` returns the tag types with counts only (`[{type, count, icon, color}]`), filtered by desks, `created_by` and `search`. A type's tags come from the new `GET /api/entities/by-type/{type}`, one page at a time. Returning every tag was 21 MB at 100 000 tags. MessyDesk-UI's tags page and file tag tool load a type when it is opened |
+| G4 | Each TagLink stores the desk of its target (`project_rid`, indexed), so the desk filter of the tag lists reads links by desk instead of by every file of the desk. Existing links get it in the background at startup |

@@ -1,5 +1,7 @@
 # S7: tags at scale (2026-10-05)
 
+**Update:** Ari decided the two open points (plan/decisions.md G3, G4); see "After G3 and G4" at the end.
+
 Scenario S7 of [plan/performance-testing.md](../../plan/performance-testing.md): one user's tags
 grown in steps directly in the database, then the tag calls the UI makes timed over HTTP
 (`perf/s7-tags.ts`), plus an autotag batch (`perf/s7-autotag.ts`). ArcadeDB 25.3.1, same laptop as
@@ -66,3 +68,30 @@ others as in the table. Contract tests: 68 of 71 on 25.3.1 and 23.7.1, as before
    set (up to 1 000 000 here): 1.4–2.3 s. Storing `project_rid` on each TagLink would let the desk
    filter use an index; machine-tag counts could be kept up to date when links change instead of
    counted on every request. Both are schema changes.
+
+## After G3 and G4
+
+`GET /api/entities` now returns the tag types with counts, and `GET /api/entities/by-type/{type}`
+returns one page of a type's tags (200 by default, sorted by label, with the same desk, made-by and
+search filters). TagLinks store their desk. At 100 000 tags and 1 000 000 links on one desk:
+
+| Call | Before | After |
+|---|---|---|
+| Tags page, all desks: `GET /api/entities` | 1.39 s, 21 MB | **0.19 s, 0.4 KB** |
+| Tags page, one desk: `?project_rid=` | 2.51 s, 4.3 MB | **1.2 s, 0.4 KB** |
+| Opening a type: `by-type/Tag` (first 200) | – | 0.07 s, 29 KB |
+| Opening a type on one desk | – | 1.2 s |
+| Search `tag 998` in a type | – | 0.06 s |
+
+The desk filter still reads every link of the desk once (1 000 000 here); it no longer reads the
+desk's files first. MessyDesk-UI (branch `tags-api`): the tags page and the file tag tool show the
+types with counts and load a type's tags when its panel opens, 200 at a time with "Show more";
+the search box filters on the server. Checked in the browser against this database.
+
+Filling the desk into 1 000 000 existing links took about 2.5 minutes in the background at startup.
+
+**ArcadeDB 25.3.1 lost index entries again**: after the parallel autotag runs, the `TagLink.target_rid`
+index was missing entries (5 of 15 000 backend-made links on one sample, and the links of 3 002
+files in all), so lookups by file did not find them until `REBUILD INDEX`. Together with the lost
+uploads and the composite index that returned 24× too many rows, 25.3.1 is not safe to run
+MessyDesk on; the next tests should use a newer stable ArcadeDB.

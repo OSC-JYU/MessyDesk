@@ -5,7 +5,7 @@ import {
     createProject, createSet, upload, PNG_1x1, FakeConsumer, sampleDescriptor, SseListener,
 } from './helpers.ts';
 
-test('entity types, entities and tags', async () => {
+test('entity types, entities and tags', { skip: onlyNew }, async () => {
     const types = await get('/api/entities/types');
     assert.equal(types.status, 200);
     assert.deepEqual(types.body.map((t: any) => t.type).sort(), ['Date', 'Location', 'Organisation', 'Person', 'Quality', 'Tag', 'Theme']);
@@ -30,15 +30,26 @@ test('entity types, entities and tags', async () => {
     assert.equal(row.description, 'a tag');
     assert.equal(row.type, 'Tag');
 
+    // Types with counts; the tags of a type come one page at a time (plan/decisions.md G3).
     const grouped = await get('/api/entities');
     assert.equal(grouped.status, 200);
     const person = grouped.body.find((g: any) => g.type === 'Person');
-    assert.ok(person.labels.includes(label));
-    assert.ok(person.items.some((i: any) => i.label === label && i['@rid']));
     assert.equal(typeof person.count, 'number');
+    assert.ok(person.count >= 1);
+    assert.equal(person.labels, undefined, 'tags are no longer listed in the groups');
+    const byType = await get(`/api/entities/by-type/Person?search=${encodeURIComponent(label)}`);
+    assert.equal(byType.status, 200);
+    assert.equal(byType.body.type, 'Person');
+    assert.equal(byType.body.total, 1);
+    assert.equal(byType.body.items[0].label, label);
+    assert.match(byType.body.items[0]['@rid'], /^#\d+:\d+$/);
+    const userMade = await get('/api/entities?created_by=user');
+    assert.ok(userMade.body.find((g: any) => g.type === 'Person'));
+    const machineMade = await get(`/api/entities/by-type/Person?created_by=machine&search=${encodeURIComponent(label)}`);
+    assert.equal(machineMade.body.total, 0);
 });
 
-test('link and unlink an entity to a file', async () => {
+test('link and unlink an entity to a file', { skip: onlyNew }, async () => {
     const project = await createProject();
     const set = await createSet(project['@rid']);
     const up = await upload(project['@rid'], [{ name: 'tagged.txt', type: 'text/plain', content: 't' }], set['@rid']);
@@ -61,6 +72,12 @@ test('link and unlink an entity to a file', async () => {
     assert.equal(items.body.length, 1);
     assert.equal(items.body[0].rid, file['@rid']);
     assert.match(items.body[0].thumb, /api\/thumbnails\//);
+
+    // The desk filter reads the desk stored on the link (plan/decisions.md G4).
+    const deskTypes = await get(`/api/entities?project_rid=${encodeURIComponent(project['@rid'])}`);
+    assert.deepEqual(deskTypes.body.map((g: any) => [g.type, g.count]), [['Tag', 1]]);
+    const deskTags = await get(`/api/entities/by-type/Tag?project_rid=${encodeURIComponent(project['@rid'])}`);
+    assert.deepEqual(deskTags.body.items.map((i: any) => i.label), [label]);
 
     const scoped = await get(`/api/entities?project_rid=${encodeURIComponent(project['@rid'])}`);
     assert.deepEqual(scoped.body.map((g: any) => g.type), ['Tag']);
