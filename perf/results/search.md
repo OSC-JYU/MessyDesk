@@ -110,3 +110,25 @@ My recommendation:
    text) and **light** (whole words only, ~1× the text). Both get fuzzy search for OCR errors. The
    search query already covers both fields, so both kinds of documents are found by the same search.
    Light could be the default for very large desks.
+
+## Built (decision G6)
+
+- **Search option "include OCR misspellings"** (`fuzzy: true` in `POST /api/search`, a checkbox on the
+  UI's search page). The normal search runs as before, OR'ed with fuzzy terms on the whole-word
+  field: each word of 4+ letters as `word~1` plus its common two-edit OCR confusions (m↔rn, d↔cl,
+  w↔vv, h↔li), which `~1` cannot reach. Word-fragment matches and their snippets are kept.
+- **md-solr index option** `index_mode`: `full` (default, today's) or `light` (whole words only).
+  Re-indexing a desk keeps each run's mode.
+
+Same 200 MB with 3 % OCR errors, the backend's own search (`SolrClient.search`), 1 000 hits:
+
+| Index | Search | Misread-only pages found | Other pages per search | p50 / p95 |
+|---|---|---|---|---|
+| Full (1 400 MB) | normal | 0.6 % | 118 | 50 / 652 ms |
+| Full | + OCR misspellings | 86.9 % | 369 | 157 / 675 ms |
+| Light (190 MB) | normal | 0 % | 0 | 23 / 136 ms |
+| Light | + OCR misspellings | **95.6 %** | 284 | 131 / 593 ms |
+
+The OCR confusions raised the light index from 88.8 % (plain `~1`) to 95.6 %. On the full index
+more unrelated pages match through word fragments, and with 1 000 hits some misread pages rank below
+the cut.

@@ -262,7 +262,7 @@ export class ProcessingService {
             const groups = await manyToOneGroups(this.db, service, task, files, searchOutput);
             const processNode = await this.nodes.createManyToOneProcess(taskName, service, task, set);
             const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: rid, label: `${task.name || task.id} output`, project_rid: set.project_rid, search_output: searchOutput });
-            await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, total_files: files.length, search_output: searchOutput });
+            await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, task_payload_json: JSON.stringify(payload), total_files: files.length, search_output: searchOutput });
             this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: processNode, output: outputSet });
             await writeJson(path.dirname(processNode.path), 'params.json', payload);
             const dispatchGroups = async () => {
@@ -536,7 +536,10 @@ export class ProcessingService {
             try { input = toRid(String(row.input_set)); } catch { continue; }
             if (seen.has(input)) continue;
             seen.add(input);
-            sources.push({ input_set: input });
+            // Keep the run's index options (full or light index, decision G6) when re-indexing.
+            let params: Record<string, unknown> = {};
+            try { params = JSON.parse(row.task_payload_json || '{}')?.params || {}; } catch { params = {}; }
+            sources.push({ input_set: input, params });
         }
         let requeuedSets = 0;
         let requeuedFiles = 0;
@@ -547,7 +550,7 @@ export class ProcessingService {
                 if (!set) { warnings.push({ set_rid: source.input_set, reason: 'set metadata not found' }); continue; }
                 const files = (await this.files.setFiles(source.input_set, userRid, { limit: 10000 })).files;
                 if (!files.length) { warnings.push({ set_rid: source.input_set, reason: 'set has no files' }); continue; }
-                const task = { id: 'index', name: service.tasks.index.name || 'Search index' };
+                const task = { id: 'index', name: service.tasks.index.name || 'Search index', params: source.params };
                 const searchOutput = isSearchOutputTask(service, task);
                 const processNode = await this.nodes.createManyToOneProcess(task.name, service, task, set);
                 const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: source.input_set, label: `${task.name || task.id} output`, project_rid: set.project_rid, search_output: searchOutput });

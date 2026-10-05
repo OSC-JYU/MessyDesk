@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
 import { percentiles } from './lib/http.ts';
+import { SolrClient } from '../src/platform/solr/solr.ts';
 
 const { values: args } = parseArgs({
     options: {
@@ -104,6 +105,11 @@ function params(q: string, rows: number): Record<string, unknown> {
 
 async function search(core: string, q: string, extra: Record<string, unknown> = {}, rows = 1000): Promise<{ ids: number[]; numFound: number; ms: number }> {
     const started = performance.now();
+    if (extra.backend) {
+        // The backend's own search (SolrClient.search), with or without `fuzzy`.
+        const body = await new SolrClient({ url: SOLR, core }).search({ query: q, rows, fuzzy: extra.fuzzy === true }, '#1:0');
+        return { ids: (body?.response?.docs || []).map((d: any) => Number(String(d.id).split(':')[1])), numFound: Number(body?.response?.numFound || 0), ms: performance.now() - started };
+    }
     const res = await fetch(`${SOLR}/${core}/query`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ params: { ...params(q, rows), ...extra } }) });
     const body = await res.json() as any;
     const ms = performance.now() - started;
@@ -144,11 +150,10 @@ async function main(): Promise<void> {
     console.error(`candidates ${candidates.length}`);
     const chosen = candidates.sort((a, b) => a - b).filter((_, i) => i % Math.max(1, Math.floor(candidates.length / 40)) === 0).slice(0, 40);
     const ways: Array<[string, string, (w: string) => string, Record<string, unknown>?]> = [
-        ['full (today)', String(args.full), (w) => w],
-        ['full, fuzzy ~1', String(args.full), (w) => `${w}~1`],
-        ['light, exact words', String(args.light), (w) => w],
-        ['light, fuzzy ~1', String(args.light), (w) => `${w}~1`],
-        ['light, fuzzy ~2', String(args.light), (w) => `${w}~2`],
+        ['full, backend search', String(args.full), (w) => w, { backend: true }],
+        ['full, backend search + OCR misspellings', String(args.full), (w) => w, { backend: true, fuzzy: true }],
+        ['light, backend search', String(args.light), (w) => w, { backend: true }],
+        ['light, backend search + OCR misspellings', String(args.light), (w) => w, { backend: true, fuzzy: true }],
     ];
     const recall: any[] = [];
     for (const [name, core, make, extraParams] of ways) {
@@ -184,7 +189,7 @@ async function main(): Promise<void> {
         recall.push(row);
         console.log(JSON.stringify(row));
     }
-    fs.writeFileSync('perf/results/s8-light.json', JSON.stringify({ when: new Date().toISOString(), error_rate: ERROR_RATE, sizes, recall }, null, 2));
+    fs.writeFileSync(`perf/results/s8-light${args['no-load'] ? '' : ''}.${process.env.S8_LABEL || 'run'}.json`, JSON.stringify({ when: new Date().toISOString(), error_rate: ERROR_RATE, sizes, recall }, null, 2));
 }
 
 main().catch((error) => {
