@@ -1,0 +1,152 @@
+{
+  "when": "2026-10-05T18:02:00.160Z",
+  "results": [
+    {
+      "text_mb": 11,
+      "docs": 4500,
+      "index_mb": 74,
+      "index_bytes_per_doc": 17293,
+      "index_to_text": 6.9,
+      "bulk_load_docs_per_s": 642,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 142,
+        "p95": 273,
+        "p99": 299,
+        "max": 299,
+        "avg_hits": 1241
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 8,
+        "p95": 255,
+        "p99": 256,
+        "max": 256,
+        "avg_hits": 62
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 182,
+        "p95": 463,
+        "p99": 505,
+        "max": 505,
+        "avg_hits": 1241
+      }
+    },
+    {
+      "text_mb": 50,
+      "docs": 21000,
+      "index_mb": 345,
+      "index_bytes_per_doc": 17250,
+      "index_to_text": 6.9,
+      "bulk_load_docs_per_s": 686,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 150,
+        "p95": 285,
+        "p99": 295,
+        "max": 295,
+        "avg_hits": 5789
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 32,
+        "p95": 278,
+        "p99": 293,
+        "max": 293,
+        "avg_hits": 290
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 250,
+        "p95": 454,
+        "p99": 508,
+        "max": 508,
+        "avg_hits": 5789
+      }
+    },
+    {
+      "text_mb": 201,
+      "docs": 84000,
+      "index_mb": 1264,
+      "index_bytes_per_doc": 15783,
+      "index_to_text": 6.3,
+      "bulk_load_docs_per_s": 660,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 160,
+        "p95": 305,
+        "p99": 309,
+        "max": 309,
+        "avg_hits": 23156
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 123,
+        "p95": 297,
+        "p99": 299,
+        "max": 299,
+        "avg_hits": 1159
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 280,
+        "p95": 442,
+        "p99": 482,
+        "max": 482,
+        "avg_hits": 23156
+      }
+    },
+    {
+      "text_mb": 1000,
+      "docs": 419000,
+      "index_mb": 6312,
+      "index_bytes_per_doc": 15797,
+      "index_to_text": 6.3,
+      "bulk_load_docs_per_s": 637,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 163,
+        "p95": 330,
+        "p99": 333,
+        "max": 333,
+        "avg_hits": 115503
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 160,
+        "p95": 307,
+        "p99": 310,
+        "max": 310,
+        "avg_hits": 5780
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 267,
+        "p95": 528,
+        "p99": 666,
+        "max": 666,
+        "avg_hits": 115503
+      }
+    }
+  ],
+  "md_solr_style_commit_per_page_ms": {
+    "n": 100,
+    "p50": 70,
+    "p95": 112,
+    "p99": 216,
+    "max": 216
+  }
+}
