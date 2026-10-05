@@ -21,6 +21,7 @@ export function perfDescriptor(id: string): any {
             upper: { name: 'Perf one-to-one', description: 'perf', behaviour: 'one-to-one', params: {} },
             pages: { name: 'Perf one-to-many', behaviour: 'one-to-many', output_set: 'Pages', params: {} },
             combine: { name: 'Perf many-to-one', behaviour: 'many-to-one', params: {} },
+            ner: { name: 'Perf NER', behaviour: 'one-to-one', autotag: true, params: {} },
         },
     };
 }
@@ -34,14 +35,29 @@ export interface ConsumerStats {
     completeMs: number[];
 }
 
+export interface FakeOutput {
+    content: string;
+    label: string;
+    type: string;
+    extension: string;
+}
+
+/** A text output, like a one-to-one text service. */
+export function textOutput(msg: any): FakeOutput {
+    const label = `${msg.file?.label || 'file'}.txt`;
+    return { content: `perf output of ${msg.file?.label}`, label, type: 'text', extension: 'txt' };
+}
+
 export class FakeConsumer {
     readonly adapterId = randomUUID();
     readonly topic: string;
+    readonly output: (msg: any) => FakeOutput;
     readonly stats: ConsumerStats = { claimed: 0, callbacks: 0, errors: 0, claimMs: [], callbackMs: [], completeMs: [] };
     private stopped = false;
 
-    constructor(topic: string) {
+    constructor(topic: string, output: (msg: any) => FakeOutput = textOutput) {
         this.topic = topic;
+        this.output = output;
     }
 
     async register(): Promise<void> {
@@ -62,10 +78,10 @@ export class FakeConsumer {
     /** One output per input, like a one-to-one text service. */
     private async answer(job: any): Promise<void> {
         const msg = job.payload;
-        const label = `${msg.file?.label || 'file'}.txt`;
-        const message = { ...msg, response: { time: 0.01 }, file: { ...msg.file, label, type: 'text', extension: 'txt' } };
+        const out = this.output(msg);
+        const message = { ...msg, response: { time: 0.01 }, file: { ...msg.file, label: out.label, type: out.type, extension: out.extension } };
         const form = new FormData();
-        form.append('content', new Blob([`perf output of ${msg.file?.label}`]), label);
+        form.append('content', new Blob([out.content]), out.label);
         form.append('message', new Blob([JSON.stringify(message)], { type: 'application/json' }), 'message.json');
         const res = await call('POST', '/api/nomad/process/files', { service: true, form });
         this.stats.callbackMs.push(res.ms);

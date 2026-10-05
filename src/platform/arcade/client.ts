@@ -209,6 +209,15 @@ export class ArcadeClient {
     }
 
     /**
+     * One record by RID, or null when it is missing or fails `where` (e.g. "@type = 'Entity' AND
+     * owner = :owner"). `SELECT FROM <Type> WHERE @rid = :rid` reads every record of the type: 160 ms
+     * per lookup at 100 000 entities (perf/results/tags.md).
+     */
+    async firstByRid<T = any>(select: string, rid: unknown, where?: string, params?: Record<string, unknown>): Promise<T | null> {
+        return (await this.rowsByRids<T>(select, [rid], where, params))[0] ?? null;
+    }
+
+    /**
      * The edges of one type that end (`in`) or start (`out`) at the given records, found from the
      * records themselves instead of by scanning the edge type. Each row has the edge's `rid`,
      * `target` (@out: the derived node), `source` (@in) and the requested edge properties.

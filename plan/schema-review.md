@@ -82,9 +82,9 @@ backend ignores them, so rollback still works.
 | P2 | Edge-end lookups as traversals from the known vertex (`inE`/`outE`), including delete, set lock, grouping, attachSources | B2, B10, grouping | 300–550 ms → ≈10 ms; grouping 108 s → 23 ms | done |
 | P3 | `SELECT FROM [rids]` instead of `WHERE @rid IN :rids`; traversal instead of `MATCH {type:File, where:(@rid…)}` | @rid IN, source file, PDF thumbnails | 81 s → 19 ms; 478 ms → 8 ms | done |
 | P4 | Declare and index `DERIVED_FROM.process_rid`, `Process.set_process`, `User.id`, `Process.project_rid`, `SetProcess.project_rid` | resume, delete, auth, reindex | 427 ms → 11 ms (process_rid) | done |
-| P5 | Composite indexes `Entity (owner, type, label)` and `TagLink (owner, created_by)` | B13 | to measure in step 4 | open |
+| P5 | Composite indexes `Entity (owner, type, label)` and `TagLink (owner, created_by)` | B13 | `/api/tags` 1.2 s → 0.15 s | Entity index done; TagLink index dropped (wrong results on 25.3.1) |
 | P6 | Access check that walks up from the node to its projects instead of down from all of the user's projects | B1 | 272 ms → 2 ms | done |
-| P7 | Drop the Process node for tag syncs; publish the md-solr `update_tags` job without it. The md-solr adapter only echoes the message to `/done`, which falls back to the file rid when there is no process (results.ts) | B11 | removes one node, one directory and one file per tag change | open |
+| P7 | Drop the Process node for tag syncs; publish the md-solr `update_tags` job without it. The md-solr adapter only echoes the message to `/done`, which falls back to the file rid when there is no process (results.ts) | B11 | removes one node, one directory and one file per tag change | done |
 | P8 | Remove `ErrorNode` and `Person` from the type list and the dead `Filter` conditions | tidiness | – | open |
 
 P1–P4 change only how the backend queries; P6 changes how access is decided, so it needs the

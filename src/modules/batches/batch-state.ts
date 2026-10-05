@@ -21,8 +21,7 @@ export class BatchState {
     async get(processRid: string): Promise<any | null> {
         const rid = tryRid(processRid);
         if (!rid) return null;
-        return await this.db.first('SELECT FROM SetProcess WHERE @rid = :rid LIMIT 1', { rid })
-            || await this.db.first('SELECT FROM Process WHERE @rid = :rid LIMIT 1', { rid });
+        return this.db.firstByRid('', rid, "@type IN ['SetProcess', 'Process']");
     }
 
     static status(batch: any): string | undefined {

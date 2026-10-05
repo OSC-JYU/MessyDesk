@@ -151,7 +151,7 @@ export class NodesService {
     /** Writes <set path>/set.json with the current members. */
     async syncSetManifest(setRid: string): Promise<any> {
         const rid = toRid(setRid);
-        const set = await this.db.first('SELECT @rid, uuid, label, path, count FROM Set WHERE @rid = :rid', { rid });
+        const set = await this.db.firstByRid('@rid, uuid, label, path, count', rid, "@type = 'Set'");
         if (!set) return null;
         let setPath = set.path;
         if (!setPath) {

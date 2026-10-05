@@ -31,6 +31,8 @@ export type TagSync = (fileRid: string, userRid: string, fields: TagFields) => P
 
 export interface LinkMeta {
     region_id?: string | null;
+    /** The caller re-syncs the file's search tags itself, once for many links. */
+    defer_reindex?: boolean;
     created_by?: 'user' | 'machine';
     service_id?: string | null;
     task?: string | null;
@@ -245,10 +247,10 @@ export class TagsService {
         const e = tryRid(entityRid);
         const t = tryRid(targetRid);
         if (!e || !t) return undefined;
-        const entity = await this.db.first('SELECT @rid FROM Entity WHERE @rid = :e AND owner = :owner', { e, owner: userRid });
+        const entity = await this.db.firstByRid('@rid', e, "@type = 'Entity' AND owner = :owner", { owner: userRid });
         if (!entity || !(await this.access.canRead(t, userRid))) return undefined;
         const linked = await this.createTagLink(e, t, userRid, meta);
-        if (!meta.region_id) await this.reindexFileTags(t, userRid);
+        if (!meta.region_id && !meta.defer_reindex) await this.reindexFileTags(t, userRid);
         return linked;
     }
 
@@ -256,7 +258,7 @@ export class TagsService {
         const e = tryRid(entityRid);
         const t = tryRid(targetRid);
         if (!e || !t) return undefined;
-        const entity = await this.db.first('SELECT @rid FROM Entity WHERE @rid = :e AND owner = :owner', { e, owner: userRid });
+        const entity = await this.db.firstByRid('@rid', e, "@type = 'Entity' AND owner = :owner", { owner: userRid });
         if (!entity) return undefined;
         const deleted = await this.db.sql('DELETE FROM TagLink WHERE entity_rid = :e AND target_rid = :t AND region_id IS NULL', { e, t });
         await this.reindexFileTags(t, userRid);
@@ -268,11 +270,11 @@ export class TagsService {
     async pruneOrphanMachineTag(entityRid: string): Promise<void> {
         const e = tryRid(entityRid);
         if (!e) return;
-        const entity = await this.db.first('SELECT created_by FROM Entity WHERE @rid = :e', { e });
+        const entity = await this.db.firstByRid('created_by', e, "@type = 'Entity'");
         if (!entity || entity.created_by !== 'machine') return;
         const count = await this.db.first('SELECT count(*) AS count FROM TagLink WHERE entity_rid = :e', { e });
         if (Number(count?.count || 0) > 0) return;
-        await this.db.sql('DELETE FROM Entity WHERE @rid = :e', { e });
+        await this.db.sql(`DELETE FROM ${e} WHERE @type = 'Entity'`);
     }
 
     /** Removes the links of deleted nodes and prunes machine entities left without links. */
@@ -351,9 +353,11 @@ export class TagsService {
             }
             const entityRid = entity?.['@rid'];
             if (!entityRid) continue;
-            await this.link(entityRid, sourceRid, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence });
+            await this.link(entityRid, sourceRid, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence, defer_reindex: true });
             linked.push({ entity_rid: entityRid, label, confidence });
         }
+        // One search-index update for all labels, not one per label.
+        if (linked.length && tryRid(sourceRid)) await this.reindexFileTags(toRid(sourceRid), userRid);
         return linked;
     }
 
@@ -378,10 +382,11 @@ export class TagsService {
                 const entityRid = entities.get(label);
                 if (!entityRid) continue;
                 const confidence = Number.isFinite(Number(tag.confidence)) ? Number(tag.confidence) : null;
-                const done = await this.link(entityRid, target, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence });
+                const done = await this.link(entityRid, target, userRid, { created_by: 'machine', service_id: message.service?.id || null, task: message.task?.id || null, confidence, defer_reindex: true });
                 if (done) linked.push({ entity_rid: entityRid, target_rid: target, label, confidence });
             }
         }
+        for (const target of new Set(linked.map((l) => toRid(l.target_rid)))) await this.reindexFileTags(target, userRid);
         return linked;
     }
 

@@ -43,9 +43,12 @@ const PROPERTIES = [
     'CREATE PROPERTY Process.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY SetProcess.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY User.id IF NOT EXISTS STRING',
+    'CREATE PROPERTY Entity.type IF NOT EXISTS STRING',
+    'CREATE PROPERTY Entity.label IF NOT EXISTS STRING',
 ];
 
 const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
+    // Composite indexes list their properties comma-separated.
     ['File', 'project_rid', 'NOTUNIQUE'],
     ['File', 'set', 'NOTUNIQUE'],
     // New: lets a thumbnail request find its file (ownership check, plan/decisions.md B3).
@@ -64,6 +67,11 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['Process', 'project_rid', 'NOTUNIQUE'],
     ['SetProcess', 'project_rid', 'NOTUNIQUE'],
     ['User', 'id', 'NOTUNIQUE'],
+    // Tags (perf/results/tags.md): a user's tags sorted by label (/api/tags 1.2 s -> 0.14 s at
+    // 100 000 entities) and finding a tag by type and label for every autotag label. A composite
+    // TagLink (owner, created_by) index was tried and left out: on ArcadeDB 25.3.1 queries on
+    // `owner` alone then returned 24 times too many rows.
+    ['Entity', 'owner, type, label', 'NOTUNIQUE'],
 ];
 
 // Buckets per type. ArcadeDB 23.7.1 gave every type 8 buckets by default; 25.x gives one, and

@@ -506,10 +506,10 @@ export class ProcessingService {
         if (!service?.tasks?.update_tags) return this.solr.updateTagsForFile(fileRid, fields as any);
         const file = await this.files.metadata(fileRid, userRid);
         if (!file) return null;
-        const msg: any = { service, task: { id: 'update_tags', name: service.tasks.update_tags.name || 'Sync tags to search index' }, file, userId: userRid, tag_fields: fields, output_file: false };
-        msg.process = await this.nodes.createProcess(msg);
-        await ensureDir(msg.process.path);
-        await writeJson(path.dirname(msg.process.path), 'message.json', msg);
+        // No Process node (plan/schema-review.md P7): it was one node, one directory and one
+        // message.json per tag change, shown nowhere. The md-solr adapter only echoes the message
+        // to /done, which falls back to the file rid.
+        const msg: any = { service, task: { id: 'update_tags', name: service.tasks.update_tags.name || 'Sync tags to search index' }, file, userId: userRid, tag_fields: fields, output_file: false, process: null };
         await this.publisher.publish(`${service.id}_batch`, msg);
         return null;
     }

@@ -125,7 +125,7 @@ export class NerService {
             const source = { rid: (await this.db.edgesOf('out', 'DERIVED_FROM', [node['@rid']]))[0]?.source };
             if (!source.rid || seen.has(source.rid)) continue;
             seen.add(source.rid);
-            const file = await this.db.first('SELECT @rid AS rid, label, path, type FROM File WHERE @rid = :rid', { rid: source.rid });
+            const file = await this.db.firstByRid('@rid AS rid, label, path, type', source.rid, "@type = 'File'");
             if (file) files.push(file);
         }
         return files;

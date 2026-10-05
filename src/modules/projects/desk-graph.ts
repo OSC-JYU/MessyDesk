@@ -41,12 +41,9 @@ export class DeskGraph {
         if (cache.has(rid)) return cache.get(rid);
         let record = null;
         try {
-            record = await this.db.first(
-                'SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM Process WHERE @rid = :rid LIMIT 1',
-                { rid: toRid(rid) },
-            ) || await this.db.first(
-                'SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM SetProcess WHERE @rid = :rid LIMIT 1',
-                { rid: toRid(rid) },
+            record = await this.db.firstByRid(
+                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description',
+                toRid(rid), "@type IN ['Process', 'SetProcess']",
             );
         } catch {
             record = null;
