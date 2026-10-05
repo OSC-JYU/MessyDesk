@@ -106,13 +106,13 @@ async function main(): Promise<void> {
 
     const registry = new ServiceRegistry(config.serviceRegistryPath, config.consumerTtlSeconds);
     await registry.load();
-    const nodes = new NodesService(db, store, layout);
+    const nodes = new NodesService(db, store, layout, { log: (m) => logger.warn(m) });
     const deskGraph = new DeskGraph(db, config.apiUrl);
     const thumbnails = new ThumbnailService(publisher, layout);
     const importPipeline = new ImportPipeline(store, nodes, registry, publisher, sse);
     const files = new FilesService({ db, store, layout, access, nodes, tags, thumbnails, registry, importPipeline, deskGraph, sse, apiUrl: config.apiUrl, maxVersionTextBytes: config.maxVersionTextBytes });
     const batches = new BatchState(db, store);
-    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl });
+    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
     const graph = new GraphService(db, store, access, tags, solr, layout);
     const filters = new FiltersService(db, store, layout, access, nodes);
@@ -166,6 +166,8 @@ async function main(): Promise<void> {
         logger.info('Shutting down');
         sse.closeAll();
         await server.stop({ timeout: 5000 });
+        await processing.idle();
+        await nodes.flushAllManifests();
         queue.close();
         process.exit(0);
     };

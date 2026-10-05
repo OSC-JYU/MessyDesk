@@ -71,12 +71,16 @@ export class ProcessingService {
     private readonly sse: SseHub;
     private readonly solr: SolrClient;
     private readonly apiUrl: string;
+    private readonly log: (message: string) => void;
+    private readonly dispatching = new Set<Promise<void>>();
 
     constructor(deps: {
         db: ArcadeClient; store: GraphStore; layout: DataLayout; access: AccessService; nodes: NodesService; files: FilesService;
         registry: ServiceRegistry; publisher: Publisher; batches: BatchState; sse: SseHub; solr: SolrClient; apiUrl: string;
+        log?: (message: string) => void;
     }) {
         this.apiUrl = deps.apiUrl;
+        this.log = deps.log || (() => {});
         this.db = deps.db;
         this.store = deps.store;
         this.layout = deps.layout;
@@ -88,6 +92,30 @@ export class ProcessingService {
         this.batches = deps.batches;
         this.sse = deps.sse;
         this.solr = deps.solr;
+    }
+
+    /**
+     * Publishes a batch's jobs after the request has answered. Publishing 10 000 jobs inside the
+     * request took over 5 minutes while consumers were busy, past any proxy timeout
+     * (perf/results/upload-and-batch.md); the UI follows the batch by SSE anyway. A failure is
+     * logged and recorded on the batch node as `dispatch_error`.
+     */
+    private inBackground(batchRid: string, work: () => Promise<unknown>): void {
+        const run: Promise<void> = (async () => {
+            try {
+                await work();
+            } catch (error) {
+                const message = (error as Error)?.message || String(error);
+                this.log(`Dispatching batch ${batchRid} failed: ${message}`);
+                await this.batches.update(batchRid, { dispatch_error: message.slice(0, 500), updated_at: new Date().toISOString() }).catch(() => null);
+            }
+        })().finally(() => this.dispatching.delete(run));
+        this.dispatching.add(run);
+    }
+
+    /** Resolves when every background dispatch has finished (tests, shutdown). */
+    async idle(): Promise<void> {
+        while (this.dispatching.size) await Promise.all([...this.dispatching]);
     }
 
     private service(topic: string): any {
@@ -237,45 +265,51 @@ export class ProcessingService {
             await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, total_files: files.length, search_output: searchOutput });
             this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: processNode, output: outputSet });
             await writeJson(path.dirname(processNode.path), 'params.json', payload);
-            let batchIndex = 1;
-            for (const group of groups) {
-                let groupIndex = 1;
-                for (const f of group.files) {
-                    const msg: any = {
-                        task,
-                        process: processNode,
-                        project_rid: set.project_rid,
-                        set_rid: rid,
-                        input_set: rid,
-                        output_set: outputSet['@rid'],
-                        behaviour,
-                        set_process: processNode['@rid'],
-                        total_files: group.files.length,
-                        current_file: groupIndex,
-                        batch_total_files: files.length,
-                        batch_current_file: batchIndex,
-                        userId: userRid,
-                        file: await this.files.metadata(f['@rid'], userRid),
-                    };
-                    if (group.source_rid) {
-                        msg.root_source = { '@rid': group.source_rid, label: group.label || null, type: group.type || null, path: group.path || null };
-                        msg.root_source_rid = group.source_rid;
-                        msg.root_source_label = group.label || null;
-                        msg.group_size = group.files.length;
+            const dispatchGroups = async () => {
+                let batchIndex = 1;
+                for (const group of groups) {
+                    let groupIndex = 1;
+                    for (const f of group.files) {
+                        // Published after the request: stop when the batch is paused or cancelled meanwhile.
+                        const status = BatchState.status(await this.batches.get(processNode['@rid'])) || 'running';
+                        if (['paused', 'cancelling', 'cancelled', 'done'].includes(status)) return;
+                        const msg: any = {
+                            task,
+                            process: processNode,
+                            project_rid: set.project_rid,
+                            set_rid: rid,
+                            input_set: rid,
+                            output_set: outputSet['@rid'],
+                            behaviour,
+                            set_process: processNode['@rid'],
+                            total_files: group.files.length,
+                            current_file: groupIndex,
+                            batch_total_files: files.length,
+                            batch_current_file: batchIndex,
+                            userId: userRid,
+                            file: await this.files.metadata(f['@rid'], userRid),
+                        };
+                        if (group.source_rid) {
+                            msg.root_source = { '@rid': group.source_rid, label: group.label || null, type: group.type || null, path: group.path || null };
+                            msg.root_source_rid = group.source_rid;
+                            msg.root_source_label = group.label || null;
+                            msg.group_size = group.files.length;
+                        }
+                        if (searchOutput) {
+                            msg.search_output = true;
+                            msg.search_source_set = rid;
+                        }
+                        if (service.tasks?.[task.id]?.source === 'source_file') {
+                            const source = await this.sourceFileOf(f['@rid'], userRid);
+                            if (source) msg.source = source;
+                        }
+                        await this.publisher.publish(`${topic}_batch`, msg);
+                        groupIndex += 1;
+                        batchIndex += 1;
                     }
-                    if (searchOutput) {
-                        msg.search_output = true;
-                        msg.search_source_set = rid;
-                    }
-                    if (service.tasks?.[task.id]?.source === 'source_file') {
-                        const source = await this.sourceFileOf(f['@rid'], userRid);
-                        if (source) msg.source = source;
-                    }
-                    await this.publisher.publish(`${topic}_batch`, msg);
-                    groupIndex += 1;
-                    batchIndex += 1;
                 }
-            }
+            };
+            this.inBackground(processNode['@rid'], dispatchGroups);
             return rid;
         }
 
@@ -289,7 +323,7 @@ export class ProcessingService {
             total_files: files.length,
         });
         this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: nodes.process, output: nodes.set });
-        await this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length });
+        this.inBackground(nodes.process['@rid'], () => this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length }));
         return rid;
     }
 
@@ -459,10 +493,10 @@ export class ProcessingService {
         const pending = listing.files.filter((f: any) => !done.has(f['@rid']));
         const current = BatchState.status(await this.batches.get(rid));
         if (current !== 'resuming' && current !== 'running') throw Boom.conflict(`Batch changed state before dispatch (status: ${current || 'unknown'})`);
-        await this.dispatchBatchFiles({
+        this.inBackground(rid, () => this.dispatchBatchFiles({
             service, task, files: pending, batchRid: rid, inputSet: batch.input_set, outputSet: batch.output_set, userRid,
             total: batch.total_files || listing.files.length, startIndex: Number(batch.processed_files || 0) + 1, searchOutput: batch.search_output === true,
-        });
+        }));
         return { pending: pending.length };
     }
 

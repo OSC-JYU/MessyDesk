@@ -341,7 +341,7 @@ export class ResultsService {
             sse.send(message.userId, { command: 'add', type: message.file.type, input: processRid, node: fileNode, process: { '@rid': processRid, status: 'finished' } });
             return;
         }
-        const count = await nodes.updateFileCount(message.output_set);
+        const count = await nodes.updateFileCount(message.output_set, 'later');
         const total = message.batch_total_files || message.total_files;
         const batchRid = message.set_process || message.process['@rid'];
         const outputTotal = Number(message.file_total || 0);
@@ -357,6 +357,7 @@ export class ResultsService {
         const finished = BatchState.status(batch) === 'done' || (batchTotal && processed >= batchTotal);
         const grouped = message.behaviour === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
         if (finished) {
+            await nodes.flushSetManifest(message.output_set);
             if (isImport) await this.d.importPipeline.complete(message);
             sse.send(message.userId, {
                 command: 'process_finished',
@@ -401,6 +402,7 @@ export class ResultsService {
             if (node) await store.setAttribute(node['@rid'], 'summary', message.summary);
         }
         if (BatchState.status(batch) === 'done' || (total > 0 && current >= total)) {
+            if (message.output_set) await this.d.nodes.flushSetManifest(message.output_set);
             sse.send(message.userId, { command: 'process_finished', process: { ...(message.process || {}), '@rid': batchRid, status: 'done' }, summary: message.summary || null });
         }
     }

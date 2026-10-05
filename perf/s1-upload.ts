@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { call, get, JPEG_1x1, percentiles, post, rid } from './lib/http.ts';
+import { call, get, JPEG_1x1, percentiles, post, rid, sleep } from './lib/http.ts';
 
 const { values: args } = parseArgs({
     options: {
@@ -73,7 +73,8 @@ async function main(): Promise<void> {
     }
     const curve = [...buckets.entries()].sort((a, b) => a[0] - b[0]).map(([from, ms]) => ({ set_size_from: from, ...percentiles(ms) }));
 
-    // Consistency: stored count, members, set.json.
+    // Consistency: stored count, members, set.json (written once the set has been quiet for 5 s).
+    await sleep(7000);
     const listing = await get(`/api/sets/${rid(setRid)}/files?limit=1`);
     const node = await get(`/api/documents/${rid(setRid)}`).catch(() => null);
     let manifestItems: number | null = null;

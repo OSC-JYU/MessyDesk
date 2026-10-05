@@ -88,3 +88,12 @@ Not part of this rewrite. To fix later in MD-consumers:
 7. The pause/resume/cancel control server is never consulted and registers a `localhost` URL.
 
 Details: [consumer-calls.md §7](consumer-calls.md).
+
+## G. Performance (2026-10-05)
+
+Decided by Ari after the upload and batch tests ([../perf/results/upload-and-batch.md](../perf/results/upload-and-batch.md)).
+
+| # | Decision |
+|---|---|
+| G1 | `set.json` is written once, not for every added file: when the set has had no new files for 5 s, when a batch finishes, and on shutdown. Nothing in the backend, UI or consumers reads it |
+| G2 | Starting a set batch (`POST /api/queue/{topic}/sets/{rid}`) and resuming one answer as soon as the batch node exists; the jobs are published in the background. A dispatch failure is logged and stored on the batch as `dispatch_error` |

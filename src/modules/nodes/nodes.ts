@@ -31,10 +31,16 @@ export class NodesService {
     private readonly store: GraphStore;
     private readonly layout: DataLayout;
 
-    constructor(db: ArcadeClient, store: GraphStore, layout: DataLayout) {
+    private readonly log: (message: string) => void;
+    private readonly manifestDelayMs: number;
+    private readonly manifestTimers = new Map<string, NodeJS.Timeout>();
+
+    constructor(db: ArcadeClient, store: GraphStore, layout: DataLayout, opts: { log?: (message: string) => void; manifestDelayMs?: number } = {}) {
         this.db = db;
         this.store = store;
         this.layout = layout;
+        this.log = opts.log || (() => {});
+        this.manifestDelayMs = opts.manifestDelayMs ?? 5000;
     }
 
     // ---- sets --------------------------------------------------------------------------
@@ -94,13 +100,52 @@ export class NodesService {
         return rows.map((r) => r.rid).filter(Boolean);
     }
 
-    async updateFileCount(setRid: string): Promise<number> {
+    /**
+     * Stores the set's member count. The manifest is written once the set stops changing
+     * (`manifest: 'later'`, for files added one by one) or right away.
+     */
+    async updateFileCount(setRid: string, manifest: 'now' | 'later' = 'now'): Promise<number> {
         const rid = toRid(setRid);
         const row = await this.db.first('SELECT count(*) AS count FROM File WHERE set = :set', { set: rid });
         const count = Number(row?.count || 0);
         await this.store.setAttribute(rid, 'count', count);
-        await this.syncSetManifest(rid);
+        if (manifest === 'now') await this.flushSetManifest(rid);
+        else this.scheduleSetManifest(rid);
         return count;
+    }
+
+    /**
+     * set.json lists every member, so rewriting it for each added file made uploads and batches
+     * slower with every file (O(N²), perf/results/upload-and-batch.md). Files added one by one only
+     * schedule a write; it happens when the set has had no new files for `manifestDelayMs`, or
+     * when the upload or batch finishes and calls flushSetManifest.
+     */
+    scheduleSetManifest(setRid: string): void {
+        const rid = toRid(setRid);
+        const pending = this.manifestTimers.get(rid);
+        if (pending) clearTimeout(pending);
+        const timer = setTimeout(() => {
+            this.manifestTimers.delete(rid);
+            this.syncSetManifest(rid).catch((error) => this.log(`set.json write failed for ${rid}: ${(error as Error).message}`));
+        }, this.manifestDelayMs);
+        timer.unref();
+        this.manifestTimers.set(rid, timer);
+    }
+
+    /** Writes a set's set.json now, replacing a scheduled write. */
+    async flushSetManifest(setRid: string): Promise<void> {
+        const rid = toRid(setRid);
+        const pending = this.manifestTimers.get(rid);
+        if (pending) clearTimeout(pending);
+        this.manifestTimers.delete(rid);
+        await this.syncSetManifest(rid);
+    }
+
+    /** Writes every scheduled set.json (on shutdown). */
+    async flushAllManifests(): Promise<void> {
+        for (const rid of [...this.manifestTimers.keys()]) {
+            await this.flushSetManifest(rid).catch((error) => this.log(`set.json write failed for ${rid}: ${(error as Error).message}`));
+        }
     }
 
     /** Writes <set path>/set.json with the current members. */
@@ -236,7 +281,7 @@ export class NodesService {
         node.path = filePath;
         if (setRid) {
             await this.store.setAttribute(node['@rid'], 'set', toRid(setRid));
-            await this.updateFileCount(setRid);
+            await this.updateFileCount(setRid, 'later');
         }
         return node;
     }
@@ -275,7 +320,7 @@ export class NodesService {
         const source = this.lineageSource(msg, fallback);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (source) await this.store.connectDerivedFrom(node['@rid'], source, processRid);
-        if (msg.output_set) await this.syncSetManifest(msg.output_set);
+        if (msg.output_set) this.scheduleSetManifest(msg.output_set);
         return node;
     }
 
@@ -304,7 +349,7 @@ export class NodesService {
         const lineage = this.lineageSource(msg, ref);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (lineage) await this.store.connectDerivedFrom(node['@rid'], lineage, processRid);
-        if (msg.output_set) await this.syncSetManifest(msg.output_set);
+        if (msg.output_set) this.scheduleSetManifest(msg.output_set);
         return node;
     }
 
@@ -331,7 +376,7 @@ export class NodesService {
         node.path = filePath;
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         await this.store.connectDerivedFrom(node['@rid'], msg.file['@rid'], processRid);
-        if (msg.output_set) await this.syncSetManifest(msg.output_set);
+        if (msg.output_set) this.scheduleSetManifest(msg.output_set);
         return node;
     }
 

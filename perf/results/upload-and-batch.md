@@ -1,5 +1,8 @@
 # S1 upload and S5 batch (2026-10-05)
 
+**Update:** Ari decided both questions at the end (plan/decisions.md G1, G2); the fixes and the
+reruns are in "After G1 and G2" at the end.
+
 Scenarios S1 and S5 of [plan/performance-testing.md](../../plan/performance-testing.md), run against the
 backend itself (`node dist/src/main.js`) with the query fixes of step 1, on ArcadeDB 25.3.1 unless
 noted, on the same laptop as step 1. Uploads are 1×1 JPEGs without thumbnails; batches use the fake
@@ -83,3 +86,23 @@ version of the check also counted the output set's own edge.
    come before the jobs are queued. OK to change?
 3. **ArcadeDB version**: 25.3.1 has the parallel-write bug above. If production moves to a newer
    ArcadeDB, use a newer stable release than 25.3.1 (the build that passed was a snapshot).
+
+## After G1 and G2
+
+`set.json` is now written once (5 s after a set's last change, when a batch finishes, and on
+shutdown), and a batch's jobs are published after the start request has answered. Same tests, new
+database:
+
+| | Before | After |
+|---|---|---|
+| S1: upload 10 000 files (chunks of 20, 3 parallel) | 273 s (37 files/s) | **79 s (127 files/s)** |
+| S1: chunk of 20 at 9 000–10 000 files, p50 | 2.72 s | **0.58 s** |
+| S5: start request, 16 consumers already working | 279 s | **0.28 s** |
+| S5: outputs per minute, 16 consumers | 1 281–1 451 | **4 600** |
+| S5: result callback p50 (first / last third of the batch) | 0.54 / 0.61 s | **0.13 / 0.13 s** |
+
+All checks pass: 10 000 members, stored count and `set.json` items after the upload; 10 000 outputs,
+one per input, `processed_files` 10 000, status `done`, and 10 000 items in the output set's
+`set.json` after the batch. Callback time no longer grows with the set. Contract tests: 68 of 71 on
+both ArcadeDB versions, as before; the test that listed a batch's jobs right after starting it now
+waits for them (G2).
