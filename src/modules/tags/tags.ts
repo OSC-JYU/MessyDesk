@@ -359,9 +359,13 @@ export class TagsService {
     /** Removes the links of deleted nodes and prunes machine entities left without links. */
     async removeLinksOf(targetRids: string[]): Promise<void> {
         if (!targetRids.length) return;
-        const affected = await this.db.rows('SELECT DISTINCT entity_rid AS rid FROM TagLink WHERE target_rid IN :targets', { targets: targetRids });
-        await this.db.sql('DELETE FROM TagLink WHERE target_rid IN :targets', { targets: targetRids });
-        for (const row of affected) await this.pruneOrphanMachineTag(row.rid);
+        const affected = new Set<string>();
+        for (let i = 0; i < targetRids.length; i += 1000) {
+            const targets = targetRids.slice(i, i + 1000);
+            for (const row of await this.db.rows('SELECT DISTINCT entity_rid AS rid FROM TagLink WHERE target_rid IN :targets', { targets })) affected.add(row.rid);
+            await this.db.sql('DELETE FROM TagLink WHERE target_rid IN :targets', { targets });
+        }
+        for (const rid of affected) await this.pruneOrphanMachineTag(rid);
     }
 
     /** Removes the machine links a deleted ner.json run produced on its source file. */

@@ -99,7 +99,10 @@ export class ArcadeClient {
 
     private async run<T>(language: string, command: string, params: Record<string, unknown> | undefined, options: QueryOptions): Promise<ArcadeEnvelope<T>> {
         const retries = options.retries ?? this.opts.writeRetries;
-        const body: Record<string, unknown> = { language, command };
+        // The HTTP API returns at most 20 000 rows unless told otherwise (23.7.1 and 26.x alike),
+        // which silently cut, for example, the files of a big desk being deleted. -1 means "no
+        // limit" on 26.x but returns nothing on 23.7.1, so a large number is used.
+        const body: Record<string, unknown> = { language, command, limit: 100_000_000 };
         if (params && Object.keys(params).length) body.params = params;
         if (options.serializer) body.serializer = options.serializer;
         let lastError: DbError | Error | null = null;

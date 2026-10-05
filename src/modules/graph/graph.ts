@@ -124,43 +124,63 @@ export class GraphService {
             const clean = tryRid(value);
             if (clean && !visited.has(clean)) queue.push(clean);
         };
+        // Breadth-first, a level at a time: the nodes, their edges and their members are read
+        // for the whole level at once (one query per node took 40 s for a 10 000-file set).
         while (queue.length) {
-            const current = queue.pop()!;
-            if (visited.has(current)) continue;
-            visited.add(current);
-            const node = await this.db.first(`SELECT @rid, @type, path, uuid, service, ref, type AS file_type, service_id, task FROM ${current}`).catch((error) => {
-                if (/404|not found/i.test(String(error?.message) + String(error?.detail))) return null;
-                throw error;
-            });
-            if (!node?.['@rid']) continue;
-            toDelete.add(node['@rid']);
-            if (node.service === 'Solr') solrProcesses.add(node['@rid']);
-            if (node['@type'] === 'File') {
-                files.add(node['@rid']);
-                if (AUTOTAG_SOURCE_FILE_TYPES.includes(node.file_type)) nerRuns.add(node['@rid']);
-            }
-            const isReference = node['@type'] === 'File' && Boolean(node.ref);
-            if (node.path && node['@type'] !== 'Filter' && !isReference) {
-                if (node['@type'] === 'File' && !this.ownsDirectory(node)) {
-                    // e.g. roi.json, stored next to its image: remove only the file, never the
-                    // image's directory (the old backend removed the whole directory).
-                    singleFiles.add(node.path);
-                } else {
-                    paths.add(node['@type'] === 'Process' && path.basename(node.path) === 'files' ? path.dirname(node.path) : node.path);
+            const level = [...new Set(queue.splice(0))].filter((r) => !visited.has(r));
+            if (!level.length) continue;
+            level.forEach((r) => visited.add(r));
+            const nodes = await this.db.rowsByRids<any>('@rid, @type, path, uuid, service, ref, type AS file_type, service_id, task', level);
+            const found = nodes.map((n) => n['@rid']).filter(Boolean);
+            const sets: string[] = [];
+            const setProcesses: string[] = [];
+            const projects: string[] = [];
+            for (const node of nodes) {
+                if (!node?.['@rid']) continue;
+                toDelete.add(node['@rid']);
+                if (node.service === 'Solr') solrProcesses.add(node['@rid']);
+                if (node['@type'] === 'File') {
+                    files.add(node['@rid']);
+                    if (AUTOTAG_SOURCE_FILE_TYPES.includes(node.file_type)) nerRuns.add(node['@rid']);
+                }
+                if (node['@type'] === 'Set') sets.push(node['@rid']);
+                if (node['@type'] === 'SetProcess') setProcesses.push(node['@rid']);
+                if (node['@type'] === 'Project') {
+                    projects.push(node['@rid']);
+                    paths.add(this.layout.projectDir(node['@rid']));
+                }
+                const isReference = node['@type'] === 'File' && Boolean(node.ref);
+                if (node.path && node['@type'] !== 'Filter' && !isReference) {
+                    if (node['@type'] === 'File' && !this.ownsDirectory(node)) {
+                        // e.g. roi.json, stored next to its image: remove only the file, never the
+                        // image's directory (the old backend removed the whole directory).
+                        singleFiles.add(node.path);
+                    } else {
+                        paths.add(node['@type'] === 'Process' && path.basename(node.path) === 'files' ? path.dirname(node.path) : node.path);
+                    }
                 }
             }
-            // Edges are read from the node itself (and by the indexed process_rid), not by scanning
-            // DERIVED_FROM: three scans per deleted node made deleting a set take minutes.
-            for (const edge of await this.db.edgesOf('both', 'DERIVED_FROM', [current], ['process_rid'])) {
-                if (edge.source === current) enqueue(edge.target); // an output of this node
+            if (!found.length) continue;
+            const inLevel = new Set(found);
+            // Edges are read from the nodes themselves (and by the indexed process_rid), not by
+            // scanning DERIVED_FROM.
+            for (const edge of await this.db.edgesOf('both', 'DERIVED_FROM', found, ['process_rid'])) {
+                if (inLevel.has(edge.source)) enqueue(edge.target); // an output of a node in this level
                 enqueue(edge.process_rid);
             }
-            for (const rel of await this.db.rows('SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = :rid', { rid: current })) enqueue(rel.rid);
-            if (node['@type'] === 'Set') {
-                for (const f of await this.db.rows('SELECT @rid AS rid FROM File WHERE set = :rid', { rid: current })) enqueue(f.rid);
+            for (let i = 0; i < found.length; i += 500) {
+                const chunk = found.slice(i, i + 500);
+                for (const rel of await this.db.rows('SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid IN :rids', { rids: chunk })) enqueue(rel.rid);
             }
-            if (node['@type'] === 'SetProcess') {
-                for (const p of await this.db.rows('SELECT @rid AS rid FROM Process WHERE set_process = :rid', { rid: current })) enqueue(p.rid);
+            if (sets.length) for (const f of await this.db.rows('SELECT @rid AS rid FROM File WHERE set IN :sets', { sets })) enqueue(f.rid);
+            if (setProcesses.length) for (const p of await this.db.rows('SELECT @rid AS rid FROM Process WHERE set_process IN :rids', { rids: setProcesses })) enqueue(p.rid);
+            // A desk takes everything on it. Deleting a desk used to remove only the Project
+            // node, leaving its files, sets, processes, tag links and directories behind.
+            for (const project of projects) {
+                for (const edge of await this.db.edgesOf('in', 'BELONGS_TO', [project])) enqueue(edge.target);
+                for (const type of ['File', 'Set', 'Process', 'SetProcess', 'Source']) {
+                    for (const row of await this.db.rows(`SELECT @rid AS rid FROM ${type} WHERE project_rid = :p`, { p: project })) enqueue(row.rid);
+                }
             }
         }
 
@@ -173,8 +193,18 @@ export class GraphService {
             if (!toDelete.has(source.rid)) await this.tags.reindexFileTags(source.rid, userRid);
         }
         await this.tags.removeLinksOf([...toDelete]);
-        for (const fileRid of files) await this.solr.dropFileIndex(fileRid);
-        for (const target of toDelete) await this.db.sql(`DELETE FROM ${target}`);
+        await this.solr.dropFilesIndex([...files]);
+        // In chunks: one statement per node made a 20 000-node delete take minutes.
+        const targets = [...toDelete];
+        for (let i = 0; i < targets.length; i += 500) {
+            const chunk = targets.slice(i, i + 500);
+            try {
+                await this.db.sql(`DELETE FROM [${chunk.join(', ')}]`);
+            } catch {
+                // A node that went away meanwhile fails the whole chunk: delete one by one.
+                for (const target of chunk) await this.db.sql(`DELETE FROM ${target}`).catch(() => null);
+            }
+        }
         for (const p of singleFiles) await fsp.rm(p, { force: true }).catch(() => {});
         const sorted = [...paths].sort((a, b) => b.length - a.length);
         for (const p of sorted) await removeNodePath(p, this.layout.dataDir).catch(() => {});

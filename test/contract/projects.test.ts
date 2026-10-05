@@ -279,7 +279,7 @@ test('traverse and ancestors', async () => {
 
 test('DELETE /api/projects/{rid} removes the project', async () => {
     const project = await createProject();
-    await upload(project['@rid'], [{ name: 'd.txt', type: 'text/plain', content: 'd' }]);
+    const file = (await upload(project['@rid'], [{ name: 'd.txt', type: 'text/plain', content: 'd' }])).body;
     await ensureOtherUser();
     const foreign = await del(`/api/projects/${stripHash(project['@rid'])}`, { user: OTHER });
     assert.equal(foreign.status, 404);
@@ -288,6 +288,11 @@ test('DELETE /api/projects/{rid} removes the project', async () => {
     assert.equal(res.body, project['@rid']);
     const list = await get('/api/projects');
     assert.ok(!list.body.find((p: any) => p['@rid'] === project['@rid']));
+    if (process.env.TARGET !== 'old') {
+        // The desk's content goes with it (the old backend left files behind).
+        const gone = await get(`/api/files/${stripHash(file['@rid'])}`);
+        assert.equal(gone.status, 404);
+    }
 });
 
 test('set zip job: queued job and status', async () => {

@@ -125,6 +125,22 @@ export class SolrClient {
         return this.deleteByQuery(`node:"${escapeSolrValue(fileRid)}"`);
     }
 
+    /**
+     * All docs of many files, with one commit at the end. One delete-and-commit per file made
+     * deleting a 10 000-file set spend most of its time in Solr commits (perf/results/delete.md).
+     */
+    async dropFilesIndex(fileRids: string[]): Promise<void> {
+        for (let i = 0; i < fileRids.length; i += 500) {
+            const chunk = fileRids.slice(i, i + 500).map((r) => `"${escapeSolrValue(r)}"`).join(' OR ');
+            try {
+                await this.postJson('/update', { delete: { query: `node:(${chunk})` } });
+            } catch (error) {
+                this.log(`Solr delete error: ${(error as Error).message}`);
+            }
+        }
+        if (fileRids.length) await this.postJson('/update?commit=true', { commit: {} }).catch((error) => this.log(`Solr commit error: ${(error as Error).message}`));
+    }
+
     async dropProjectIndex(userRid: string, projectRid: string): Promise<any> {
         const values = projectRidVariants(projectRid);
         if (!values.length) return { responseHeader: { status: 0 }, message: 'no project rid' };
