@@ -1,5 +1,8 @@
 # Step 1: query profile (2026-10-05)
 
+**Update:** the fixes below are now in the backend (P1–P4 and the access check of
+[plan/schema-review.md](../../plan/schema-review.md)); see "After the fixes" at the end.
+
 Plan step 1 of [plan/performance-testing.md](../../plan/performance-testing.md): the queries behind
 the suspected bottlenecks, run with the backend's statements and parameters on direct-loaded data.
 Raw numbers and execution plans are in `perf_profile.profile.{S,M,L}.json` next to this file.
@@ -25,23 +28,23 @@ Median ms. "Scan" means ArcadeDB read every record of the type (from PROFILE).
 
 | Bottleneck | Query (code) | S | M | L | Scan | Verdict |
 |---|---|---|---|---|---|---|
-| B2 | edge lookup in `connectDerivedFrom` (graph-store.ts:413), runs for **every output file** | 4 | 254 | 325 | DERIVED_FROM | **confirmed**, grows with the whole database |
-| B2 | `processedSetRids` (desk-graph.ts:606), runs on every upload into a set and every desk open | 11 | 741 | 920 | DERIVED_FROM | **confirmed** |
-| B2 | `processedInputs` (batch-state.ts:90), batch resume | 10 | 341 | 427 | DERIVED_FROM | **confirmed** |
-| B10 | delete: outputs of a node (graph.ts:155) | 5 | 308 | 397 | DERIVED_FROM | **confirmed**; 3 such scans per deleted node |
-| B10 | delete: edges either way (graph.ts:160) | 6 | 428 | 548 | DERIVED_FROM | **confirmed** |
-| B3 | `projectRidOf` (graph-store.ts:427) | 19 | 1 068 | 1 303 | Project, then in-edges | **confirmed** |
-| new | `sourceFileOf` / `files.source` / `usePdfThumbnail` MATCH from `{type:File, where:(@rid = …)}` (processing.ts:124, files.ts:177, desk-graph.ts:624, results.ts:169) | 6 | 378 | 478 | **File** | **new finding**: the MATCH reads every File to find one rid. `usePdfThumbnail` runs it per PDF on a set page (B15) |
-| new | many-to-one grouping, parents of 1 000 files: `DERIVED_FROM WHERE @out IN :rids` (grouping.ts:63) | 767 | 86 943 | 108 378 | DERIVED_FROM, then the IN list per record | **broken**: 108 s for a 1 000-file set; a many-to-one run over a PDF set cannot start |
-| new | 500 files by `File WHERE @rid IN :rids` (processing.ts:307, grouping.ts:73, tags.ts:177) | – | – | 81 372 | **File** | **broken**: 81 s for 500 rids. Whole-set runs (`attachSources`) do this per 500 files |
-| B1 | `access.findOwned` (access.ts:28), runs on **every request with a rid** | 28 | 12 | 272 | Project, User; then walks the user's projects | **confirmed**, grows with the user's own data (6 k → 156 k files: 12 → 272 ms) |
-| B8 | desk MATCH (desk-graph.ts:463), small project | 27 | 14 | 14 | – | not a problem at 6 000 files; needs S3 with a 100 000-page project |
-| B8 | `decorateSets` all members (desk-graph.ts:563) | 82 | 78 | 71 | – | 6 000 rows; grows with the project, not the database |
-| B9 | project list count, per project (projects.ts:79) | 44 | 34 | 33 | – | per project; the list runs it for every project, so a user with 11 projects pays 11 traversals |
-| B14 | set listing: count, first page, last page (files.ts:260) | 4–6 | 2–5 | 2–4 | – | fine: uses the `File.set` index |
-| B5/B6 | set run read, 10 000 limit (processing.ts:222) | 26 | 18 | 17 | – | fine at 1 000; per-file `findOwned` in the dispatch loop is the cost (B1 × N) |
-| B4 | `syncSetManifest` items (nodes.ts:118) | 10 | 8 | 8 | – | 8 ms × every added file: O(N²) per set but small at 10 000 (≈ 80 s of DB time per 10 000-file set) |
-| B7 | `batches.get` by @rid (batch-state.ts:24) | – | – | 1 | – | fine |
+| B2 | edge lookup in `connectDerivedFrom` (graph-store.ts), runs for **every output file** | 4 | 254 | 325 | DERIVED_FROM | **confirmed**, grows with the whole database |
+| B2 | `processedSetRids` (desk-graph.ts), runs on every upload into a set and every desk open | 11 | 741 | 920 | DERIVED_FROM | **confirmed** |
+| B2 | `processedInputs` (batch-state.ts), batch resume | 10 | 341 | 427 | DERIVED_FROM | **confirmed** |
+| B10 | delete: outputs of a node (graph.ts) | 5 | 308 | 397 | DERIVED_FROM | **confirmed**; 3 such scans per deleted node |
+| B10 | delete: edges either way (graph.ts) | 6 | 428 | 548 | DERIVED_FROM | **confirmed** |
+| B3 | `projectRidOf` (graph-store.ts) | 19 | 1 068 | 1 303 | Project, then in-edges | **confirmed** |
+| new | `sourceFileOf` / `files.source` / `usePdfThumbnail` MATCH from `{type:File, where:(@rid = …)}` (processing.ts, files.ts, desk-graph.ts, results.ts) | 6 | 378 | 478 | **File** | **new finding**: the MATCH reads every File to find one rid. `usePdfThumbnail` runs it per PDF on a set page (B15) |
+| new | many-to-one grouping, parents of 1 000 files: `DERIVED_FROM WHERE @out IN :rids` (grouping.ts) | 767 | 86 943 | 108 378 | DERIVED_FROM, then the IN list per record | **broken**: 108 s for a 1 000-file set; a many-to-one run over a PDF set cannot start |
+| new | 500 files by `File WHERE @rid IN :rids` (processing.ts, grouping.ts, tags.ts) | – | – | 81 372 | **File** | **broken**: 81 s for 500 rids. Whole-set runs (`attachSources`) do this per 500 files |
+| B1 | `access.findOwned` (access.ts), runs on **every request with a rid** | 28 | 12 | 272 | Project, User; then walks the user's projects | **confirmed**, grows with the user's own data (6 k → 156 k files: 12 → 272 ms) |
+| B8 | desk MATCH (desk-graph.ts), small project | 27 | 14 | 14 | – | not a problem at 6 000 files; needs S3 with a 100 000-page project |
+| B8 | `decorateSets` all members (desk-graph.ts) | 82 | 78 | 71 | – | 6 000 rows; grows with the project, not the database |
+| B9 | project list count, per project (projects.ts) | 44 | 34 | 33 | – | per project; the list runs it for every project, so a user with 11 projects pays 11 traversals |
+| B14 | set listing: count, first page, last page (files.ts) | 4–6 | 2–5 | 2–4 | – | fine: uses the `File.set` index |
+| B5/B6 | set run read, 10 000 limit (processing.ts) | 26 | 18 | 17 | – | fine at 1 000; per-file `findOwned` in the dispatch loop is the cost (B1 × N) |
+| B4 | `syncSetManifest` items (nodes.ts) | 10 | 8 | 8 | – | 8 ms × every added file: O(N²) per set but small at 10 000 (≈ 80 s of DB time per 10 000-file set) |
+| B7 | `batches.get` by @rid (batch-state.ts) | – | – | 1 | – | fine |
 | B12 | tags: grouped entities, project filter, set entities | 8–40 | 8–18 | 8–19 | – | fine at 1 000 entities / 4 000 links; tag scale not grown yet |
 | B13 | `findEntity`, `machineTags` | 2–14 | 2–10 | 2–10 | TagLink (machineTags) | fine at 4 000 links; `machineTags` scans all TagLinks, grow in step 4 |
 | – | `isProjectOwner`, `createTagLink` lookup, `pruneOrphanMachineTag` | ≈1 | ≈1 | ≈1 | – | fine |
@@ -89,3 +92,32 @@ lost vertex. The loader now retries the whole script instead, and a check after 
 duplicate edges. The backend does not use sqlscript, so this does not affect it. Also seen: all
 inserts of one type go to a single bucket, and parallel loaders conflict on its pages
 (`ConcurrentModificationException`); parallel consumer callbacks will hit the same, which S5 measures.
+
+## After the fixes
+
+The backend now reads lineage from the node itself (`ArcadeClient.edgesOf`), reads known records
+by RID (`ArcadeClient.rowsByRids`), walks up from the node for `projectRidOf`, the access check and
+the source-file lookup, and has indexes on `DERIVED_FROM.process_rid`, `Process.set_process`,
+`Process.project_rid`, `SetProcess.project_rid` and `User.id`. Timed by calling the backend's own
+functions on the L dataset (`perf/profile-code.ts`, `perf_profile.code.after.json`):
+
+| Code path | Before (L) | After (L) |
+|---|---|---|
+| `access.findOwned` (every request with a rid) | 272 ms | 2 ms |
+| `store.projectRidOf` | 1 303 ms | 0.8 ms |
+| `store.connectDerivedFrom` (every output file) | 325 ms + create | 3 ms in total |
+| source file lookup (`files.source`, `usePdfThumbnail`, `sourceFileOf`) | 478 ms | 0.7–0.9 ms |
+| `desk.processedSetRids` (upload into a set, desk open) | 920 ms | 0.9 ms |
+| `batches.processedInputs` (resume) | 427 ms | 5 ms |
+| `batches.outputFor`, `processOfSet` | – , 1 ms | 2 ms, 2 ms |
+| many-to-one grouping of 1 000 files | 108 s | 54 ms |
+| 500 files by RID | 81 s | 3 ms |
+| delete: edge lookups per node | 0.4 + 0.5 s (+ process_rid 0.4 s) | 0.8 ms + 4 ms |
+| `tags.groupedEntities` with project filter, `setEntities` | 37 ms, 8 ms | 45 ms, 19 ms |
+
+Building the new indexes on the L database took under a second at startup (`ensureSchema`).
+The tag queries are slightly slower because entities are now fetched by RID in chunks; they stay
+well under the limits and get their own scale test in step 4.
+
+Contract tests: 68 of 71 pass on both ArcadeDB 25.3.1 and 23.7.1, the same as before the change
+(2 skipped by design; `set zip job` fails in both runs because no md-zip consumer was running).

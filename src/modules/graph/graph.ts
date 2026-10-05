@@ -8,7 +8,7 @@ import { toRid, tryRid } from '../../platform/ids.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
 import { removeNodePath } from '../../platform/storage/fsutil.ts';
 import type { SolrClient } from '../../platform/solr/solr.ts';
-import { assertIdentifier, type GraphStore } from '../../shared/graph-store.ts';
+import { assertIdentifier, sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
 import type { AccessService } from '../access/access.ts';
 import type { TagsService } from '../tags/tags.ts';
 
@@ -58,10 +58,7 @@ export class GraphService {
         const out = [];
         let current = toRid(fileRid);
         for (let depth = 0; depth < maxDepth; depth += 1) {
-            const row = await this.db.first(
-                'MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source.@rid AS rid, source.label AS label, source.type AS type, source.extension AS extension, source.path AS path, source.@type AS node_type',
-                { rid: current },
-            );
+            const row = await sourceFileOf<any>(this.db, current, '@rid AS rid, label, type, extension, path, @type AS node_type');
             if (!row?.rid) break;
             out.push({ '@rid': row.rid, label: row.label, type: row.type, extension: row.extension, path: row.path, '@type': row.node_type });
             current = row.rid;
@@ -152,12 +149,13 @@ export class GraphService {
                     paths.add(node['@type'] === 'Process' && path.basename(node.path) === 'files' ? path.dirname(node.path) : node.path);
                 }
             }
-            for (const rel of await this.db.rows('SELECT @out AS rid, process_rid FROM DERIVED_FROM WHERE @in = :rid', { rid: current })) {
-                enqueue(rel.rid);
-                enqueue(rel.process_rid);
+            // Edges are read from the node itself (and by the indexed process_rid), not by scanning
+            // DERIVED_FROM: three scans per deleted node made deleting a set take minutes.
+            for (const edge of await this.db.edgesOf('both', 'DERIVED_FROM', [current], ['process_rid'])) {
+                if (edge.source === current) enqueue(edge.target); // an output of this node
+                enqueue(edge.process_rid);
             }
             for (const rel of await this.db.rows('SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = :rid', { rid: current })) enqueue(rel.rid);
-            for (const edge of await this.db.rows('SELECT process_rid FROM DERIVED_FROM WHERE @in = :rid OR @out = :rid', { rid: current })) enqueue(edge.process_rid);
             if (node['@type'] === 'Set') {
                 for (const f of await this.db.rows('SELECT @rid AS rid FROM File WHERE set = :rid', { rid: current })) enqueue(f.rid);
             }
@@ -168,8 +166,8 @@ export class GraphService {
 
         for (const processRid of solrProcesses) await this.solr.dropProcessIndex(processRid);
         for (const nerRid of nerRuns) {
-            const source = await this.db.first('SELECT @in AS rid FROM DERIVED_FROM WHERE @out = :rid', { rid: nerRid });
-            if (!source?.rid) continue;
+            const source = { rid: (await this.db.edgesOf('out', 'DERIVED_FROM', [nerRid]))[0]?.source };
+            if (!source.rid) continue;
             const run = await this.db.first(`SELECT service_id, task FROM ${nerRid}`);
             await this.tags.removeMachineLinksOfRun(source.rid, run?.service_id || null, run?.task || null);
             if (!toDelete.has(source.rid)) await this.tags.reindexFileTags(source.rid, userRid);

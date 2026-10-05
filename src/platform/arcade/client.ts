@@ -193,4 +193,64 @@ export class ArcadeClient {
         }
         return this.rows<T>(`TRAVERSE ${direction}(${edgeList}) FROM :rid`, { rid });
     }
+
+    // ---- reading known records ------------------------------------------------------------
+
+    /**
+     * `SELECT <select> FROM [rid, ...] [WHERE <where>]`: reads records by RID directly. The
+     * equivalent `SELECT FROM <Type> WHERE @rid IN :rids` reads every record of the type and checks
+     * each against the list (81 s for 500 RIDs among 756 000 files, perf/results/step1-query-profile.md).
+     * RIDs are validated and inlined, since a bound parameter is not accepted as the target; they
+     * go in chunks of 500. A missing record fails the whole statement, so a chunk that fails that
+     * way is read again one RID at a time, skipping the missing ones.
+     */
+    async rowsByRids<T = any>(select: string, rids: Iterable<unknown>, where?: string, params?: Record<string, unknown>): Promise<T[]> {
+        return this.readByRids<T>(rids, (target) => `SELECT ${select} FROM ${target}${where ? ` WHERE ${where}` : ''}`, params);
+    }
+
+    /**
+     * The edges of one type that end (`in`) or start (`out`) at the given records, found from the
+     * records themselves instead of by scanning the edge type. Each row has the edge's `rid`,
+     * `target` (@out: the derived node), `source` (@in) and the requested edge properties.
+     */
+    async edgesOf<T = any>(direction: 'in' | 'out' | 'both', edge: string, rids: Iterable<unknown>, properties: string[] = [], where?: string, params?: Record<string, unknown>): Promise<T[]> {
+        const fields = ['@rid AS rid', '@out AS target', '@in AS source', ...properties].join(', ');
+        return this.readByRids<T>(rids, (target) => `SELECT ${fields} FROM (SELECT expand(${direction}E("${edge}")) FROM ${target})${where ? ` WHERE ${where}` : ''}`, params);
+    }
+
+    private async readByRids<T>(rids: Iterable<unknown>, statement: (target: string) => string, params?: Record<string, unknown>): Promise<T[]> {
+        const clean: string[] = [];
+        const seen = new Set<string>();
+        for (const value of rids) {
+            const match = typeof value === 'string' ? value.trim().match(/^#?(\d+):(\d+)$/) : null;
+            if (!match) continue;
+            const rid = `#${match[1]}:${match[2]}`;
+            if (!seen.has(rid)) {
+                seen.add(rid);
+                clean.push(rid);
+            }
+        }
+        const out: T[] = [];
+        for (let i = 0; i < clean.length; i += 500) {
+            const chunk = clean.slice(i, i + 500);
+            try {
+                out.push(...await this.rows<T>(statement(`[${chunk.join(', ')}]`), params, { quiet: true }));
+            } catch (error) {
+                if (!isMissingRecord(error)) throw error;
+                for (const rid of chunk) {
+                    try {
+                        out.push(...await this.rows<T>(statement(rid), params, { quiet: true }));
+                    } catch (single) {
+                        if (!isMissingRecord(single)) throw single;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+}
+
+function isMissingRecord(error: unknown): boolean {
+    const text = `${(error as Error)?.message || ''} ${(error as DbError)?.detail || ''}`;
+    return /not found/i.test(text);
 }

@@ -122,7 +122,7 @@ export class SemanticSearch {
 
     /** The service that built an index (its producing process), and that therefore searches it. */
     private async serviceOf(indexRid: string, indexType: string): Promise<string> {
-        const edge = await this.d.db.first('SELECT @in AS source, process_rid FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(indexRid) });
+        const edge = (await this.d.db.edgesOf('out', 'DERIVED_FROM', [toRid(indexRid)], ['process_rid']))[0];
         const processRid = tryRid(edge?.process_rid);
         if (processRid) {
             const process = await this.d.db.first(`SELECT service_id FROM ${processRid}`);
@@ -135,7 +135,7 @@ export class SemanticSearch {
     private async setLabel(setRid: string): Promise<string | null> {
         const set = await this.d.db.first(`SELECT label FROM ${toRid(setRid)}`);
         if (set?.label) return String(set.label);
-        const edge = await this.d.db.first('SELECT process_rid FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(setRid) });
+        const edge = (await this.d.db.edgesOf('out', 'DERIVED_FROM', [toRid(setRid)], ['process_rid']))[0];
         const processRid = tryRid(edge?.process_rid);
         const process = processRid ? await this.d.db.first(`SELECT label FROM ${processRid}`) : null;
         return process?.label ? `${process.label} output` : null;
@@ -157,7 +157,7 @@ export class SemanticSearch {
         for (const file of files) {
             if (!file.path) continue;
             const meta = await this.indexMeta(file.path);
-            const edge = await this.d.db.first('SELECT @in AS source FROM DERIVED_FROM WHERE @out = :rid', { rid: toRid(file.rid) });
+            const edge = (await this.d.db.edgesOf('out', 'DERIVED_FROM', [toRid(file.rid)]))[0];
             const sourceRid = tryRid(edge?.source);
             const source = sourceRid ? await this.setLabel(sourceRid) : null;
             out.push({

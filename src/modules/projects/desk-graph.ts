@@ -8,6 +8,7 @@
 import path from 'node:path';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { toRid } from '../../platform/ids.ts';
+import { sourceFileOf } from '../../shared/graph-store.ts';
 
 export const PDF_ICON_SENTINEL = '__pdf_icon__';
 
@@ -169,11 +170,8 @@ export class DeskGraph {
     async processedSetRids(setRids: string[]): Promise<Set<string>> {
         const clean = [...new Set(setRids.map((r) => toRid(r)))];
         if (!clean.length) return new Set();
-        const rows = await this.db.rows(
-            'SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE @in IN :rids AND process_rid IS NOT NULL',
-            { rids: clean },
-        );
-        return new Set(rows.map((r) => r.rid));
+        const rows = await this.db.edgesOf('in', 'DERIVED_FROM', clean, [], 'process_rid IS NOT NULL');
+        return new Set(rows.map((r) => r.source));
     }
 
     /**
@@ -186,11 +184,8 @@ export class DeskGraph {
         if (Number.isFinite(pages) && pages > 1) return false;
         const rid = file.rid || file['@rid'];
         if (!rid) return false;
-        const row = await this.db.first(
-            'MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source.type AS source_type LIMIT 1',
-            { rid: toRid(rid) },
-        );
-        const sourceType = row?.source_type ? String(row.source_type).toLowerCase() : null;
+        const source = await sourceFileOf(this.db, toRid(rid), 'type');
+        const sourceType = source?.type ? String(source.type).toLowerCase() : null;
         return Boolean(sourceType) && sourceType !== 'zip';
     }
 }

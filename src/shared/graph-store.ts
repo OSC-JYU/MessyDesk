@@ -131,10 +131,15 @@ export class GraphStore {
             cruncher = proc.service_id || proc.service || proc.label || '';
             task = proc.task || '';
         }
-        await this.db.sql(
-            `UPDATE DERIVED_FROM SET process_rid = :processRid, process_id = :processId, cruncher = :cruncher, task = :task WHERE @out = ${t} AND @in = ${s}`,
-            { processRid: p, processId, cruncher: String(cruncher), task: String(task) },
-        );
+        // The edge is found from its output node: `UPDATE DERIVED_FROM ... WHERE @out AND @in`
+        // read every DERIVED_FROM edge in the database for each new output.
+        const edges = await this.db.edgesOf<{ rid: string }>('out', EDGE.DERIVED_FROM, [t], [], '@in = :source', { source: s });
+        for (const edge of edges) {
+            await this.db.sql(
+                `UPDATE ${toRid(edge.rid)} SET process_rid = :processRid, process_id = :processId, cruncher = :cruncher, task = :task`,
+                { processRid: p, processId, cruncher: String(cruncher), task: String(task) },
+            );
+        }
     }
 
     async getNode<T = any>(rid: string): Promise<T | null> {
@@ -144,12 +149,33 @@ export class GraphStore {
         });
     }
 
-    /** The project a node belongs to, following DERIVED_FROM/BELONGS_TO up to 40 levels. */
+    /**
+     * The project a node belongs to, following its outgoing edges (DERIVED_FROM/BELONGS_TO) up to
+     * 40 levels. Walks up from the node; matching from `{type:Project}` downwards read every project.
+     */
     async projectRidOf(rid: string): Promise<string | null> {
-        const row = await this.db.first(
-            `MATCH {type:Project, as:project}<--{as:node, where:(@rid = :rid), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1`,
-            { rid: toRid(rid) },
-        );
+        const row = await this.db.first(`SELECT @rid AS rid FROM (TRAVERSE out() FROM ${toRid(rid)} MAXDEPTH 40) WHERE @type = 'Project' LIMIT 1`).catch((error) => {
+            if (/not found/i.test(`${error?.message} ${error?.detail}`)) return null;
+            throw error;
+        });
         return row?.rid ?? null;
     }
+
+    sourceFileOf<T = any>(rid: string, fields = ''): Promise<T | null> {
+        return sourceFileOf<T>(this.db, rid, fields);
+    }
+}
+
+/**
+ * The File a File was derived from (first DERIVED_FROM target that is a File), or null. Same
+ * answer as `MATCH {type:File, where:(@rid = :rid)}-DERIVED_FROM->{type:File}`, which read every
+ * File to find the start node.
+ */
+export async function sourceFileOf<T = any>(db: ArcadeClient, rid: string, fields = ''): Promise<T | null> {
+    return db.first<T>(
+        `SELECT ${fields} FROM (SELECT expand(out('DERIVED_FROM')) FROM (SELECT FROM ${toRid(rid)} WHERE @type = 'File')) WHERE @type = 'File' LIMIT 1`,
+    ).catch((error) => {
+        if (/not found/i.test(`${error?.message} ${error?.detail}`)) return null;
+        throw error;
+    });
 }

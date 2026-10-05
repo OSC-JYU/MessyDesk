@@ -37,6 +37,12 @@ const PROPERTIES = [
     'CREATE PROPERTY TagLink.region_id IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING',
     'CREATE PROPERTY ServiceGroup.id IF NOT EXISTS STRING',
+    // New (perf/results/step1-query-profile.md): looked up by value, so they get indexes below.
+    'CREATE PROPERTY DERIVED_FROM.process_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY Process.set_process IF NOT EXISTS STRING',
+    'CREATE PROPERTY Process.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY SetProcess.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY User.id IF NOT EXISTS STRING',
 ];
 
 const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
@@ -50,6 +56,14 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['TagLink', 'target_rid', 'NOTUNIQUE'],
     ['TagLink', 'entity_rid', 'NOTUNIQUE'],
     ['ServiceGroup', 'id', 'UNIQUE'],
+    // New: batch resume, cascade delete and grouped-run retries look edges up by process; the
+    // delete cascade finds a batch's processes; reindex finds a desk's processes; every request
+    // finds its user by id. All are additive: the old backend ignores them.
+    ['DERIVED_FROM', 'process_rid', 'NOTUNIQUE'],
+    ['Process', 'set_process', 'NOTUNIQUE'],
+    ['Process', 'project_rid', 'NOTUNIQUE'],
+    ['SetProcess', 'project_rid', 'NOTUNIQUE'],
+    ['User', 'id', 'NOTUNIQUE'],
 ];
 
 async function quietly(fn: () => Promise<unknown>, log: (m: string) => void, label: string): Promise<void> {

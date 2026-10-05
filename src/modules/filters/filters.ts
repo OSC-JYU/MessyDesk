@@ -66,7 +66,7 @@ export class FiltersService {
 
         let labels: string[] = [];
         if (mode !== 'untagged') {
-            const rows = await this.db.rows('SELECT @rid AS rid, label FROM Entity WHERE owner = :owner AND @rid IN :rids', { owner: userRid, rids: selected });
+            const rows = await this.db.rowsByRids('@rid AS rid, label', selected, "@type = 'Entity' AND owner = :owner", { owner: userRid });
             if (rows.length !== selected.length) throw Boom.badRequest('One or more selected tags are invalid or inaccessible');
             const byRid = new Map(rows.map((r) => [r.rid, r.label]));
             labels = selected.map((r) => byRid.get(r)).filter(Boolean);
@@ -116,7 +116,8 @@ export class FiltersService {
         outputSet.path = setPath;
         await this.store.connectDerivedFrom(outputSet['@rid'], sourceSet, processRid);
         if (matched.length) {
-            const files = await this.db.rows('SELECT @rid, project_rid, type, extension, label, info FROM File WHERE @rid IN :rids ORDER BY label', { rids: [...new Set(matched)] });
+            const files = (await this.db.rowsByRids('@rid, project_rid, type, extension, label, info', matched, "@type = 'File'"))
+                .sort((a, b) => (String(a.label ?? '') < String(b.label ?? '') ? -1 : String(a.label ?? '') > String(b.label ?? '') ? 1 : 0));
             for (const file of files) {
                 const message = { file: { '@rid': file['@rid'], project_rid: file.project_rid || project, type: file.type, extension: file.extension, label: file.label }, output_set: outputSet['@rid'] };
                 await this.nodes.createReferenceFile(processRid, message, file['@rid'], '', file.info || '');

@@ -121,9 +121,9 @@ export class ProcessingService {
     }
 
     private async sourceFileOf(fileRid: string, userRid: string): Promise<any | null> {
-        const row = await this.db.first('MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source', { rid: toRid(fileRid) });
-        if (!row?.source) return null;
-        return this.files.metadata(row.source['@rid'], userRid);
+        const source = await this.store.sourceFileOf(toRid(fileRid), '@rid');
+        if (!source?.['@rid']) return null;
+        return this.files.metadata(source['@rid'], userRid);
     }
 
     // ---- single file ---------------------------------------------------------------------
@@ -301,12 +301,12 @@ export class ProcessingService {
         const rids = entries.map((e) => e['@rid']).filter(Boolean);
         for (let i = 0; i < rids.length; i += 500) {
             const chunk = rids.slice(i, i + 500);
-            const edges = await this.db.rows('SELECT @out AS out, @in AS src FROM DERIVED_FROM WHERE @out IN :rids', { rids: chunk });
-            const sources = [...new Set(edges.map((e: any) => String(e.src)).filter(Boolean))];
+            const edges = await this.db.edgesOf('out', 'DERIVED_FROM', chunk);
+            const sources = [...new Set(edges.map((e: any) => String(e.source)).filter(Boolean))];
             if (!sources.length) continue;
-            const files = await this.db.rows('SELECT @rid AS rid, label, path, type FROM File WHERE @rid IN :rids', { rids: sources });
+            const files = await this.db.rowsByRids('@rid AS rid, label, path, type', sources, "@type = 'File'");
             const byRid = new Map(files.map((f: any) => [String(f.rid), f]));
-            const sourceOf = new Map(edges.map((e: any) => [String(e.out), byRid.get(String(e.src))]));
+            const sourceOf = new Map(edges.map((e: any) => [String(e.target), byRid.get(String(e.source))]));
             for (const entry of entries) {
                 const source = sourceOf.get(String(entry['@rid']));
                 if (source?.path) entry.source = { '@rid': source.rid, label: source.label, path: source.path, type: source.type };

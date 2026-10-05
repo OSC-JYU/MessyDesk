@@ -86,7 +86,20 @@ export class TagsService {
         const links = await this.db.rows('SELECT DISTINCT entity_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: fileRids, owner: userRid });
         const entityRids = links.map((r) => r.entity_rid).filter(Boolean);
         if (!entityRids.length) return [];
-        return this.db.rows(`${select} WHERE owner = :owner AND @rid IN :entities GROUP BY type ORDER BY count DESC`, { owner: userRid, entities: entityRids });
+        // Read by RID and grouped here: `@rid IN :list` checked every entity against the list.
+        const entities = await this.db.rowsByRids('', entityRids, "@type = 'Entity' AND owner = :owner", { owner: userRid });
+        const groups = new Map<string, any>();
+        for (const entity of entities) {
+            let group = groups.get(entity.type);
+            if (!group) {
+                group = { type: entity.type, count: 0, labels: [], icon: entity.icon, color: entity.color, items: [] };
+                groups.set(entity.type, group);
+            }
+            group.count += 1;
+            group.labels.push(entity.label);
+            group.items.push(entity);
+        }
+        return [...groups.values()].sort((a, b) => b.count - a.count);
     }
 
     async createEntity(data: any, userRid: string): Promise<ArcadeEnvelope | undefined> {
@@ -151,10 +164,7 @@ export class TagsService {
             { files: fileRids, owner: userRid },
         );
         if (!links.length) return [];
-        const entities = await this.db.rows(
-            'SELECT @rid AS rid, label, type, icon, color FROM Entity WHERE owner = :owner AND @rid IN :entities',
-            { owner: userRid, entities: links.map((l) => l.entity_rid).filter(Boolean) },
-        );
+        const entities = await this.db.rowsByRids('@rid AS rid, label, type, icon, color', links.map((l) => l.entity_rid), "@type = 'Entity' AND owner = :owner", { owner: userRid });
         const byRid = new Map(entities.map((e) => [e.rid, e]));
         return links
             .map((l) => {
@@ -174,8 +184,8 @@ export class TagsService {
         if (!targets.length) return [];
         const projects = projectRidsFrom(options);
         const items = projects.length
-            ? await this.db.rows('SELECT label, info, description, @rid AS rid, path, type FROM File WHERE @rid IN :targets AND project_rid IN :projects', { targets, projects })
-            : await this.db.rows('SELECT label, info, description, @rid AS rid, path, type FROM File WHERE @rid IN :targets', { targets });
+            ? await this.db.rowsByRids('label, info, description, @rid AS rid, path, type', targets, "@type = 'File' AND project_rid IN :projects", { projects })
+            : await this.db.rowsByRids('label, info, description, @rid AS rid, path, type', targets, "@type = 'File'");
         for (const item of items) item.thumb = apiUrl + 'api/thumbnails/' + String(item.path || '').split('/').slice(0, -1).join('/');
         return items;
     }
@@ -185,7 +195,7 @@ export class TagsService {
         const links = await this.db.rows('SELECT entity_rid FROM TagLink WHERE target_rid = :target AND region_id IS NULL AND owner = :owner', { target: toRid(rid), owner: userRid });
         const entityRids = [...new Set(links.map((l) => l.entity_rid).filter(Boolean))];
         if (!entityRids.length) return [];
-        return this.db.rows('SELECT label, type, @rid AS rid, color, icon FROM Entity WHERE owner = :owner AND @rid IN :entities', { owner: userRid, entities: entityRids });
+        return this.db.rowsByRids('label, type, @rid AS rid, color, icon', entityRids, "@type = 'Entity' AND owner = :owner", { owner: userRid });
     }
 
     /** Entities of many files at once, for set listings: Map<fileRid, entity[]>. */
@@ -195,7 +205,7 @@ export class TagsService {
         const links = await this.db.rows('SELECT target_rid, entity_rid FROM TagLink WHERE target_rid IN :files AND region_id IS NULL', { files: fileRids });
         const entityRids = [...new Set(links.map((l) => l.entity_rid).filter(Boolean))];
         const entities = entityRids.length
-            ? await this.db.rows('SELECT label, icon, color, @rid AS rid FROM Entity WHERE @rid IN :entities', { entities: entityRids })
+            ? await this.db.rowsByRids('label, icon, color, @rid AS rid', entityRids, "@type = 'Entity'")
             : [];
         const byRid = new Map(entities.map((e) => [e.rid, e]));
         for (const link of links) {
@@ -291,7 +301,7 @@ export class TagsService {
             const fields: TagFields = { tag_label: [], tag_rid: [], tag_created_by: [], tag_confidence: [] };
             if (links.length) {
                 const entityRids = [...new Set(links.map((l) => l.entity_rid).filter(Boolean))];
-                const entities = await this.db.rows('SELECT @rid AS rid, label FROM Entity WHERE @rid IN :entities', { entities: entityRids });
+                const entities = await this.db.rowsByRids('@rid AS rid, label', entityRids, "@type = 'Entity'");
                 const labels = new Map(entities.map((e) => [e.rid, e.label]));
                 for (const link of links) {
                     const label = labels.get(link.entity_rid);
@@ -382,7 +392,7 @@ export class TagsService {
             { owner: userRid },
         );
         if (!links.length) return [];
-        const entities = await this.db.rows('SELECT @rid AS rid, label, description FROM Entity WHERE @rid IN :entities', { entities: [...new Set(links.map((l) => l.entity_rid).filter(Boolean))] });
+        const entities = await this.db.rowsByRids('@rid AS rid, label, description', links.map((l) => l.entity_rid), "@type = 'Entity'");
         const byRid = new Map(entities.map((e) => [e.rid, e]));
         return links
             .map((l) => ({ service_id: l.service_id, task: l.task, entity_rid: l.entity_rid, label: byRid.get(l.entity_rid)?.label || null, description: byRid.get(l.entity_rid)?.description || null, count: l.count }))

@@ -174,8 +174,7 @@ export class FilesService {
     /** The file a file was derived from (GET /api/files/{rid}/source). */
     async source(fileRid: string, userRid: string): Promise<any | null> {
         if (!(await this.access.canRead(fileRid, userRid))) return null;
-        const row = await this.db.first('MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source', { rid: toRid(fileRid) });
-        return row?.source || null;
+        return this.store.sourceFileOf(toRid(fileRid));
     }
 
     // ---- versions ----------------------------------------------------------------------

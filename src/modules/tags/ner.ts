@@ -80,8 +80,8 @@ export class NerService {
         }
         if (!nodes.length) return [];
         // service_id/task are stamped on newer runs; older ones have them only on the edge.
-        const edges = await this.db.rows('SELECT @out AS rid, cruncher, task FROM DERIVED_FROM WHERE @out IN :rids', { rids: nodes.map((n) => n['@rid']) });
-        const byRid = new Map(edges.map((e) => [e.rid, e]));
+        const edges = await this.db.edgesOf('out', 'DERIVED_FROM', nodes.map((n) => n['@rid']), ['cruncher', 'task']);
+        const byRid = new Map(edges.map((e) => [e.target, e]));
         return nodes.map((node) => {
             const edge = byRid.get(node['@rid']);
             return { ...node, service_id: node.service_id || edge?.cruncher || null, task: node.task || edge?.task || null };
@@ -122,8 +122,8 @@ export class NerService {
             let parsed;
             try { parsed = await readJson(node.path); } catch { continue; }
             if (!regionsOf(parsed).some((r) => r?.label === label)) continue;
-            const source = await this.db.first('SELECT @in AS rid FROM DERIVED_FROM WHERE @out = :rid', { rid: node['@rid'] });
-            if (!source?.rid || seen.has(source.rid)) continue;
+            const source = { rid: (await this.db.edgesOf('out', 'DERIVED_FROM', [node['@rid']]))[0]?.source };
+            if (!source.rid || seen.has(source.rid)) continue;
             seen.add(source.rid);
             const file = await this.db.first('SELECT @rid AS rid, label, path, type FROM File WHERE @rid = :rid', { rid: source.rid });
             if (file) files.push(file);

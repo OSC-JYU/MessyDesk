@@ -3,7 +3,8 @@
 Plan step 1b (Ari's answer 3 in [performance-testing.md](performance-testing.md)). This compares
 the schema the backend creates (`src/platform/arcade/schema.ts`) with how the code queries it, and
 uses the step 1 profile ([../perf/results/step1-query-profile.md](../perf/results/step1-query-profile.md))
-for the costs. Nothing here is changed yet; section 5 lists the proposals for Ari.
+for the costs. Section 5 lists the proposals; P1–P4 and the access part of P6 are done (Ari: "fix
+queries first"), the rest wait for a decision.
 
 ## 1. Types
 
@@ -13,7 +14,7 @@ for the costs. Nothing here is changed yet; section 5 lists the proposals for Ar
 | Vertex, unused | `ErrorNode`, `Person` | Errors are `File` nodes of type `error.json`; "Person" is an Entity `type`, not a vertex type. Nothing creates or reads these |
 | Vertex, missing | `Filter` | The project list counts `@type="Filter"` nodes and delete skips their path, but the schema has no Filter type and nothing creates one (filters create a `Process`). Dead condition |
 | Document | Usage, TagLink | |
-| Edge, in use | BELONGS_TO, DERIVED_FROM, HAS_OWNER, HAS_PROCESS | HAS_PROCESS only for source processes (`processing.ts:387`) |
+| Edge, in use | BELONGS_TO, DERIVED_FROM, HAS_OWNER, HAS_PROCESS | HAS_PROCESS only for source processes (`processing.ts`) |
 | Edge, legacy | PROCESSED_BY, PRODUCED, HAS_ITEM, HAS_ENTITY, HAS_SET, HAS_SOURCE | Kept so a rollback to the old backend works (decision A3); no query reads them |
 
 Each type has one bucket, so concurrent inserts of the same type contend on the same pages
@@ -48,13 +49,13 @@ for one vertex or for 500 at once).
 
 ## 3. Nodes that exist only for bookkeeping
 
-- **A Process per tag change.** `processing.syncTags` (processing.ts:470) creates a `Process` node
+- **A Process per tag change.** `processing.syncTags` (processing.ts) creates a `Process` node
   linked to the project, a process directory with `message.json`, and an md-solr `update_tags`
   job for every tag link or unlink, and for every label of every autotag run. Ari agrees the node
   is not needed (answer 3). The UI does not draw Process nodes that have no outputs; they only
   inflate the project's `node_count` and fill `processes/` on disk. Over time this is the largest
   source of Process nodes: tagging 10 000 pages with 3 labels each leaves 30 000.
-- **Process per filter run** (`filters.ts:47`): one per use, small.
+- **Process per filter run** (`filters.ts`): one per use, small.
 - **`set.json` per set** (not a node): rewritten on every added file (B4). Its readers are not
   known yet (question 4).
 
@@ -67,24 +68,24 @@ for one vertex or for 500 at once).
   File, Set, Process and SetProcess already has `project_rid`.
 - Lineage is the DERIVED_FROM edge plus copies of process data on the edge (`process_rid`,
   `process_id`, `cruncher`, `task`), written by a second UPDATE after the edge is created
-  (graph-store.ts:398). Setting them in the `CREATE EDGE … SET` would remove the scan (B2).
+  (graph-store.ts). Setting them in the `CREATE EDGE … SET` would remove the scan (B2).
 - Set counts are stored (`Set.count`) and recomputed with `count(*)` after every added file.
 
-## 5. Proposals (not done; for Ari)
+## 5. Proposals
 
 All of these keep the API and the data layout. Indexes and properties are additive: the old
 backend ignores them, so rollback still works.
 
-| # | Change | Fixes | Measured gain |
-|---|---|---|---|
-| P1 | Create DERIVED_FROM with its properties in one statement (`CREATE EDGE … SET process_rid = …`) instead of create + UPDATE by scan | B2, every output file | 325 ms → 0 extra per output file |
-| P2 | Edge-end lookups as traversals from the known vertex (`inE`/`outE`), including delete, set lock, grouping, attachSources | B2, B10, grouping | 300–550 ms → ≈10 ms; grouping 108 s → 23 ms |
-| P3 | `SELECT FROM [rids]` instead of `WHERE @rid IN :rids`; traversal instead of `MATCH {type:File, where:(@rid…)}` | @rid IN, source file, PDF thumbnails | 81 s → 19 ms; 478 ms → 8 ms |
-| P4 | Declare and index `DERIVED_FROM.process_rid`, `Process.set_process`, `User.id`, `Process.project_rid`, `SetProcess.project_rid` | resume, delete, auth, reindex | 427 ms → 11 ms (process_rid) |
-| P5 | Composite indexes `Entity (owner, type, label)` and `TagLink (owner, created_by)` | B13 | to measure in step 4 |
-| P6 | Access check from the node's `project_rid` (one lookup) with the traversal only as fallback for nodes without it | B1 | 272 ms → expected ≈2 ms; to measure |
-| P7 | Drop the Process node for tag syncs; publish the md-solr `update_tags` job without it. The md-solr adapter only echoes the message to `/done`, which falls back to the file rid when there is no process (results.ts:382) | B11 | removes one node, one directory and one file per tag change |
-| P8 | Remove `ErrorNode` and `Person` from the type list and the dead `Filter` conditions | tidiness | – |
+| # | Change | Fixes | Measured gain | Status |
+|---|---|---|---|---|
+| P1 | After creating a DERIVED_FROM edge, find it from its output node (`outE`) and update it by RID, instead of `UPDATE DERIVED_FROM WHERE @out AND @in` (a scan) | B2, every output file | 325 ms → 3 ms per output file | done |
+| P2 | Edge-end lookups as traversals from the known vertex (`inE`/`outE`), including delete, set lock, grouping, attachSources | B2, B10, grouping | 300–550 ms → ≈10 ms; grouping 108 s → 23 ms | done |
+| P3 | `SELECT FROM [rids]` instead of `WHERE @rid IN :rids`; traversal instead of `MATCH {type:File, where:(@rid…)}` | @rid IN, source file, PDF thumbnails | 81 s → 19 ms; 478 ms → 8 ms | done |
+| P4 | Declare and index `DERIVED_FROM.process_rid`, `Process.set_process`, `User.id`, `Process.project_rid`, `SetProcess.project_rid` | resume, delete, auth, reindex | 427 ms → 11 ms (process_rid) | done |
+| P5 | Composite indexes `Entity (owner, type, label)` and `TagLink (owner, created_by)` | B13 | to measure in step 4 | open |
+| P6 | Access check that walks up from the node to its projects instead of down from all of the user's projects | B1 | 272 ms → 2 ms | done |
+| P7 | Drop the Process node for tag syncs; publish the md-solr `update_tags` job without it. The md-solr adapter only echoes the message to `/done`, which falls back to the file rid when there is no process (results.ts) | B11 | removes one node, one directory and one file per tag change | open |
+| P8 | Remove `ErrorNode` and `Person` from the type list and the dead `Filter` conditions | tidiness | – | open |
 
 P1–P4 change only how the backend queries; P6 changes how access is decided, so it needs the
 contract tests to prove the same answers; P7 changes what nodes exist (not visible in the UI).

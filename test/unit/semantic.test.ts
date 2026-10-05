@@ -25,7 +25,7 @@ function fakes(dir: string) {
         '#10:3': { node: { '@rid': '#10:3', '@type': 'File', type: 'similarity_index', path: path.join(dir, 't.safetensors') }, projectRid: '#1:0' },
     };
     const deps: any = {
-        db: { first: async () => null, rows: async () => [] },
+        db: { first: async () => null, rows: async () => [], edgesOf: async () => [], rowsByRids: async () => [] },
         access: { findOwned: async (rid: string, user: string) => (user === '#16:0' ? nodes[rid] ?? null : null) },
         registry: { hasActiveConsumer: () => true },
         publisher: { publish: async (topic: string, msg: any) => { published.push({ topic, msg }); } },

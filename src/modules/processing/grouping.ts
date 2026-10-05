@@ -54,17 +54,17 @@ export async function groupByRootSource(db: ArcadeClient, files: any[], boundary
         if (!batch.length) break;
         batch.forEach((r) => visited.add(r));
         frontier = [];
-        const edges = await db.rows('SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN :rids', { rids: batch });
+        const edges = await db.edgesOf('out', 'DERIVED_FROM', batch);
         const sources: string[] = [];
         for (const edge of edges) {
-            if (!edge.target_rid || !edge.source_rid) continue;
-            if (!parent.has(edge.target_rid)) parent.set(edge.target_rid, edge.source_rid);
-            sources.push(edge.source_rid);
-            if (!visited.has(edge.source_rid)) frontier.push(edge.source_rid);
+            if (!edge.target || !edge.source) continue;
+            if (!parent.has(edge.target)) parent.set(edge.target, edge.source);
+            sources.push(edge.source);
+            if (!visited.has(edge.source)) frontier.push(edge.source);
         }
         const missing = [...new Set(sources)].filter((r) => !meta.has(r));
         if (missing.length) {
-            for (const row of await db.rows('SELECT @rid AS rid, label, type, path, original_filename FROM File WHERE @rid IN :rids', { rids: missing })) {
+            for (const row of await db.rowsByRids('@rid AS rid, label, type, path, original_filename', missing, "@type = 'File'")) {
                 meta.set(row.rid, { '@rid': row.rid, label: row.label, type: row.type, path: row.path, original_filename: row.original_filename });
             }
         }

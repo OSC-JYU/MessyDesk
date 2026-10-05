@@ -93,9 +93,9 @@ export class BatchState {
 
     /** An existing output of a process for a given source (guards grouped many-to-one retries). */
     async outputFor(processRid: string, sourceRid: string, outputSet: string | null): Promise<any | null> {
-        const rows = await this.db.rows('SELECT @out AS rid FROM DERIVED_FROM WHERE process_rid = :p AND @in = :s LIMIT 10', { p: toRid(processRid), s: toRid(sourceRid) });
+        const rows = (await this.db.edgesOf('in', 'DERIVED_FROM', [toRid(sourceRid)], [], 'process_rid = :p', { p: toRid(processRid) })).slice(0, 10);
         for (const row of rows) {
-            const node = await this.store.getNode(row.rid);
+            const node = await this.store.getNode(row.target);
             if (!node || node['@type'] !== 'File') continue;
             if (outputSet && tryRid(node.set) !== toRid(outputSet)) continue;
             return node;
@@ -105,7 +105,7 @@ export class BatchState {
 
     /** The process that produced a set (from the set's DERIVED_FROM edge). */
     async processOfSet(setRid: string): Promise<any | null> {
-        const row = await this.db.first('SELECT process_rid FROM DERIVED_FROM WHERE @out = :rid AND process_rid IS NOT NULL LIMIT 1', { rid: toRid(setRid) });
+        const row = (await this.db.edgesOf('out', 'DERIVED_FROM', [toRid(setRid)], ['process_rid'], 'process_rid IS NOT NULL'))[0];
         if (!row?.process_rid) return null;
         return this.store.getNode(row.process_rid);
     }
