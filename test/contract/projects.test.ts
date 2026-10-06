@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     get, post, put, del, call, OTHER, onlyNew, onlyOld, ensureOtherUser, uniq, stripHash,
-    createProject, createSet, upload, PNG_1x1, SseListener,
+    createProject, createSet, upload, PNG_1x1, SseListener, waitFor,
 } from './helpers.ts';
 
 test('POST /api/projects creates a project with an expiration date', async () => {
@@ -257,7 +257,9 @@ test('graph vertex attribute update and delete', async () => {
 
     const deleted = await del(`/api/graph/vertices/${rid}`);
     assert.equal(deleted.status, 200);
-    assert.equal(deleted.body.deleted, 1);
+    // Deletes finish in the background (plan/decisions.md G5); the node is gone for the user at once.
+    if (process.env.TARGET !== 'old') assert.equal(deleted.body.status, 'deleting');
+    else assert.equal(deleted.body.deleted, 1);
     assert.equal((await get(`/api/documents/${rid}`)).status, 404);
     assert.equal((await del(`/api/graph/vertices/${rid}`)).status, 404);
 });
@@ -279,7 +281,7 @@ test('traverse and ancestors', async () => {
 
 test('DELETE /api/projects/{rid} removes the project', async () => {
     const project = await createProject();
-    await upload(project['@rid'], [{ name: 'd.txt', type: 'text/plain', content: 'd' }]);
+    const file = (await upload(project['@rid'], [{ name: 'd.txt', type: 'text/plain', content: 'd' }])).body;
     await ensureOtherUser();
     const foreign = await del(`/api/projects/${stripHash(project['@rid'])}`, { user: OTHER });
     assert.equal(foreign.status, 404);
@@ -288,6 +290,11 @@ test('DELETE /api/projects/{rid} removes the project', async () => {
     assert.equal(res.body, project['@rid']);
     const list = await get('/api/projects');
     assert.ok(!list.body.find((p: any) => p['@rid'] === project['@rid']));
+    if (process.env.TARGET !== 'old') {
+        // The desk's content goes with it (the old backend left files behind).
+        // It is deleted in the background (decisions G5).
+        await waitFor(async () => (await get(`/api/files/${stripHash(file['@rid'])}`)).status === 404);
+    }
 });
 
 test('set zip job: queued job and status', async () => {

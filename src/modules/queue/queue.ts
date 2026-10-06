@@ -97,6 +97,11 @@ export class JobQueue {
             CREATE INDEX IF NOT EXISTS idx_queue_claim ON queue_jobs(queue, status, next_retry_at, created_at);
             CREATE INDEX IF NOT EXISTS idx_queue_process ON queue_jobs(process_rid, set_process_rid, status);
             CREATE INDEX IF NOT EXISTS idx_queue_cleanup ON queue_jobs(status, updated_at);
+            CREATE TABLE IF NOT EXISTS pending_deletes (
+                rid TEXT PRIMARY KEY,
+                user_rid TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS batch_state (
                 process_rid TEXT PRIMARY KEY,
                 state TEXT NOT NULL,
@@ -130,6 +135,20 @@ export class JobQueue {
             if (row) return row.state;
         }
         return null;
+    }
+
+    // ---- background deletes (graph/deletes.ts) -------------------------------------------
+
+    addPendingDelete(rid: string, userRid: string): void {
+        this.open().prepare('INSERT OR REPLACE INTO pending_deletes (rid, user_rid, created_at) VALUES (?, ?, ?)').run(rid, userRid, new Date().toISOString());
+    }
+
+    removePendingDelete(rid: string): void {
+        this.open().prepare('DELETE FROM pending_deletes WHERE rid = ?').run(rid);
+    }
+
+    pendingDeletes(): Array<{ rid: string; user_rid: string }> {
+        return this.open().prepare('SELECT rid, user_rid FROM pending_deletes ORDER BY created_at').all() as any[];
     }
 
     isCancelled(...rids: Array<string | null | undefined>): boolean {

@@ -1,0 +1,26 @@
+{
+  "scenario": "S9 delete set",
+  "target": "#148:0",
+  "project": "#16:0",
+  "status": 200,
+  "seconds": 13.6,
+  "deleted": 20003,
+  "before": {
+    "project_nodes": 1,
+    "files": 20000,
+    "sets": 2,
+    "set_processes": 1,
+    "processes": 0,
+    "tag_links": 0,
+    "files_on_disk": 20002
+  },
+  "after": {
+    "project_nodes": 1,
+    "files": 0,
+    "sets": 0,
+    "set_processes": 0,
+    "processes": 0,
+    "tag_links": 0,
+    "files_on_disk": 0
+  }
+}

@@ -12,6 +12,7 @@ import type { AccessService } from '../modules/access/access.ts';
 import type { BatchState } from '../modules/batches/batch-state.ts';
 import type { FilesService } from '../modules/files/files.ts';
 import type { FiltersService } from '../modules/filters/filters.ts';
+import type { BackgroundDeletes } from '../modules/graph/deletes.ts';
 import type { GraphService } from '../modules/graph/graph.ts';
 import type { ImportPipeline } from '../modules/import/import.ts';
 import type { NodesService } from '../modules/nodes/nodes.ts';
@@ -51,6 +52,7 @@ export interface Deps {
     deskGraph: DeskGraph;
     nodes: NodesService;
     graph: GraphService;
+    deletes: BackgroundDeletes;
     files: FilesService;
     thumbnails: ThumbnailService;
     zipJobs: ZipJobs;

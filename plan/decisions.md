@@ -88,3 +88,16 @@ Not part of this rewrite. To fix later in MD-consumers:
 7. The pause/resume/cancel control server is never consulted and registers a `localhost` URL.
 
 Details: [consumer-calls.md §7](consumer-calls.md).
+
+## G. Performance (2026-10-05)
+
+Decided by Ari after the upload and batch tests ([../perf/results/upload-and-batch.md](../perf/results/upload-and-batch.md)).
+
+| # | Decision |
+|---|---|
+| G1 | `set.json` is written once, not for every added file: when the set has had no new files for 5 s, when a batch finishes, and on shutdown. Nothing in the backend, UI or consumers reads it |
+| G2 | Starting a set batch (`POST /api/queue/{topic}/sets/{rid}`) and resuming one answer as soon as the batch node exists; the jobs are published in the background. A dispatch failure is logged and stored on the batch as `dispatch_error` |
+| G3 | `GET /api/entities` returns the tag types with counts only (`[{type, count, icon, color}]`), filtered by desks, `created_by` and `search`. A type's tags come from the new `GET /api/entities/by-type/{type}`, one page at a time. Returning every tag was 21 MB at 100 000 tags. MessyDesk-UI's tags page and file tag tool load a type when it is opened |
+| G4 | Each TagLink stores the desk of its target (`project_rid`, indexed), so the desk filter of the tag lists reads links by desk instead of by every file of the desk. Existing links get it in the background at startup |
+| G5 | Deleting a node (`DELETE /api/graph/vertices/{rid}`) or a desk (`DELETE /api/projects/{rid}`) answers at once and finishes in the background. The node is marked `_deleting` and is gone for the user immediately (reads give 404, a desk's content too, desk lists and the desk graph leave it out); the cascade ends with SSE `delete_finished` (or `delete_failed`, and the node comes back). A restart resumes unfinished deletes (`pending_deletes` table in the queue database). The vertex route answers `{path: null, deleted: null, status: 'deleting'}` |
+| G6 | Search gets a "Fuzzy search" option (`fuzzy: true` in `POST /api/search`): each word of 4+ letters also matches words one edit away and its common two-edit OCR confusions (m↔rn, d↔cl, w↔vv, h↔li), on the whole-word field, in addition to the normal search. md-solr's index task gets an `index_mode` option: `full` ("Partial word match", default, today's n-gram index) or `light` ("Whole word match", whole words only, about 7× smaller). Re-indexing keeps a run's mode |

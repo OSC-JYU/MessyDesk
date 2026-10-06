@@ -489,7 +489,8 @@ test('queue admin and other users jobs are protected', { skip: onlyNew }, async 
 
         const { set } = await setWithFiles(1);
         await post(`/api/queue/${consumer.topic}/sets/${stripHash(set['@rid'])}`, { id: 'upper' });
-        const mine = (await get('/api/queue/jobs/active')).body.find((j: any) => j.service_id === consumer.topic);
+        // Jobs are published after the request answers (plan/decisions.md G2), so wait for them.
+        const mine = await waitFor(async () => (await get('/api/queue/jobs/active')).body.find((j: any) => j.service_id === consumer.topic));
         assert.ok(mine);
         const theirs = (await get('/api/queue/jobs/active', { user: OTHER })).body.find((j: any) => j.service_id === consumer.topic);
         assert.equal(theirs, undefined);

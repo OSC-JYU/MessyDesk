@@ -18,6 +18,7 @@ Files in this folder:
 | [decisions.md](decisions.md) | Ari's answers to questions.md; these override anything else in this plan |
 | [ui-calls.md](ui-calls.md) | Every call the UI makes, with bodies, response fields read and call sites |
 | [consumer-calls.md](consumer-calls.md) | Every call MD-consumers make, the claim loop, and the message fields adapters read |
+| [performance-testing.md](performance-testing.md) | How to measure the size limits (files per set/project, tags, search index) and the bottlenecks the code suggests |
 
 ## 1. What the current backend looks like
 

@@ -8,6 +8,7 @@
 import path from 'node:path';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { toRid } from '../../platform/ids.ts';
+import { sourceFileOf } from '../../shared/graph-store.ts';
 
 export const PDF_ICON_SENTINEL = '__pdf_icon__';
 
@@ -26,11 +27,21 @@ export class DeskGraph {
     }
 
     async forProject(projectRid: string, userRid: string): Promise<VueFlowGraph> {
-        const query = `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()
-            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND $depth > 0), while:($depth < 20)}
-            RETURN node, node.outE() AS edges`;
-        const response = await this.db.sql(query, { user: toRid(userRid), project: toRid(projectRid) }, { serializer: 'studio' });
-        const graph = await this.toVueFlow(response.result as any);
+        const match = `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()
+            {as:node, where:((@type="Set" OR @type="File" OR @type="SetProcess" OR @type="Source") AND set IS NULL AND _deleting IS NULL AND $depth > 0), while:($depth < 20)}`;
+        const params = { user: toRid(userRid), project: toRid(projectRid) };
+        let result: { vertices?: any[]; edges?: any[] };
+        if (this.db.legacy) {
+            result = (await this.db.sql(`${match} RETURN node, node.outE() AS edges`, params, { serializer: 'studio' })).result as any;
+        } else {
+            // Newer servers have no `node.outE()` in MATCH; the nodes' outgoing edges are read
+            // separately, in the same shape as the studio serializer gives them.
+            const vertices = ((await this.db.sql(`${match} RETURN node`, params, { serializer: 'studio' })).result as any)?.vertices || [];
+            const edges = (await this.db.edgesOf<any>('out', '', vertices.map((v: any) => v.r), ['@type AS t', 'process_rid', 'process_id', 'cruncher', 'task']))
+                .map((e) => ({ r: e.rid, t: e.t, i: e.source, o: e.target, p: { process_rid: e.process_rid, process_id: e.process_id, cruncher: e.cruncher, task: e.task } }));
+            result = { vertices, edges };
+        }
+        const graph = await this.toVueFlow(result);
         await this.decorateSets(graph);
         return graph;
     }
@@ -40,12 +51,9 @@ export class DeskGraph {
         if (cache.has(rid)) return cache.get(rid);
         let record = null;
         try {
-            record = await this.db.first(
-                'SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM Process WHERE @rid = :rid LIMIT 1',
-                { rid: toRid(rid) },
-            ) || await this.db.first(
-                'SELECT @rid AS rid, @type AS node_type, label, task, service, service_id, info, description FROM SetProcess WHERE @rid = :rid LIMIT 1',
-                { rid: toRid(rid) },
+            record = await this.db.firstByRid(
+                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description',
+                toRid(rid), "@type IN ['Process', 'SetProcess']",
             );
         } catch {
             record = null;
@@ -169,11 +177,8 @@ export class DeskGraph {
     async processedSetRids(setRids: string[]): Promise<Set<string>> {
         const clean = [...new Set(setRids.map((r) => toRid(r)))];
         if (!clean.length) return new Set();
-        const rows = await this.db.rows(
-            'SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE @in IN :rids AND process_rid IS NOT NULL',
-            { rids: clean },
-        );
-        return new Set(rows.map((r) => r.rid));
+        const rows = await this.db.edgesOf('in', 'DERIVED_FROM', clean, [], 'process_rid IS NOT NULL');
+        return new Set(rows.map((r) => r.source));
     }
 
     /**
@@ -186,11 +191,8 @@ export class DeskGraph {
         if (Number.isFinite(pages) && pages > 1) return false;
         const rid = file.rid || file['@rid'];
         if (!rid) return false;
-        const row = await this.db.first(
-            'MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source.type AS source_type LIMIT 1',
-            { rid: toRid(rid) },
-        );
-        const sourceType = row?.source_type ? String(row.source_type).toLowerCase() : null;
+        const source = await sourceFileOf(this.db, toRid(rid), 'type');
+        const sourceType = source?.type ? String(source.type).toLowerCase() : null;
         return Boolean(sourceType) && sourceType !== 'zip';
     }
 }

@@ -26,6 +26,42 @@ export function projectRidVariants(value: unknown): string[] {
     return [normalized, normalized.replace(/^#/, '')];
 }
 
+// OCR confusions that are two edits apart, which `~1` cannot reach (m read as rn, d as cl, ...).
+const OCR_CONFUSIONS: Array<[string, string]> = [['m', 'rn'], ['rn', 'm'], ['d', 'cl'], ['cl', 'd'], ['w', 'vv'], ['vv', 'w'], ['h', 'li'], ['li', 'h']];
+const MAX_VARIANTS = 6;
+
+/** Spellings of a word with one OCR confusion applied, e.g. governments -> govemments. */
+export function ocrVariants(word: string): string[] {
+    const out = new Set<string>();
+    const lower = word.toLowerCase();
+    for (const [from, to] of OCR_CONFUSIONS) {
+        for (let i = lower.indexOf(from); i >= 0 && out.size < MAX_VARIANTS; i = lower.indexOf(from, i + 1)) {
+            out.add(lower.slice(0, i) + to + lower.slice(i + from.length));
+        }
+    }
+    out.delete(lower);
+    return [...out].slice(0, MAX_VARIANTS);
+}
+
+/**
+ * The query with every plain word of 4+ letters made fuzzy, to find OCR misreadings: `word~1`
+ * (one letter changed, added or removed) or one of its common two-edit OCR confusions
+ * (ocrVariants). Phrases, wildcards, fuzzy/boosted terms, field queries and operators are left
+ * as they are; so are short words, where one edit matches too much.
+ */
+export function fuzzyQuery(query: string): string {
+    const tokens = String(query).match(/[+-]?"[^"]*"\S*|\S+/g) || [];
+    return tokens.map((token) => {
+        const sign = /^[+-]/.test(token) ? token[0] : '';
+        const bare = token.slice(sign.length);
+        if (bare.startsWith('"') || /[*?~^:()\[\]{}\\/]/.test(bare)) return token;
+        if (['AND', 'OR', 'NOT', '&&', '||'].includes(bare)) return token;
+        if (bare.length < 4) return token;
+        const variants = ocrVariants(bare);
+        return variants.length ? `${sign}(${bare}~1 ${variants.join(' ')})` : `${sign}${bare}~1`;
+    }).join(' ');
+}
+
 export class SolrClient {
     private readonly base: string;
     private readonly log: (message: string) => void;
@@ -60,25 +96,56 @@ export class SolrClient {
         if (projects.length === 1) fq.push(`project:"${escapeSolrValue(projects[0])}"`);
         else if (projects.length > 1) fq.push(`(${projects.map((rid) => `project:"${escapeSolrValue(rid)}"`).join(' OR ')})`);
         if (!query) return [];
-        return this.postJson('/query', {
-            params: {
-                q: query,
-                rows,
-                defType: 'edismax',
-                qf: 'fulltext_exact^10 fulltext^2 label^3 description^1',
-                pf: 'fulltext_exact^20',
-                pf2: 'fulltext_exact^5',
-                hl: true,
-                'hl.fl': 'fulltext_exact,fulltext',
-                'hl.simple.pre': '<em>',
-                'hl.simple.post': '</em>',
-                'hl.snippets': 3,
-                'hl.fragsize': 100,
-                wt: 'json',
-                fl: 'description,label,id,node,process,project,set,owner,score,type,path',
-                fq,
-            },
-        });
+        // `fuzzy`: also find OCR misreadings (plan/decisions.md G6). Fuzzy terms go only to the
+        // whole-word field: on the n-gram field they would match almost anything.
+        const fuzzy = data?.fuzzy === true || data?.fuzzy === 'true';
+        const params = {
+            q: query,
+            rows,
+            defType: 'edismax',
+            qf: 'fulltext_exact^10 fulltext^2 label^3 description^1',
+            pf: 'fulltext_exact^20',
+            pf2: 'fulltext_exact^5',
+            hl: true,
+            'hl.fl': 'fulltext_exact',
+            'hl.simple.pre': '<em>',
+            'hl.simple.post': '</em>',
+            'hl.snippets': 3,
+            'hl.fragsize': 100,
+            wt: 'json',
+            fl: 'description,label,id,node,process,project,set,owner,score,type,path',
+            fq,
+        };
+        // Highlighting the n-gram field took most of the search time (~300 ms of 320 for 500 hits,
+        // perf/results/search.md). Whole-word snippets come first; only hits without one (matched
+        // by a word fragment) are highlighted on the n-gram field, in a second, smaller request.
+        // Fuzzy: the normal search OR the fuzzy terms on the whole-word field only (on the n-gram
+        // field they would match almost anything), so word-fragment matches are kept.
+        const request = fuzzy
+            ? {
+                ...params,
+                defType: 'lucene',
+                q: '_query_:"{!edismax qf=$qf pf=$pf pf2=$pf2 v=$qn}" OR _query_:"{!edismax qf=$qff v=$qz}"',
+                qn: query,
+                qz: fuzzyQuery(query),
+                qff: 'fulltext_exact^10 label^3 description^1',
+            }
+            : params;
+        const response = await this.postJson('/query', { params: request });
+        const docs: any[] = response?.response?.docs || [];
+        const highlighting = response?.highlighting || {};
+        const missing = docs.map((d) => d.id).filter((id) => !(highlighting[id]?.fulltext_exact?.length));
+        if (missing.length) {
+            const ids = missing.map((id) => `"${escapeSolrValue(id)}"`).join(' OR ');
+            const fragments = await this.postJson('/query', {
+                params: { ...params, rows: missing.length, fl: 'id', 'hl.fl': 'fulltext', fq: [...fq, `id:(${ids})`] },
+            }).catch(() => null);
+            for (const [id, hl] of Object.entries<any>(fragments?.highlighting || {})) {
+                if (hl?.fulltext?.length) highlighting[id] = { ...(highlighting[id] || {}), fulltext: hl.fulltext };
+            }
+            if (response) response.highlighting = highlighting;
+        }
+        return response;
     }
 
     async projectDocCounts(userRid: string): Promise<any> {
@@ -123,6 +190,22 @@ export class SolrClient {
     /** All docs of one file (one per indexing process). */
     dropFileIndex(fileRid: string): Promise<any> {
         return this.deleteByQuery(`node:"${escapeSolrValue(fileRid)}"`);
+    }
+
+    /**
+     * All docs of many files, with one commit at the end. One delete-and-commit per file made
+     * deleting a 10 000-file set spend most of its time in Solr commits (perf/results/delete.md).
+     */
+    async dropFilesIndex(fileRids: string[]): Promise<void> {
+        for (let i = 0; i < fileRids.length; i += 500) {
+            const chunk = fileRids.slice(i, i + 500).map((r) => `"${escapeSolrValue(r)}"`).join(' OR ');
+            try {
+                await this.postJson('/update', { delete: { query: `node:(${chunk})` } });
+            } catch (error) {
+                this.log(`Solr delete error: ${(error as Error).message}`);
+            }
+        }
+        if (fileRids.length) await this.postJson('/update?commit=true', { commit: {} }).catch((error) => this.log(`Solr commit error: ${(error as Error).message}`));
     }
 
     async dropProjectIndex(userRid: string, projectRid: string): Promise<any> {

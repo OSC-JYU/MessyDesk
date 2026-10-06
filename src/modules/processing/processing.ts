@@ -71,12 +71,16 @@ export class ProcessingService {
     private readonly sse: SseHub;
     private readonly solr: SolrClient;
     private readonly apiUrl: string;
+    private readonly log: (message: string) => void;
+    private readonly dispatching = new Set<Promise<void>>();
 
     constructor(deps: {
         db: ArcadeClient; store: GraphStore; layout: DataLayout; access: AccessService; nodes: NodesService; files: FilesService;
         registry: ServiceRegistry; publisher: Publisher; batches: BatchState; sse: SseHub; solr: SolrClient; apiUrl: string;
+        log?: (message: string) => void;
     }) {
         this.apiUrl = deps.apiUrl;
+        this.log = deps.log || (() => {});
         this.db = deps.db;
         this.store = deps.store;
         this.layout = deps.layout;
@@ -88,6 +92,30 @@ export class ProcessingService {
         this.batches = deps.batches;
         this.sse = deps.sse;
         this.solr = deps.solr;
+    }
+
+    /**
+     * Publishes a batch's jobs after the request has answered. Publishing 10 000 jobs inside the
+     * request took over 5 minutes while consumers were busy, past any proxy timeout
+     * (perf/results/upload-and-batch.md); the UI follows the batch by SSE anyway. A failure is
+     * logged and recorded on the batch node as `dispatch_error`.
+     */
+    private inBackground(batchRid: string, work: () => Promise<unknown>): void {
+        const run: Promise<void> = (async () => {
+            try {
+                await work();
+            } catch (error) {
+                const message = (error as Error)?.message || String(error);
+                this.log(`Dispatching batch ${batchRid} failed: ${message}`);
+                await this.batches.update(batchRid, { dispatch_error: message.slice(0, 500), updated_at: new Date().toISOString() }).catch(() => null);
+            }
+        })().finally(() => this.dispatching.delete(run));
+        this.dispatching.add(run);
+    }
+
+    /** Resolves when every background dispatch has finished (tests, shutdown). */
+    async idle(): Promise<void> {
+        while (this.dispatching.size) await Promise.all([...this.dispatching]);
     }
 
     private service(topic: string): any {
@@ -121,9 +149,9 @@ export class ProcessingService {
     }
 
     private async sourceFileOf(fileRid: string, userRid: string): Promise<any | null> {
-        const row = await this.db.first('MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source', { rid: toRid(fileRid) });
-        if (!row?.source) return null;
-        return this.files.metadata(row.source['@rid'], userRid);
+        const source = await this.store.sourceFileOf(toRid(fileRid), '@rid');
+        if (!source?.['@rid']) return null;
+        return this.files.metadata(source['@rid'], userRid);
     }
 
     // ---- single file ---------------------------------------------------------------------
@@ -234,48 +262,54 @@ export class ProcessingService {
             const groups = await manyToOneGroups(this.db, service, task, files, searchOutput);
             const processNode = await this.nodes.createManyToOneProcess(taskName, service, task, set);
             const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: rid, label: `${task.name || task.id} output`, project_rid: set.project_rid, search_output: searchOutput });
-            await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, total_files: files.length, search_output: searchOutput });
+            await this.batches.init(processNode['@rid'], { topic, task_id: task.id, input_set: rid, output_set: outputSet?.['@rid'] || null, task_payload_json: JSON.stringify(payload), total_files: files.length, search_output: searchOutput });
             this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: processNode, output: outputSet });
             await writeJson(path.dirname(processNode.path), 'params.json', payload);
-            let batchIndex = 1;
-            for (const group of groups) {
-                let groupIndex = 1;
-                for (const f of group.files) {
-                    const msg: any = {
-                        task,
-                        process: processNode,
-                        project_rid: set.project_rid,
-                        set_rid: rid,
-                        input_set: rid,
-                        output_set: outputSet['@rid'],
-                        behaviour,
-                        set_process: processNode['@rid'],
-                        total_files: group.files.length,
-                        current_file: groupIndex,
-                        batch_total_files: files.length,
-                        batch_current_file: batchIndex,
-                        userId: userRid,
-                        file: await this.files.metadata(f['@rid'], userRid),
-                    };
-                    if (group.source_rid) {
-                        msg.root_source = { '@rid': group.source_rid, label: group.label || null, type: group.type || null, path: group.path || null };
-                        msg.root_source_rid = group.source_rid;
-                        msg.root_source_label = group.label || null;
-                        msg.group_size = group.files.length;
+            const dispatchGroups = async () => {
+                let batchIndex = 1;
+                for (const group of groups) {
+                    let groupIndex = 1;
+                    for (const f of group.files) {
+                        // Published after the request: stop when the batch is paused or cancelled meanwhile.
+                        const status = BatchState.status(await this.batches.get(processNode['@rid'])) || 'running';
+                        if (['paused', 'cancelling', 'cancelled', 'done'].includes(status)) return;
+                        const msg: any = {
+                            task,
+                            process: processNode,
+                            project_rid: set.project_rid,
+                            set_rid: rid,
+                            input_set: rid,
+                            output_set: outputSet['@rid'],
+                            behaviour,
+                            set_process: processNode['@rid'],
+                            total_files: group.files.length,
+                            current_file: groupIndex,
+                            batch_total_files: files.length,
+                            batch_current_file: batchIndex,
+                            userId: userRid,
+                            file: await this.files.metadata(f['@rid'], userRid),
+                        };
+                        if (group.source_rid) {
+                            msg.root_source = { '@rid': group.source_rid, label: group.label || null, type: group.type || null, path: group.path || null };
+                            msg.root_source_rid = group.source_rid;
+                            msg.root_source_label = group.label || null;
+                            msg.group_size = group.files.length;
+                        }
+                        if (searchOutput) {
+                            msg.search_output = true;
+                            msg.search_source_set = rid;
+                        }
+                        if (service.tasks?.[task.id]?.source === 'source_file') {
+                            const source = await this.sourceFileOf(f['@rid'], userRid);
+                            if (source) msg.source = source;
+                        }
+                        await this.publisher.publish(`${topic}_batch`, msg);
+                        groupIndex += 1;
+                        batchIndex += 1;
                     }
-                    if (searchOutput) {
-                        msg.search_output = true;
-                        msg.search_source_set = rid;
-                    }
-                    if (service.tasks?.[task.id]?.source === 'source_file') {
-                        const source = await this.sourceFileOf(f['@rid'], userRid);
-                        if (source) msg.source = source;
-                    }
-                    await this.publisher.publish(`${topic}_batch`, msg);
-                    groupIndex += 1;
-                    batchIndex += 1;
                 }
-            }
+            };
+            this.inBackground(processNode['@rid'], dispatchGroups);
             return rid;
         }
 
@@ -289,7 +323,7 @@ export class ProcessingService {
             total_files: files.length,
         });
         this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: nodes.process, output: nodes.set });
-        await this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length });
+        this.inBackground(nodes.process['@rid'], () => this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length }));
         return rid;
     }
 
@@ -301,12 +335,12 @@ export class ProcessingService {
         const rids = entries.map((e) => e['@rid']).filter(Boolean);
         for (let i = 0; i < rids.length; i += 500) {
             const chunk = rids.slice(i, i + 500);
-            const edges = await this.db.rows('SELECT @out AS out, @in AS src FROM DERIVED_FROM WHERE @out IN :rids', { rids: chunk });
-            const sources = [...new Set(edges.map((e: any) => String(e.src)).filter(Boolean))];
+            const edges = await this.db.edgesOf('out', 'DERIVED_FROM', chunk);
+            const sources = [...new Set(edges.map((e: any) => String(e.source)).filter(Boolean))];
             if (!sources.length) continue;
-            const files = await this.db.rows('SELECT @rid AS rid, label, path, type FROM File WHERE @rid IN :rids', { rids: sources });
+            const files = await this.db.rowsByRids('@rid AS rid, label, path, type', sources, "@type = 'File'");
             const byRid = new Map(files.map((f: any) => [String(f.rid), f]));
-            const sourceOf = new Map(edges.map((e: any) => [String(e.out), byRid.get(String(e.src))]));
+            const sourceOf = new Map(edges.map((e: any) => [String(e.target), byRid.get(String(e.source))]));
             for (const entry of entries) {
                 const source = sourceOf.get(String(entry['@rid']));
                 if (source?.path) entry.source = { '@rid': source.rid, label: source.label, path: source.path, type: source.type };
@@ -459,10 +493,10 @@ export class ProcessingService {
         const pending = listing.files.filter((f: any) => !done.has(f['@rid']));
         const current = BatchState.status(await this.batches.get(rid));
         if (current !== 'resuming' && current !== 'running') throw Boom.conflict(`Batch changed state before dispatch (status: ${current || 'unknown'})`);
-        await this.dispatchBatchFiles({
+        this.inBackground(rid, () => this.dispatchBatchFiles({
             service, task, files: pending, batchRid: rid, inputSet: batch.input_set, outputSet: batch.output_set, userRid,
             total: batch.total_files || listing.files.length, startIndex: Number(batch.processed_files || 0) + 1, searchOutput: batch.search_output === true,
-        });
+        }));
         return { pending: pending.length };
     }
 
@@ -472,10 +506,10 @@ export class ProcessingService {
         if (!service?.tasks?.update_tags) return this.solr.updateTagsForFile(fileRid, fields as any);
         const file = await this.files.metadata(fileRid, userRid);
         if (!file) return null;
-        const msg: any = { service, task: { id: 'update_tags', name: service.tasks.update_tags.name || 'Sync tags to search index' }, file, userId: userRid, tag_fields: fields, output_file: false };
-        msg.process = await this.nodes.createProcess(msg);
-        await ensureDir(msg.process.path);
-        await writeJson(path.dirname(msg.process.path), 'message.json', msg);
+        // No Process node (plan/schema-review.md P7): it was one node, one directory and one
+        // message.json per tag change, shown nowhere. The md-solr adapter only echoes the message
+        // to /done, which falls back to the file rid.
+        const msg: any = { service, task: { id: 'update_tags', name: service.tasks.update_tags.name || 'Sync tags to search index' }, file, userId: userRid, tag_fields: fields, output_file: false, process: null };
         await this.publisher.publish(`${service.id}_batch`, msg);
         return null;
     }
@@ -502,7 +536,10 @@ export class ProcessingService {
             try { input = toRid(String(row.input_set)); } catch { continue; }
             if (seen.has(input)) continue;
             seen.add(input);
-            sources.push({ input_set: input });
+            // Keep the run's index options (full or light index, decision G6) when re-indexing.
+            let params: Record<string, unknown> = {};
+            try { params = JSON.parse(row.task_payload_json || '{}')?.params || {}; } catch { params = {}; }
+            sources.push({ input_set: input, params });
         }
         let requeuedSets = 0;
         let requeuedFiles = 0;
@@ -513,7 +550,7 @@ export class ProcessingService {
                 if (!set) { warnings.push({ set_rid: source.input_set, reason: 'set metadata not found' }); continue; }
                 const files = (await this.files.setFiles(source.input_set, userRid, { limit: 10000 })).files;
                 if (!files.length) { warnings.push({ set_rid: source.input_set, reason: 'set has no files' }); continue; }
-                const task = { id: 'index', name: service.tasks.index.name || 'Search index' };
+                const task = { id: 'index', name: service.tasks.index.name || 'Search index', params: source.params };
                 const searchOutput = isSearchOutputTask(service, task);
                 const processNode = await this.nodes.createManyToOneProcess(task.name, service, task, set);
                 const outputSet = await this.nodes.createProcessSet(processNode['@rid'], { input_set: source.input_set, label: `${task.name || task.id} output`, project_rid: set.project_rid, search_output: searchOutput });

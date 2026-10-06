@@ -27,7 +27,7 @@ export class UsersService {
         if (mailOrRid.startsWith('#')) {
             const rid = tryRid(mailOrRid);
             if (!rid) return null;
-            return this.db.first<UserRecord>(`SELECT ${USER_FIELDS} FROM User WHERE @rid = :rid`, { rid });
+            return this.db.firstByRid<UserRecord>(USER_FIELDS, rid, "@type = 'User'");
         }
         return this.db.first<UserRecord>(`SELECT ${USER_FIELDS} FROM User WHERE id = :id`, { id: mailOrRid });
     }
@@ -60,12 +60,12 @@ export class UsersService {
         const rid = toRid(userRid);
         const clean = Array.isArray(groups) ? groups.map((g) => String(g).trim()).filter(Boolean) : [];
         await this.store.setAttribute(rid, 'service_groups', clean);
-        return this.db.first('SELECT @rid AS rid, service_groups FROM User WHERE @rid = :rid', { rid });
+        return this.db.firstByRid('@rid AS rid, service_groups', rid, "@type = 'User'");
     }
 
     async updateSettings(userRid: string, patch: Record<string, string>): Promise<Record<string, unknown>> {
         const rid = toRid(userRid);
-        const current = await this.db.first('SELECT settings FROM User WHERE @rid = :rid', { rid });
+        const current = await this.db.firstByRid('settings', rid, "@type = 'User'");
         if (!current) throw Boom.notFound('User not found');
         const settings = { ...(current.settings || {}), ...patch };
         await this.db.sql(`UPDATE ${rid} SET settings = :settings`, { settings });

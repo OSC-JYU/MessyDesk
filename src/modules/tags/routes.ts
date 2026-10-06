@@ -11,6 +11,9 @@ function split(value: unknown): string[] | undefined {
 function scope(query: any): Record<string, unknown> {
     return {
         search: query.search,
+        created_by: query.created_by,
+        skip: query.skip,
+        limit: query.limit,
         project_rid: query.project_rid,
         project_rids: split(query.project_rids),
         file_rids: split(query.file_rids),
@@ -25,6 +28,7 @@ export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, co
         { method: 'GET', path: '/api/entities', handler: (r) => tags.groupedEntities(currentUser(r).rid, scope(r.query)) },
         { method: 'POST', path: '/api/entities', handler: async (r) => (await tags.createEntity(r.payload || {}, currentUser(r).rid)) ?? null },
         { method: 'GET', path: '/api/entities/types', handler: (r) => tags.entityTypeSchema(currentUser(r).rid) },
+        { method: 'GET', path: '/api/entities/by-type/{type}', handler: (r) => tags.entitiesOfType(currentUser(r).rid, r.params.type, scope(r.query)) },
         { method: 'GET', path: '/api/entities/items', handler: (r) => tags.entityItems((r.query as any).entities, currentUser(r).rid, scope(r.query), config.apiUrl) },
         { method: 'GET', path: '/api/entities/sets/{rid}', handler: (r) => tags.setEntities(r.params.rid, currentUser(r).rid) },
         { method: 'POST', path: '/api/entities/{rid}/vertex/{vid}', handler: async (r) => (await tags.link(r.params.rid, r.params.vid, currentUser(r).rid)) ?? null },

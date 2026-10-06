@@ -99,7 +99,10 @@ export class ArcadeClient {
 
     private async run<T>(language: string, command: string, params: Record<string, unknown> | undefined, options: QueryOptions): Promise<ArcadeEnvelope<T>> {
         const retries = options.retries ?? this.opts.writeRetries;
-        const body: Record<string, unknown> = { language, command };
+        // The HTTP API returns at most 20 000 rows unless told otherwise (23.7.1 and 26.x alike),
+        // which silently cut, for example, the files of a big desk being deleted. -1 means "no
+        // limit" on 26.x but returns nothing on 23.7.1, so a large number is used.
+        const body: Record<string, unknown> = { language, command, limit: 100_000_000 };
         if (params && Object.keys(params).length) body.params = params;
         if (options.serializer) body.serializer = options.serializer;
         let lastError: DbError | Error | null = null;
@@ -193,4 +196,73 @@ export class ArcadeClient {
         }
         return this.rows<T>(`TRAVERSE ${direction}(${edgeList}) FROM :rid`, { rid });
     }
+
+    // ---- reading known records ------------------------------------------------------------
+
+    /**
+     * `SELECT <select> FROM [rid, ...] [WHERE <where>]`: reads records by RID directly. The
+     * equivalent `SELECT FROM <Type> WHERE @rid IN :rids` reads every record of the type and checks
+     * each against the list (81 s for 500 RIDs among 756 000 files, perf/results/step1-query-profile.md).
+     * RIDs are validated and inlined, since a bound parameter is not accepted as the target; they
+     * go in chunks of 500. A missing record fails the whole statement, so a chunk that fails that
+     * way is read again one RID at a time, skipping the missing ones.
+     */
+    async rowsByRids<T = any>(select: string, rids: Iterable<unknown>, where?: string, params?: Record<string, unknown>): Promise<T[]> {
+        return this.readByRids<T>(rids, (target) => `SELECT ${select} FROM ${target}${where ? ` WHERE ${where}` : ''}`, params);
+    }
+
+    /**
+     * One record by RID, or null when it is missing or fails `where` (e.g. "@type = 'Entity' AND
+     * owner = :owner"). `SELECT FROM <Type> WHERE @rid = :rid` reads every record of the type: 160 ms
+     * per lookup at 100 000 entities (perf/results/tags.md).
+     */
+    async firstByRid<T = any>(select: string, rid: unknown, where?: string, params?: Record<string, unknown>): Promise<T | null> {
+        return (await this.rowsByRids<T>(select, [rid], where, params))[0] ?? null;
+    }
+
+    /**
+     * The edges of one type ('' for every type) that end (`in`) or start (`out`) at the given records, found from the
+     * records themselves instead of by scanning the edge type. Each row has the edge's `rid`,
+     * `target` (@out: the derived node), `source` (@in) and the requested edge properties.
+     */
+    async edgesOf<T = any>(direction: 'in' | 'out' | 'both', edge: string, rids: Iterable<unknown>, properties: string[] = [], where?: string, params?: Record<string, unknown>): Promise<T[]> {
+        const fields = ['@rid AS rid', '@out AS target', '@in AS source', ...properties].join(', ');
+        return this.readByRids<T>(rids, (target) => `SELECT ${fields} FROM (SELECT expand(${direction}E(${edge ? `"${edge}"` : ''})) FROM ${target})${where ? ` WHERE ${where}` : ''}`, params);
+    }
+
+    private async readByRids<T>(rids: Iterable<unknown>, statement: (target: string) => string, params?: Record<string, unknown>): Promise<T[]> {
+        const clean: string[] = [];
+        const seen = new Set<string>();
+        for (const value of rids) {
+            const match = typeof value === 'string' ? value.trim().match(/^#?(\d+):(\d+)$/) : null;
+            if (!match) continue;
+            const rid = `#${match[1]}:${match[2]}`;
+            if (!seen.has(rid)) {
+                seen.add(rid);
+                clean.push(rid);
+            }
+        }
+        const out: T[] = [];
+        for (let i = 0; i < clean.length; i += 500) {
+            const chunk = clean.slice(i, i + 500);
+            try {
+                out.push(...await this.rows<T>(statement(`[${chunk.join(', ')}]`), params, { quiet: true }));
+            } catch (error) {
+                if (!isMissingRecord(error)) throw error;
+                for (const rid of chunk) {
+                    try {
+                        out.push(...await this.rows<T>(statement(rid), params, { quiet: true }));
+                    } catch (single) {
+                        if (!isMissingRecord(single)) throw single;
+                    }
+                }
+            }
+        }
+        return out;
+    }
+}
+
+function isMissingRecord(error: unknown): boolean {
+    const text = `${(error as Error)?.message || ''} ${(error as DbError)?.detail || ''}`;
+    return /not found/i.test(text);
 }

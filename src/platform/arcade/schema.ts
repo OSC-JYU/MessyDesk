@@ -18,13 +18,23 @@ export const EDGE_TYPES = [
     'DERIVED_FROM', 'HAS_OWNER', 'HAS_SOURCE',
 ] as const;
 
-const CREATED_PROPERTIES = [
-    "CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
-    "CREATE PROPERTY Project.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY Process.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY SetProcess.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-    "CREATE PROPERTY File.created IF NOT EXISTS DATETIME (readonly, default sysdate('YYYY-MM-DD HH:MM:SS'))",
-];
+const CREATED_TYPES = ['Project', 'Process', 'SetProcess', 'File'] as const;
+
+/**
+ * `created` timestamps default to the time of insert. 23.7.1 takes `sysdate(format)`; ArcadeDB 26
+ * reads that argument as a time zone and fails every insert, so the current mode uses plain
+ * `sysdate()` (the property is a DATETIME either way).
+ */
+function createdDefault(legacy: boolean): string {
+    return legacy ? "sysdate('YYYY-MM-DD HH:MM:SS')" : 'sysdate()';
+}
+
+function createdProperties(legacy: boolean): string[] {
+    return [
+        "CREATE PROPERTY Project.label IF NOT EXISTS STRING (mandatory true, notnull true)",
+        ...CREATED_TYPES.map((type) => `CREATE PROPERTY ${type}.created IF NOT EXISTS DATETIME (readonly, default ${createdDefault(legacy)})`),
+    ];
+}
 
 const PROPERTIES = [
     'CREATE PROPERTY File.project_rid IF NOT EXISTS STRING',
@@ -37,9 +47,19 @@ const PROPERTIES = [
     'CREATE PROPERTY TagLink.region_id IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING',
     'CREATE PROPERTY ServiceGroup.id IF NOT EXISTS STRING',
+    // New (perf/results/step1-query-profile.md): looked up by value, so they get indexes below.
+    'CREATE PROPERTY DERIVED_FROM.process_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY Process.set_process IF NOT EXISTS STRING',
+    'CREATE PROPERTY Process.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY SetProcess.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY User.id IF NOT EXISTS STRING',
+    'CREATE PROPERTY TagLink.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY Entity.type IF NOT EXISTS STRING',
+    'CREATE PROPERTY Entity.label IF NOT EXISTS STRING',
 ];
 
 const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
+    // Composite indexes list their properties comma-separated.
     ['File', 'project_rid', 'NOTUNIQUE'],
     ['File', 'set', 'NOTUNIQUE'],
     // New: lets a thumbnail request find its file (ownership check, plan/decisions.md B3).
@@ -50,7 +70,28 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['TagLink', 'target_rid', 'NOTUNIQUE'],
     ['TagLink', 'entity_rid', 'NOTUNIQUE'],
     ['ServiceGroup', 'id', 'UNIQUE'],
+    // New: batch resume, cascade delete and grouped-run retries look edges up by process; the
+    // delete cascade finds a batch's processes; reindex finds a desk's processes; every request
+    // finds its user by id. All are additive: the old backend ignores them.
+    ['DERIVED_FROM', 'process_rid', 'NOTUNIQUE'],
+    ['Process', 'set_process', 'NOTUNIQUE'],
+    ['Process', 'project_rid', 'NOTUNIQUE'],
+    ['SetProcess', 'project_rid', 'NOTUNIQUE'],
+    ['User', 'id', 'NOTUNIQUE'],
+    // Tags (perf/results/tags.md): a user's tags sorted by label (/api/tags 1.2 s -> 0.14 s at
+    // 100 000 entities) and finding a tag by type and label for every autotag label. A composite
+    // TagLink (owner, created_by) index was tried and left out: on ArcadeDB 25.3.1 queries on
+    // `owner` alone then returned 24 times too many rows.
+    ['Entity', 'owner, type, label', 'NOTUNIQUE'],
+    // The desk filter of the tag lists reads links by desk (plan/decisions.md G4).
+    ['TagLink', 'project_rid', 'NOTUNIQUE'],
 ];
+
+// Buckets per type. ArcadeDB 23.7.1 gave every type 8 buckets by default; 25.x gives one, and
+// with one bucket concurrent inserts (parallel uploads, parallel consumer callbacks) conflict on
+// the same pages: on 25.3.1 that lost uploads and corrupted records (perf/results/upload-and-batch.md).
+// Only types created from now on get it; existing types keep their buckets.
+const BUCKETS = 8;
 
 async function quietly(fn: () => Promise<unknown>, log: (m: string) => void, label: string): Promise<void> {
     try {
@@ -65,19 +106,24 @@ async function quietly(fn: () => Promise<unknown>, log: (m: string) => void, lab
 export async function ensureDatabase(db: ArcadeClient, log: (m: string) => void): Promise<boolean> {
     if (await db.databaseExists()) return false;
     await db.createDatabase();
-    for (const statement of CREATED_PROPERTIES) {
+    for (const statement of createdProperties(db.legacy)) {
         // Types must exist before their properties.
         const type = statement.split(' ')[2].split('.')[0];
-        await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
+        await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
         await quietly(() => db.sql(statement, undefined, { quiet: true }), log, statement);
     }
     return true;
 }
 
 export async function ensureSchema(db: ArcadeClient, log: (m: string) => void): Promise<void> {
-    for (const type of VERTEX_TYPES) await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
-    for (const type of DOCUMENT_TYPES) await quietly(() => db.sql(`CREATE DOCUMENT TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
-    for (const type of EDGE_TYPES) await quietly(() => db.sql(`CREATE EDGE TYPE ${type} IF NOT EXISTS`, undefined, { quiet: true }), log, type);
+    for (const type of VERTEX_TYPES) await quietly(() => db.sql(`CREATE VERTEX TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
+    for (const type of DOCUMENT_TYPES) await quietly(() => db.sql(`CREATE DOCUMENT TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
+    for (const type of EDGE_TYPES) await quietly(() => db.sql(`CREATE EDGE TYPE ${type} IF NOT EXISTS BUCKETS ${BUCKETS}`, undefined, { quiet: true }), log, type);
     for (const statement of PROPERTIES) await quietly(() => db.sql(statement, undefined, { quiet: true }), log, statement);
     for (const [type, property, kind] of INDEXES) await quietly(() => db.ensureIndex(type, property, kind), log, `${type}.${property}`);
+    if (!db.legacy) {
+        // A database created by 23.7.1 keeps its sysdate(format) defaults, which newer servers
+        // cannot evaluate: every Project/Process/SetProcess/File insert would fail.
+        for (const type of CREATED_TYPES) await quietly(() => db.sql(`ALTER PROPERTY ${type}.created DEFAULT ${createdDefault(false)}`, undefined, { quiet: true }), log, `${type}.created default`);
+    }
 }

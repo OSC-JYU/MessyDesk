@@ -71,7 +71,8 @@ export class ProjectsService {
     }
 
     async list(userRid: string): Promise<any[]> {
-        const projects = await this.ownedProjects(userRid);
+        // A desk being deleted in the background is already gone for the user.
+        const projects = (await this.ownedProjects(userRid)).filter((pr) => !pr._deleting);
         const data = [];
         for (const pr of projects) {
             let nodeCount = 0;

@@ -17,7 +17,7 @@ import { tryRid } from '../../platform/ids.ts';
 import { exists, moveFile, writeJson } from '../../platform/storage/fsutil.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
-import type { GraphStore } from '../../shared/graph-store.ts';
+import { sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
 import { ROLE, SERVICE } from '../../shared/service-ids.ts';
 import { BatchState } from '../batches/batch-state.ts';
 import { imageMetadata, textDescription } from '../files/metadata.ts';
@@ -166,8 +166,9 @@ export class ResultsService {
     private async pdfHasThumbnail(file: any): Promise<boolean> {
         const pages = Number(file?.metadata?.page_count);
         if (Number.isFinite(pages) && pages > 1) return false;
-        const row = await this.d.db.first('MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source.type AS t LIMIT 1', { rid: file.rid || file['@rid'] });
-        return Boolean(row?.t) && lower(row.t) !== 'zip';
+        const rid = tryRid(file.rid || file['@rid']);
+        const source = rid ? await sourceFileOf(this.d.db, rid, 'type') : null;
+        return Boolean(source?.type) && lower(source.type) !== 'zip';
     }
 
     private async handleThumbnail(message: any, contentPath: string): Promise<void> {
@@ -340,7 +341,7 @@ export class ResultsService {
             sse.send(message.userId, { command: 'add', type: message.file.type, input: processRid, node: fileNode, process: { '@rid': processRid, status: 'finished' } });
             return;
         }
-        const count = await nodes.updateFileCount(message.output_set);
+        const count = await nodes.updateFileCount(message.output_set, 'later');
         const total = message.batch_total_files || message.total_files;
         const batchRid = message.set_process || message.process['@rid'];
         const outputTotal = Number(message.file_total || 0);
@@ -356,6 +357,7 @@ export class ResultsService {
         const finished = BatchState.status(batch) === 'done' || (batchTotal && processed >= batchTotal);
         const grouped = message.behaviour === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
         if (finished) {
+            await nodes.flushSetManifest(message.output_set);
             if (isImport) await this.d.importPipeline.complete(message);
             sse.send(message.userId, {
                 command: 'process_finished',
@@ -400,6 +402,7 @@ export class ResultsService {
             if (node) await store.setAttribute(node['@rid'], 'summary', message.summary);
         }
         if (BatchState.status(batch) === 'done' || (total > 0 && current >= total)) {
+            if (message.output_set) await this.d.nodes.flushSetManifest(message.output_set);
             sse.send(message.userId, { command: 'process_finished', process: { ...(message.process || {}), '@rid': batchRid, status: 'done' }, summary: message.summary || null });
         }
     }

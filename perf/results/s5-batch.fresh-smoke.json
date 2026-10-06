@@ -1,0 +1,112 @@
+{
+  "scenario": "S5 batch one-to-one",
+  "files": 200,
+  "workers": 4,
+  "topic": "md-perf-1791212502307",
+  "batch": "#7:0",
+  "output_set": "#19:1",
+  "dispatch_ms": 744,
+  "seconds": 21,
+  "jobs_per_minute": 577,
+  "callback_ms": {
+    "n": 200,
+    "p50": 32,
+    "p95": 322,
+    "p99": 711,
+    "max": 720
+  },
+  "callback_ms_by_third": [
+    {
+      "n": 66,
+      "p50": 31,
+      "p95": 346,
+      "p99": 720,
+      "max": 720
+    },
+    {
+      "n": 67,
+      "p50": 31,
+      "p95": 219,
+      "p99": 626,
+      "max": 626
+    },
+    {
+      "n": 67,
+      "p50": 32,
+      "p95": 217,
+      "p99": 680,
+      "max": 680
+    }
+  ],
+  "claim_ms": {
+    "n": 831,
+    "p50": 4,
+    "p95": 6,
+    "p99": 9,
+    "max": 17
+  },
+  "complete_ms": {
+    "n": 200,
+    "p50": 1,
+    "p95": 2,
+    "p99": 5,
+    "max": 7
+  },
+  "callback_errors": 0,
+  "checks": {
+    "outputs": 200,
+    "inputs_with_output": 201,
+    "inputs_with_duplicate_outputs": 0,
+    "processed_files": 199,
+    "failed_files": 0,
+    "status": "running",
+    "output_set_count": 200,
+    "ok": false
+  },
+  "progress": [
+    {
+      "s": 1,
+      "processed": 22
+    },
+    {
+      "s": 3,
+      "processed": 117
+    },
+    {
+      "s": 5,
+      "processed": 199
+    },
+    {
+      "s": 7,
+      "processed": 199
+    },
+    {
+      "s": 9,
+      "processed": 199
+    },
+    {
+      "s": 11,
+      "processed": 199
+    },
+    {
+      "s": 13,
+      "processed": 199
+    },
+    {
+      "s": 15,
+      "processed": 199
+    },
+    {
+      "s": 17,
+      "processed": 199
+    },
+    {
+      "s": 19,
+      "processed": 199
+    },
+    {
+      "s": 21,
+      "processed": 199
+    }
+  ]
+}

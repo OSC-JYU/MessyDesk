@@ -1,0 +1,26 @@
+{
+  "scenario": "S1 upload",
+  "files": 1000,
+  "chunk": 20,
+  "parallel": 3,
+  "thumbnails": false,
+  "project": "#10:0",
+  "set": "#160:0",
+  "seconds": 3,
+  "files_per_second": 299.4,
+  "uploaded": 1000,
+  "failed_chunks": 0,
+  "members": 1000,
+  "stored_count": 1000,
+  "manifest_items": 1000,
+  "chunk_ms_by_set_size": [
+    {
+      "set_size_from": 0,
+      "n": 50,
+      "p50": 190,
+      "p95": 296,
+      "p99": 308,
+      "max": 308
+    }
+  ]
+}

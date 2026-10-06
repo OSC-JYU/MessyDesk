@@ -21,6 +21,7 @@ import { fileRoutes } from './modules/files/routes.ts';
 import { FiltersService } from './modules/filters/filters.ts';
 import { GraphService } from './modules/graph/graph.ts';
 import { graphRoutes } from './modules/graph/routes.ts';
+import { BackgroundDeletes } from './modules/graph/deletes.ts';
 import { ImportPipeline } from './modules/import/import.ts';
 import { miscRoutes } from './modules/misc/routes.ts';
 import { NodesService } from './modules/nodes/nodes.ts';
@@ -106,22 +107,26 @@ async function main(): Promise<void> {
 
     const registry = new ServiceRegistry(config.serviceRegistryPath, config.consumerTtlSeconds);
     await registry.load();
-    const nodes = new NodesService(db, store, layout);
+    const nodes = new NodesService(db, store, layout, { log: (m) => logger.warn(m) });
     const deskGraph = new DeskGraph(db, config.apiUrl);
     const thumbnails = new ThumbnailService(publisher, layout);
     const importPipeline = new ImportPipeline(store, nodes, registry, publisher, sse);
     const files = new FilesService({ db, store, layout, access, nodes, tags, thumbnails, registry, importPipeline, deskGraph, sse, apiUrl: config.apiUrl, maxVersionTextBytes: config.maxVersionTextBytes });
     const batches = new BatchState(db, store);
-    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl });
+    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
+    // Links made before TagLink.project_rid existed get their desk in the background.
+    tags.backfillLinkProjects((m) => logger.info(m)).catch((error) => logger.error(`TagLink desk backfill failed: ${(error as Error).message}`));
     const graph = new GraphService(db, store, access, tags, solr, layout);
+    const deletes = new BackgroundDeletes(graph, store, access, queue, sse, (m) => logger.warn(m));
+    deletes.resumePending();
     const filters = new FiltersService(db, store, layout, access, nodes);
     filters.setFilters(await loadFilters(config.filtersDir, (m) => logger.warn(m)));
 
     const deps: Deps = {
         config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users,
         projects: new ProjectsService(db, store, layout, access, { expirationDays: config.projectExpirationDays, quotaGb: config.diskQuotaGb }),
-        deskGraph, nodes, graph, files, thumbnails,
+        deskGraph, nodes, graph, deletes, files, thumbnails,
         semantic: new SemanticSearch({ db, access, registry, publisher, sse, layout, logger }),
         zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs, registry),
         importPipeline, registry,
@@ -166,6 +171,9 @@ async function main(): Promise<void> {
         logger.info('Shutting down');
         sse.closeAll();
         await server.stop({ timeout: 5000 });
+        await processing.idle();
+        await deletes.idle();
+        await nodes.flushAllManifests();
         queue.close();
         process.exit(0);
     };

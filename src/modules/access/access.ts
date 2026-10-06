@@ -25,18 +25,23 @@ export class AccessService {
     async findOwned(rid: unknown, userRid: string): Promise<OwnedNode | null> {
         const clean = tryRid(rid);
         if (!clean || !userRid) return null;
-        const row = await this.db.first(
-            `MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = :rid), while:($depth < 40)} RETURN node, project.@rid AS project_rid LIMIT 1`,
-            { user: toRid(userRid), rid: clean },
-        );
-        if (row?.node) return { node: row.node, projectRid: row.project_rid };
-        // A project itself.
-        const project = await this.db.first(
-            `MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type:User, where:(@rid = :user)} RETURN project`,
-            { user: toRid(userRid), rid: clean },
-        );
-        if (project?.project) return { node: project.project, projectRid: project.project['@rid'] };
-        return null;
+        // Walk up from the node (outgoing edges, up to 40 levels) to the projects it belongs to
+        // and check their owners. The same reachability as matching from the user's projects
+        // downwards, which read the user's whole graph on every request.
+        const user = toRid(userRid);
+        let projects: Array<{ rid: string; owners: unknown }>;
+        try {
+            projects = await this.db.rows(`SELECT @rid AS rid, out('HAS_OWNER').@rid AS owners FROM (TRAVERSE out() FROM ${clean} MAXDEPTH 40) WHERE @type = 'Project' AND _deleting IS NULL`);
+        } catch (error) {
+            if (/not found/i.test(`${(error as Error)?.message} ${(error as any)?.detail}`)) return null;
+            throw error;
+        }
+        const project = projects.find((p) => Array.isArray(p.owners) && p.owners.map(String).includes(user));
+        if (!project) return null;
+        const node = await this.db.first(`SELECT FROM ${clean}`);
+        // Being deleted in the background (graph/deletes.ts): already gone for the user.
+        if (!node || node._deleting) return null;
+        return { node, projectRid: project.rid };
     }
 
     async canRead(rid: unknown, userRid: string): Promise<boolean> {
@@ -54,7 +59,7 @@ export class AccessService {
         const clean = tryRid(projectRid);
         if (!clean) return false;
         const row = await this.db.first(
-            `MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type:User, as:p, where:(@rid = :user)} RETURN project.@rid AS rid`,
+            `MATCH {type:Project, as:project, where:(@rid = :rid AND _deleting IS NULL)}-HAS_OWNER->{type:User, as:p, where:(@rid = :user)} RETURN project.@rid AS rid`,
             { rid: clean, user: toRid(userRid) },
         );
         return Boolean(row?.rid);

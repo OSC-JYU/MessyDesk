@@ -1,0 +1,93 @@
+{
+  "database": "perf_profile",
+  "label": "after",
+  "schema_ms": 597,
+  "when": "2026-10-05T14:40:06.111Z",
+  "results": [
+    {
+      "id": "access.findOwned(file)",
+      "ms": 1.9,
+      "result": "object"
+    },
+    {
+      "id": "access.findOwned(output)",
+      "ms": 2,
+      "result": "object"
+    },
+    {
+      "id": "access.findOwned(other user)",
+      "ms": 0.9,
+      "result": "null"
+    },
+    {
+      "id": "store.projectRidOf(output)",
+      "ms": 0.8,
+      "result": "#1:0"
+    },
+    {
+      "id": "store.sourceFileOf(output)",
+      "ms": 0.7,
+      "result": "object"
+    },
+    {
+      "id": "store.connectDerivedFrom (existing edge)",
+      "ms": 3.1,
+      "result": "null"
+    },
+    {
+      "id": "desk.processedSetRids",
+      "ms": 0.9,
+      "result": "4 items"
+    },
+    {
+      "id": "desk.usePdfThumbnail",
+      "ms": 0.9,
+      "result": "true"
+    },
+    {
+      "id": "batches.processedInputs",
+      "ms": 4.7,
+      "result": "1001 rows"
+    },
+    {
+      "id": "batches.outputFor",
+      "ms": 1.8,
+      "result": "object"
+    },
+    {
+      "id": "batches.processOfSet",
+      "ms": 1.9,
+      "result": "object"
+    },
+    {
+      "id": "grouping.groupByRootSource (1 000 files)",
+      "ms": 54.2,
+      "result": "1000 rows"
+    },
+    {
+      "id": "db.rowsByRids (500 files)",
+      "ms": 2.9,
+      "result": "500 rows"
+    },
+    {
+      "id": "delete: edges of a node (both ways)",
+      "ms": 0.8,
+      "result": "1 rows"
+    },
+    {
+      "id": "delete: outputs by process_rid",
+      "ms": 3.8,
+      "result": "1001 rows"
+    },
+    {
+      "id": "tags.groupedEntities (project filter)",
+      "ms": 44.8,
+      "result": "2 rows"
+    },
+    {
+      "id": "tags.setEntities",
+      "ms": 19.3,
+      "result": "496 rows"
+    }
+  ]
+}

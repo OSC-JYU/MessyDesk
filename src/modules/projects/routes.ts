@@ -10,7 +10,7 @@ function rid(value: string): string {
     return r;
 }
 
-export function projectRoutes({ projects, deskGraph, access, nodes, graph, processing, tags }: Deps): ServerRoute[] {
+export function projectRoutes({ projects, deskGraph, access, nodes, graph, processing, tags, deletes }: Deps): ServerRoute[] {
     return [
         {
             method: 'POST',
@@ -49,7 +49,8 @@ export function projectRoutes({ projects, deskGraph, access, nodes, graph, proce
                 const user = currentUser(request);
                 const project = rid(request.params.rid);
                 if (!(await access.isProjectOwner(project, user.rid))) throw Boom.notFound('Project not found or access denied');
-                await graph.deleteNode(project, user.rid);
+                // Answers at once; the desk is hidden and deleted in the background (decisions G5).
+                await deletes.start(project, user.rid);
                 return project;
             },
         },

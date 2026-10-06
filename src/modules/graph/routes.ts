@@ -11,7 +11,7 @@ function rid(value: string): string {
     return r;
 }
 
-export function graphRoutes({ graph, access, queue, sse }: Deps): ServerRoute[] {
+export function graphRoutes({ graph, access, queue, sse, deletes }: Deps): ServerRoute[] {
     return [
         {
             method: 'GET',
@@ -49,7 +49,9 @@ export function graphRoutes({ graph, access, queue, sse }: Deps): ServerRoute[] 
             handler: async (request) => {
                 const node = rid(request.params.rid);
                 if (queue.hasActiveJobsFor(node)) throw Boom.conflict('Cannot delete a node with active queue jobs. Pause or cancel the batch first.');
-                return graph.deleteNode(node, currentUser(request).rid);
+                // Answers at once; the delete finishes in the background (plan/decisions.md G5).
+                await deletes.start(node, currentUser(request).rid);
+                return { path: null, deleted: null, status: 'deleting' };
             },
         },
         {

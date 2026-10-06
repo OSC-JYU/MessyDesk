@@ -1,0 +1,117 @@
+{
+  "when": "2026-10-05T18:46:36.349Z",
+  "results": [
+    {
+      "text_mb": 11,
+      "docs": 4500,
+      "index_mb": 85,
+      "index_bytes_per_doc": 19855,
+      "index_to_text": 7.9,
+      "bulk_load_docs_per_s": 440,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 64,
+        "p95": 244,
+        "p99": 245,
+        "max": 245,
+        "avg_hits": 1277
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 6,
+        "p95": 209,
+        "p99": 215,
+        "max": 215,
+        "avg_hits": 64
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 93,
+        "p95": 423,
+        "p99": 425,
+        "max": 425,
+        "avg_hits": 1277
+      }
+    },
+    {
+      "text_mb": 201,
+      "docs": 84000,
+      "index_mb": 1521,
+      "index_bytes_per_doc": 18984,
+      "index_to_text": 7.6,
+      "bulk_load_docs_per_s": 532,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 156,
+        "p95": 249,
+        "p99": 251,
+        "max": 251,
+        "avg_hits": 23827
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 47,
+        "p95": 241,
+        "p99": 245,
+        "max": 245,
+        "avg_hits": 1188
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 290,
+        "p95": 429,
+        "p99": 505,
+        "max": 505,
+        "avg_hits": 23827
+      }
+    },
+    {
+      "text_mb": 1000,
+      "docs": 419000,
+      "index_mb": 7088,
+      "index_bytes_per_doc": 17739,
+      "index_to_text": 7.1,
+      "bulk_load_docs_per_s": 526,
+      "search_all_desks": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 127,
+        "p95": 262,
+        "p99": 263,
+        "max": 263,
+        "avg_hits": 118802
+      },
+      "search_one_desk": {
+        "concurrency": 1,
+        "n": 40,
+        "p50": 115,
+        "p95": 244,
+        "p99": 254,
+        "max": 254,
+        "avg_hits": 5938
+      },
+      "search_10_parallel": {
+        "concurrency": 10,
+        "n": 40,
+        "p50": 225,
+        "p95": 444,
+        "p99": 604,
+        "max": 604,
+        "avg_hits": 118802
+      }
+    }
+  ],
+  "md_solr_style_commit_per_page_ms": {
+    "n": 100,
+    "p50": 67,
+    "p95": 102,
+    "p99": 235,
+    "max": 235
+  }
+}
