@@ -19,6 +19,7 @@ Files in this folder:
 | [ui-calls.md](ui-calls.md) | Every call the UI makes, with bodies, response fields read and call sites |
 | [consumer-calls.md](consumer-calls.md) | Every call MD-consumers make, the claim loop, and the message fields adapters read |
 | [performance-testing.md](performance-testing.md) | How to measure the size limits (files per set/project, tags, search index) and the bottlenecks the code suggests |
+| [llm-adapter.md](llm-adapter.md) | One LLM adapter for OpenAI-compatible providers plus Gemini, provider config, prompt → model → provider flow, LLM autotagger; open questions |
 
 ## 1. What the current backend looks like
 
