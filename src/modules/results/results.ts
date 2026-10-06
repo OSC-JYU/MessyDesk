@@ -46,6 +46,15 @@ function isThumbnail(message: any): boolean {
         || lower(message?.id) === SERVICE.THUMBNAILER || lower(message?.task?.id) === 'thumbnail';
 }
 
+const SET_PREVIEW_COUNT = 4;
+const SET_THUMBNAIL_UPDATE_EVERY = 10;
+
+/** Whether the thumbnail of the nth file in a batch should refresh the set in the UI. */
+export function shouldNotifySetThumbnail(current: number): boolean {
+    if (!Number.isFinite(current) || current < 1) return false;
+    return current <= SET_PREVIEW_COUNT || current % SET_THUMBNAIL_UPDATE_EVERY === 0;
+}
+
 function thumbnailFilename(message: any): string {
     const explicit = String(message?.thumb_name || '').trim();
     if (explicit) return path.basename(explicit);
@@ -186,9 +195,12 @@ export class ResultsService {
         const isMain = name.toLowerCase() === 'thumbnail.jpg';
         const isBatch = Boolean(message?.output_set);
         const isLast = isBatch && Number(message?.current_file) === Number(message?.total_files);
-        // Single files notify on the final thumbnail; batches only once at the end.
-        if (!(internal || (!isBatch && isMain) || isLast)) return;
-        if (message.output_set && isLast) {
+        // Single files notify on the final thumbnail. Batches notify for the first few files (the
+        // set card shows four), then on every Nth file and at the end, so a set being browsed
+        // fills in without one SSE message per thumbnail.
+        const notifyBatch = isBatch && (isLast || (isMain && shouldNotifySetThumbnail(Number(message?.current_file))));
+        if (!(internal || (!isBatch && isMain) || notifyBatch)) return;
+        if (message.output_set && notifyBatch) {
             this.d.sse.send(message.userId, { command: 'update', target: message.output_set, node: { paths: await this.setPreviewPaths(message.output_set, version), count: message.current_file, thumbnail_version: version } });
             return;
         }
