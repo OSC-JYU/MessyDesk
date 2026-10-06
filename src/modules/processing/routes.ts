@@ -3,6 +3,8 @@ import type { Request, ServerRoute } from '@hapi/hapi';
 import type { Deps } from '../../app/deps.ts';
 import { currentUser, requireAdmin } from '../../platform/http/auth.ts';
 import { tryRid } from '../../platform/ids.ts';
+import { readJson } from '../../platform/storage/fsutil.ts';
+import path from 'node:path';
 
 const SERVICE_ONLY = { auth: { strategy: 'service' } };
 
@@ -114,6 +116,22 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
                 const batchRid = rid(raw);
                 await requireOwner(request, batchRid);
                 return batches.get(batchRid);
+            },
+        },
+        {
+            // What the run was started with (params.json in the process folder), when it was kept.
+            method: 'GET',
+            path: '/api/batches/{rid}/params',
+            handler: async (request) => {
+                const batchRid = rid(request.params.rid);
+                await requireOwner(request, batchRid);
+                const batch = await batches.get(batchRid);
+                if (!batch?.path) throw Boom.notFound('No parameters stored');
+                try {
+                    return await readJson(path.join(path.dirname(batch.path), 'params.json'));
+                } catch {
+                    throw Boom.notFound('No parameters stored');
+                }
             },
         },
         {
