@@ -162,15 +162,16 @@ export class ResultsService {
         const rows = await this.d.db.rows('SELECT @rid AS rid, path, type, metadata FROM File WHERE set = :set ORDER BY label LIMIT 20', { set: setRid });
         const thumbs: string[] = [];
         for (const item of rows) {
+            if (item.type !== 'image' && item.type !== 'pdf') continue;
             if (item.type === 'pdf' && !(await this.pdfHasThumbnail(item))) {
                 if (thumbs.length < 4) thumbs.push('__pdf_icon__');
                 continue;
             }
             if (!item.path) continue;
             if (thumbs.length >= 4) break;
-            thumbs.push(item.path.split('/').slice(0, -1).join('/').replace('data/', 'api/thumbnails/data/'));
+            thumbs.push(this.thumbUrl(item.path.split('/').slice(0, -1).join('/')) + '/thumbnail.jpg');
         }
-        return thumbs.map((e) => (e.includes('?') ? `${e}&v=${version}` : `${e}?v=${version}`));
+        return thumbs.map((e) => (e === '__pdf_icon__' ? e : e.includes('?') ? `${e}&v=${version}` : `${e}?v=${version}`));
     }
 
     private async pdfHasThumbnail(file: any): Promise<boolean> {
