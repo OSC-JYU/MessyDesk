@@ -19,13 +19,13 @@ git clone https://github.com/OSC-JYU/MD-lingua.git
 git clone https://github.com/OSC-JYU/MD-LibreTranslate.git
 git clone https://github.com/OSC-JYU/MD-gensim.git          # only for --profile linguistics
 git clone https://github.com/OSC-JYU/MD-Gliner2.git         # only for --profile machine_learning
-# and this repository as MessyDesk-new
+# and this repository (MessyDesk, branch rewrite)
 ```
 
 Then:
 
 ```bash
-cd MessyDesk-new/local
+cd MessyDesk/local
 cp .env.example .env        # set DB_PASSWORD and SERVICE_TOKEN
 podman-compose up -d --build
 ```

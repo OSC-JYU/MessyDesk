@@ -2,7 +2,7 @@
 
 Status: implemented 2026-10-01 (see [decisions.md](decisions.md) and ../wiki/architecture/backend-structure.md).
 
-The new backend lives in `MessyDesk-new`. The old `MessyDesk`, `MessyDesk-UI` and `MD-consumers`
+The new backend lives on the `rewrite` branch of `MessyDesk` (it was developed in a separate `MessyDesk-new` checkout, merged here on 2026-10-06). The old `MessyDesk`, `MessyDesk-UI` and `MD-consumers`
 repositories are not touched. The new backend must be a drop-in replacement: same HTTP API, same
 SSE messages, same queue message format, same ArcadeDB schema, same data directory layout and same
 `queue.sqlite` file, so it can start against an existing installation and the UI and consumers
