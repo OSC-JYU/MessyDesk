@@ -191,6 +191,7 @@ export class NodesService {
         if (msg.task.description) attrs.description = msg.task.description;
         if (msg.task.model) attrs.model = msg.task.model.id;
         if (msg.task.model?.version) attrs.model_version = msg.task.model.version;
+        if (msg.task.model?.family) attrs.model_family = msg.task.model.family;
         if (msg.output_set) attrs.set = msg.output_set;
         if (msg.set_process_rid) attrs.set_process = msg.set_process_rid;
         if (msg.set_process && !attrs.set_process) attrs.set_process = msg.set_process;
@@ -212,6 +213,8 @@ export class NodesService {
         if (task.info) attrs.info = task.info;
         if (task.model?.id) attrs.model = task.model.id;
         if (task.model?.version) attrs.model_version = task.model.version;
+        if (task.model?.family) attrs.model_family = task.model.family;
+        if (service?.id) attrs.service_id = service.id;
         const processNode = await this.store.createVertex('SetProcess', attrs);
         const projectRid = input.project_rid || await this.store.projectRidOf(input['@rid']);
         if (projectRid) await this.store.connect(processNode['@rid'], EDGE.BELONGS_TO, projectRid);
@@ -238,6 +241,8 @@ export class NodesService {
         else if (task.description) attrs.info = task.description;
         if (task.model?.id) attrs.model = task.model.id;
         if (task.model?.version) attrs.model_version = task.model.version;
+        if (task.model?.family) attrs.model_family = task.model.family;
+        if (service?.id) attrs.service_id = service.id;
         const node = await this.store.createVertex('SetProcess', attrs);
         const processPath = this.layout.processFilesDir(input.project_rid, node.uuid || node['@rid']);
         await ensureDir(processPath);

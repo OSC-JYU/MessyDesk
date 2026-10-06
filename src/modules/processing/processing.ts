@@ -24,6 +24,7 @@ import type { Publisher } from '../queue/publisher.ts';
 import { resolveBehaviour, type ServiceRegistry } from '../services/registry.ts';
 import type { SolrClient } from '../../platform/solr/solr.ts';
 import type { TagFields } from '../tags/tags.ts';
+import type { TokenBudget } from '../usage/token-budget.ts';
 import { manyToOneGroups } from './grouping.ts';
 
 export function isSearchOutputTask(service: any, task: any): boolean {
@@ -58,6 +59,20 @@ export function resolveModel(service: any, task: any): void {
     }
 }
 
+/** A prompt run on an LLM service: an `external_tasks` service, and not one of its own tasks. */
+export function isPromptTask(service: any, task: any): boolean {
+    return Boolean(service?.external_tasks) && !service?.tasks?.[task?.id];
+}
+
+/**
+ * A prompt run's params: the user's values (temperature, max output tokens) with the prompt's
+ * own `system_params` (prompt text, output type, JSON schema) on top. The old backend replaced the
+ * user's values with `system_params`, so they never reached the adapter.
+ */
+export function promptParams(task: any): Record<string, unknown> {
+    return { ...(task?.params || {}), ...(task?.system_params || {}) };
+}
+
 export class ProcessingService {
     private readonly db: ArcadeClient;
     private readonly store: GraphStore;
@@ -70,6 +85,7 @@ export class ProcessingService {
     private readonly batches: BatchState;
     private readonly sse: SseHub;
     private readonly solr: SolrClient;
+    private readonly budget: TokenBudget | null;
     private readonly apiUrl: string;
     private readonly log: (message: string) => void;
     private readonly dispatching = new Set<Promise<void>>();
@@ -77,6 +93,7 @@ export class ProcessingService {
     constructor(deps: {
         db: ArcadeClient; store: GraphStore; layout: DataLayout; access: AccessService; nodes: NodesService; files: FilesService;
         registry: ServiceRegistry; publisher: Publisher; batches: BatchState; sse: SseHub; solr: SolrClient; apiUrl: string;
+        tokenBudget?: TokenBudget;
         log?: (message: string) => void;
     }) {
         this.apiUrl = deps.apiUrl;
@@ -92,6 +109,7 @@ export class ProcessingService {
         this.batches = deps.batches;
         this.sse = deps.sse;
         this.solr = deps.solr;
+        this.budget = deps.tokenBudget || null;
     }
 
     /**
@@ -126,14 +144,14 @@ export class ProcessingService {
 
     /**
      * Fills a task from the service descriptor: the name always comes from the descriptor, and
-     * system params, description, info and the autotag flag are copied. LLM services
-     * (`external_tasks`) take the task from the request and resolve the chosen model.
+     * system params, description, info and the autotag flag are copied. Prompt runs on LLM
+     * services take the task from the request; every task gets the chosen model resolved.
      */
     private prepareTask(service: any, requested: any, singleFile: boolean): any {
         const task = structuredClone(requested || {});
         resolveModel(service, task);
-        if (service.external_tasks) {
-            if (singleFile) task.params = task.system_params;
+        if (isPromptTask(service, task)) {
+            task.params = promptParams(task);
             return task;
         }
         const def = service.tasks?.[task.id];
@@ -164,6 +182,7 @@ export class ProcessingService {
         if (file._status === 'importing') throw Boom.conflict('File is being imported and cannot be processed');
 
         const task = this.prepareTask(service, payload, true);
+        await this.budget?.apply(service, task, userRid);
         const msg: any = { service, task, file, process: null, output_set: null, userId: userRid };
         if (service.external_tasks) msg.external = 'yes';
         msg.process = await this.nodes.createProcess(msg);
@@ -242,9 +261,8 @@ export class ProcessingService {
         const service = this.service(topic);
         const rid = toRid(setRid);
         const task = this.prepareTask(service, payload, false);
-        if (service.external_tasks) {
-            task.params = task.system_params;
-        }
+        const prompt = isPromptTask(service, task);
+        await this.budget?.apply(service, task, userRid);
         const set = await this.files.metadata(rid, userRid);
         if (!set || set['@type'] !== 'Set') throw Boom.notFound('Set not found');
         const listing = await this.files.setFiles(rid, userRid, { limit: 10000 });
@@ -252,11 +270,11 @@ export class ProcessingService {
         const behaviour = resolveBehaviour(service, task);
         const taskName = task?.name || task?.id || topic;
 
-        if (!service.external_tasks && behaviour === 'whole-set') {
+        if (!prompt && behaviour === 'whole-set') {
             return this.dispatchWholeSet({ topic, service, task, set, files, payload, userRid });
         }
 
-        if (!service.external_tasks && behaviour === 'many-to-one') {
+        if (!prompt && behaviour === 'many-to-one') {
             if (!files.length) throw Boom.badRequest('Set has no files to process');
             const searchOutput = isSearchOutputTask(service, task);
             const groups = await manyToOneGroups(this.db, service, task, files, searchOutput);
@@ -313,7 +331,7 @@ export class ProcessingService {
             return rid;
         }
 
-        const nodes = await this.nodes.createSetProcessWithOutput(service, task, set, Boolean(service.external_tasks) || behaviour !== 'many-to-one');
+        const nodes = await this.nodes.createSetProcessWithOutput(service, task, set, prompt || behaviour !== 'many-to-one');
         await this.batches.init(nodes.process['@rid'], {
             topic,
             task_id: task.id,
@@ -480,14 +498,15 @@ export class ProcessingService {
         }
         if (!task.id) task.id = batch.task_id;
         task = structuredClone(task);
-        if (service.external_tasks) {
+        if (isPromptTask(service, task)) {
             task.name = task.name || task.id;
-            task.params = task.system_params || task.params || {};
+            task.params = promptParams(task);
         } else {
             if (!service.tasks?.[task.id]) throw Boom.badRequest('Task not found in service');
             task.name = service.tasks[task.id].name;
         }
         resolveModel(service, task);
+        await this.budget?.apply(service, task, userRid);
         const listing = await this.files.setFiles(batch.input_set, userRid, { limit: 10000 });
         const done = new Set(await this.batches.processedInputs(rid));
         const pending = listing.files.filter((f: any) => !done.has(f['@rid']));

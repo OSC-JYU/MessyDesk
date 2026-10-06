@@ -21,6 +21,7 @@ import { sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
 import { ROLE, SERVICE } from '../../shared/service-ids.ts';
 import { BatchState } from '../batches/batch-state.ts';
 import { imageMetadata, textDescription } from '../files/metadata.ts';
+import { usageTime } from '../usage/token-budget.ts';
 import type { ImportPipeline } from '../import/import.ts';
 import type { NodesService } from '../nodes/nodes.ts';
 import type { ServiceRegistry } from '../services/registry.ts';
@@ -480,7 +481,8 @@ export class ResultsService {
                 in_modality: tokens.in?.modality || 'UNKNOWN',
                 out_modality: tokens.out?.modality || 'UNKNOWN',
                 total: tokens.total || 0,
-                time: new Date().toISOString().replace('T', ' ').substring(0, 19),
+                service_group: message.task?.token_budget?.service_group || null,
+                time: usageTime(),
             },
         });
     }

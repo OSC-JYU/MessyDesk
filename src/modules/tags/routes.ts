@@ -22,7 +22,7 @@ function scope(query: any): Record<string, unknown> {
     };
 }
 
-export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, config }: Deps): ServerRoute[] {
+export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, tokenBudget, config }: Deps): ServerRoute[] {
     return [
         // ---- entities and tags ------------------------------------------------------------
         { method: 'GET', path: '/api/entities', handler: (r) => tags.groupedEntities(currentUser(r).rid, scope(r.query)) },
@@ -70,6 +70,7 @@ export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, co
         { method: 'GET', path: '/api/service-groups', handler: (r) => { requireAdmin(r); return serviceGroups.list(); } },
         { method: 'POST', path: '/api/service-groups', handler: (r) => { requireAdmin(r); return serviceGroups.create(r.payload || {}); } },
         { method: 'PUT', path: '/api/service-groups/{id}', handler: (r) => { requireAdmin(r); return serviceGroups.update(r.params.id, r.payload || {}); } },
+        { method: 'GET', path: '/api/service-groups/{id}/usage', handler: (r) => { requireAdmin(r); return tokenBudget.forGroup(ServiceGroupsService.requireId(r.params.id)); } },
         {
             method: 'DELETE',
             path: '/api/service-groups/{id}',

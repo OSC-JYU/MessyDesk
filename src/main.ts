@@ -39,6 +39,7 @@ import { SemanticSearch } from './modules/semantic/semantic.ts';
 import { semanticRoutes } from './modules/semantic/routes.ts';
 import { RoisService } from './modules/rois/rois.ts';
 import { ServiceGroupsService } from './modules/service-groups/service-groups.ts';
+import { TokenBudget } from './modules/usage/token-budget.ts';
 import { ServiceHelp } from './modules/service-help/bundle.ts';
 import { loadFilters } from './modules/services/matching.ts';
 import { ServiceRegistry } from './modules/services/registry.ts';
@@ -113,7 +114,8 @@ async function main(): Promise<void> {
     const importPipeline = new ImportPipeline(store, nodes, registry, publisher, sse);
     const files = new FilesService({ db, store, layout, access, nodes, tags, thumbnails, registry, importPipeline, deskGraph, sse, apiUrl: config.apiUrl, maxVersionTextBytes: config.maxVersionTextBytes });
     const batches = new BatchState(db, store);
-    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
+    const tokenBudget = new TokenBudget(db);
+    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, tokenBudget, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
     // Links made before TagLink.project_rid existed get their desk in the background.
     tags.backfillLinkProjects((m) => logger.info(m)).catch((error) => logger.error(`TagLink desk backfill failed: ${(error as Error).message}`));
@@ -139,6 +141,7 @@ async function main(): Promise<void> {
         rois: new RoisService(db, store, access, graph),
         prompts: new PromptsService(db),
         serviceGroups: new ServiceGroupsService(db, store, registry, config.dataDir),
+        tokenBudget,
     };
 
     const server = await createServer(config.port, config.publicDir);

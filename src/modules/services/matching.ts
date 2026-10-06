@@ -20,7 +20,10 @@ function pickModels(type: string, extensions: string[], service: any): Record<st
     return models;
 }
 
-/** LLM services take their tasks from the user's prompts. */
+/**
+ * LLM services take their tasks from the user's prompts: text prompts for text, image prompts for
+ * images. For a set, a prompt is offered when the set holds files of its type.
+ */
 function promptsToTasks(filter: string | undefined, prompts: any[], type: string, extensions: string[]): Record<string, any> {
     const tasks: Record<string, any> = {};
     if (filter) return tasks;
@@ -29,8 +32,7 @@ function promptsToTasks(filter: string | undefined, prompts: any[], type: string
         const key = String(prompt.name).toLowerCase().replace(/ /g, '_');
         if (type === 'Set') {
             if ((extensions.includes('txt') && prompt.type === 'text')
-                || (extensions.includes('pdf') && prompt.type === 'pdf')
-                || ((extensions.includes('jpg') || extensions.includes('png')) && prompt.type === 'image')) tasks[key] = prompt;
+                || ((extensions.includes('jpg') || extensions.includes('jpeg') || extensions.includes('png')) && prompt.type === 'image')) tasks[key] = prompt;
         } else if (type === prompt.type) {
             tasks[key] = prompt;
         }
@@ -38,16 +40,9 @@ function promptsToTasks(filter: string | undefined, prompts: any[], type: string
     return tasks;
 }
 
-function pickTasks(service: any, extensions: string[], types: string[], filter: string | undefined, user: any, prompts: any[], nodeType: string): any {
-    const out = structuredClone(service);
-    out.tasks = {};
-    const userGroups: string[] = user?.service_groups || [];
-    if (out.service_groups && !out.service_groups.some((g: string) => userGroups.includes(g))) return undefined;
-    if (out.external_tasks) {
-        out.models = pickModels(nodeType, extensions, out);
-        out.tasks = Object.keys(out.models).length ? promptsToTasks(filter, prompts, nodeType, extensions) : {};
-        return out;
-    }
+/** The descriptor's own tasks that fit the node and the user's service groups. */
+function fixedTasks(service: any, extensions: string[], types: string[], filter: string | undefined, userGroups: string[], nodeType: string): Record<string, any> {
+    const tasks: Record<string, any> = {};
     for (const [name, task] of Object.entries<any>(service.tasks || {})) {
         const behaviour = resolveBehaviour(service, { ...task, id: name });
         if (task.service_groups && !task.service_groups.some((g: string) => userGroups.includes(g))) continue;
@@ -58,8 +53,28 @@ function pickTasks(service: any, extensions: string[], types: string[], filter: 
         else if (task.supported_formats?.length) matches = task.supported_formats.some((f: string) => extensions.includes(f));
         else if (service.supported_types?.length) matches = service.supported_types.some((t: string) => types.includes(t));
         else if (service.supported_formats?.length) matches = service.supported_formats.some((f: string) => extensions.includes(f));
-        if (matches && filterTask(filter, task)) out.tasks[name] = task;
+        if (matches && filterTask(filter, task)) tasks[name] = task;
     }
+    return tasks;
+}
+
+function pickTasks(service: any, extensions: string[], types: string[], filter: string | undefined, user: any, prompts: any[], nodeType: string): any {
+    const out = structuredClone(service);
+    out.tasks = {};
+    const userGroups: string[] = user?.service_groups || [];
+    if (out.service_groups && !out.service_groups.some((g: string) => userGroups.includes(g))) return undefined;
+    if (out.external_tasks) {
+        // Prompts plus the descriptor's own tasks (e.g. the LLM autotagger), only when one of the
+        // models takes this kind of file. A fixed task wins over a prompt with the same key.
+        out.models = pickModels(nodeType, extensions, out);
+        if (!Object.keys(out.models).length) return out;
+        out.tasks = {
+            ...promptsToTasks(filter, prompts, nodeType, extensions),
+            ...fixedTasks(service, extensions, types, filter, userGroups, nodeType),
+        };
+        return out;
+    }
+    out.tasks = fixedTasks(service, extensions, types, filter, userGroups, nodeType);
     return Object.keys(out.tasks).length ? out : null;
 }
 

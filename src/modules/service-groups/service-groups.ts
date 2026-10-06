@@ -1,6 +1,7 @@
 // Service groups: admin-managed ids that gate which users see which services and tasks
 // (`service_groups` in service.json and on User). A group can have a logo, resized to 200x200 by
-// calling md-sharp's /process directly (a one-off admin action, not a queued job).
+// calling md-sharp's /process directly (a one-off admin action, not a queued job). A group can
+// also have token limits for the LLM services it gives access to (usage/token-budget.ts).
 
 import Boom from '@hapi/boom';
 import fsp from 'node:fs/promises';
@@ -9,9 +10,15 @@ import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import type { GraphStore } from '../../shared/graph-store.ts';
 import { SERVICE } from '../../shared/service-ids.ts';
 import type { ServiceRegistry } from '../services/registry.ts';
+import { normalizeTokenLimits, parseStoredLimits } from '../usage/token-budget.ts';
 
 export const GROUP_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const FIELDS = '@rid AS rid, id, name, description, logo, logo_version';
+const FIELDS = '@rid AS rid, id, name, description, logo, logo_version, token_limits';
+
+function withLimits(row: any): any {
+    if (!row) return row;
+    return { ...row, token_limits: parseStoredLimits(row.token_limits) };
+}
 export const ALLOWED_LOGO_TYPES: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
 export class ServiceGroupsService {
@@ -36,12 +43,12 @@ export class ServiceGroupsService {
         return path.resolve(this.dataDir, 'uploads', 'service-groups', ServiceGroupsService.requireId(id));
     }
 
-    list(): Promise<any[]> {
-        return this.db.rows(`SELECT ${FIELDS} FROM ServiceGroup ORDER BY id`);
+    async list(): Promise<any[]> {
+        return (await this.db.rows(`SELECT ${FIELDS} FROM ServiceGroup ORDER BY id`)).map(withLimits);
     }
 
-    get(id: string): Promise<any | null> {
-        return this.db.first(`SELECT ${FIELDS} FROM ServiceGroup WHERE id = :id`, { id: String(id) });
+    async get(id: string): Promise<any | null> {
+        return withLimits(await this.db.first(`SELECT ${FIELDS} FROM ServiceGroup WHERE id = :id`, { id: String(id) }));
     }
 
     async create(data: any): Promise<any> {
@@ -51,7 +58,10 @@ export class ServiceGroupsService {
         if (await this.get(id)) throw Boom.badRequest(`ServiceGroup "${id}" already exists`);
         const content: Record<string, unknown> = { id, name: data.name ? String(data.name) : id };
         if (data.description) content.description = String(data.description);
-        return this.db.first('CREATE VERTEX ServiceGroup CONTENT :content', { content });
+        const limits = normalizeTokenLimits(data.token_limits);
+        if (limits) content.token_limits = limits;
+        await this.db.first('CREATE VERTEX ServiceGroup CONTENT :content', { content });
+        return this.get(id);
     }
 
     async update(id: string, patch: any = {}): Promise<any> {
@@ -59,6 +69,10 @@ export class ServiceGroupsService {
         if (!group) throw Boom.badRequest(`ServiceGroup "${id}" not found`);
         for (const key of ['name', 'description', 'logo']) {
             if (patch[key] !== undefined) await this.store.setAttribute(group.rid, key, String(patch[key]));
+        }
+        if (patch.token_limits !== undefined) {
+            const limits = normalizeTokenLimits(patch.token_limits);
+            await this.db.sql(`UPDATE ${group.rid} ${limits ? 'SET token_limits = :limits' : 'REMOVE token_limits'}`, limits ? { limits } : undefined);
         }
         return this.get(id);
     }

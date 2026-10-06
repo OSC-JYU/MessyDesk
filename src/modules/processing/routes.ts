@@ -24,7 +24,7 @@ function batchSummary(batch: any, status: string, extra: Record<string, unknown>
     };
 }
 
-export function processingRoutes({ processing, queue, batches, sse, access }: Deps): ServerRoute[] {
+export function processingRoutes({ processing, queue, batches, sse, access, results, tokenBudget }: Deps): ServerRoute[] {
     /** Jobs and batches belong to the user who started them; admins may act on any. */
     async function requireOwner(request: Request, id: string): Promise<void> {
         const user = currentUser(request);
@@ -32,6 +32,22 @@ export function processingRoutes({ processing, queue, batches, sse, access }: De
         if (queue.ownerOf(id) === user.rid) return;
         if (!/^job_/.test(id) && await access.canRead(id, user.rid)) return;
         throw Boom.notFound('Batch not found');
+    }
+
+    /**
+     * A claimed job whose service group is out of tokens: a batch is paused (it can be resumed
+     * once the limit is raised or the period has turned), a single job fails with the reason.
+     */
+    async function stopOverBudget(payload: any, reason: string): Promise<void> {
+        const batchRid = tryRid(payload?.set_process);
+        if (batchRid) {
+            const now = new Date().toISOString();
+            queue.pauseBatch(batchRid);
+            const batch = await batches.update(batchRid, { status: 'paused', paused_at: now, updated_at: now, pause_reason: reason });
+            if (payload.userId) sse.send(payload.userId, { command: 'process_update', process: { '@rid': batchRid, status: 'paused' }, batch: batchSummary(batch, 'paused', { pause_reason: reason }) });
+            return;
+        }
+        await results.handleError(reason, payload);
     }
 
     return [
@@ -124,7 +140,7 @@ export function processingRoutes({ processing, queue, batches, sse, access }: De
                 await requireOwner(request, batchRid);
                 const { batch } = await processing.resume(batchRid, user.rid);
                 queue.resumeBatch(batchRid);
-                await batches.update(batchRid, { status: 'resuming', updated_at: new Date().toISOString() });
+                await batches.update(batchRid, { status: 'resuming', pause_reason: null, updated_at: new Date().toISOString() });
                 const { pending } = await processing.redispatch(batchRid, batch, user.rid);
                 const resumed = await batches.update(batchRid, { status: 'running', updated_at: new Date().toISOString() });
                 sse.send(user.rid, { command: 'process_update', process: { '@rid': batchRid, status: 'running' }, batch: batchSummary(resumed, 'running', { eta_sec: resumed?.eta_sec ?? null, pending_files: pending }) });
@@ -160,10 +176,17 @@ export function processingRoutes({ processing, queue, batches, sse, access }: De
             method: 'POST',
             path: '/api/queue/claim',
             options: SERVICE_ONLY,
-            handler: (request) => {
+            handler: async (request) => {
                 const { topic, adapter_id: adapterId } = (request.payload || {}) as any;
                 if (!topic || !adapterId) throw Boom.badRequest('topic and adapter_id are required');
-                return { job: queue.claim(topic, adapterId) };
+                const job = queue.claim(topic, adapterId);
+                if (!job) return { job: null };
+                // Token limits are checked again here, so a running batch stops at the limit.
+                const overBudget = await tokenBudget.check(job.payload).catch(() => null);
+                if (!overBudget) return { job };
+                queue.cancelJob(job.id);
+                await stopOverBudget(job.payload, overBudget);
+                return { job: null };
             },
         },
         {

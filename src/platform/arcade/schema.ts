@@ -56,6 +56,9 @@ const PROPERTIES = [
     'CREATE PROPERTY TagLink.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.type IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.label IF NOT EXISTS STRING',
+    // Token limits (plan/llm-adapter.md 4.9) sum a group's or a user's Usage in a period.
+    'CREATE PROPERTY Usage.service_group IF NOT EXISTS STRING',
+    'CREATE PROPERTY Usage.user IF NOT EXISTS STRING',
 ];
 
 const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
@@ -85,6 +88,8 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['Entity', 'owner, type, label', 'NOTUNIQUE'],
     // The desk filter of the tag lists reads links by desk (plan/decisions.md G4).
     ['TagLink', 'project_rid', 'NOTUNIQUE'],
+    ['Usage', 'service_group', 'NOTUNIQUE'],
+    ['Usage', 'user', 'NOTUNIQUE'],
 ];
 
 // Buckets per type. ArcadeDB 23.7.1 gave every type 8 buckets by default; 25.x gives one, and

@@ -25,6 +25,7 @@ import type { JobQueue } from '../modules/queue/queue.ts';
 import type { ResultsService } from '../modules/results/results.ts';
 import type { RoisService } from '../modules/rois/rois.ts';
 import type { ServiceGroupsService } from '../modules/service-groups/service-groups.ts';
+import type { TokenBudget } from '../modules/usage/token-budget.ts';
 import type { ServiceHelp } from '../modules/service-help/bundle.ts';
 import type { SemanticSearch } from '../modules/semantic/semantic.ts';
 import type { ServiceRegistry } from '../modules/services/registry.ts';
@@ -68,4 +69,5 @@ export interface Deps {
     rois: RoisService;
     prompts: PromptsService;
     serviceGroups: ServiceGroupsService;
+    tokenBudget: TokenBudget;
 }

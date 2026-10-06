@@ -4,13 +4,18 @@ import { currentUser, requireAdmin } from '../../platform/http/auth.ts';
 import type { Deps } from '../../app/deps.ts';
 import { validatePatch, withDefaults } from './settings.ts';
 
-export function userRoutes({ users }: Deps): ServerRoute[] {
+export function userRoutes({ users, tokenBudget }: Deps): ServerRoute[] {
     return [
         {
             method: 'GET',
             path: '/api/sso',
             options: { auth: false },
             handler: (request) => ({ mail: request.headers.mail, name: request.headers.displayname }),
+        },
+        {
+            method: 'GET',
+            path: '/api/me/usage',
+            handler: (request) => tokenBudget.forUser(currentUser(request).rid),
         },
         {
             method: 'GET',
