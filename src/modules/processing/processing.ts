@@ -487,6 +487,8 @@ export class ProcessingService {
         if (!batch.input_set || !batch.topic || !batch.task_id || !batch.output_set) throw Boom.badRequest('Batch resume is currently supported for set-to-set batches only');
         const status = BatchState.status(batch);
         if (status !== 'paused') throw Boom.conflict(`Batch is not paused (status: ${status || 'unknown'})`);
+        // Refuse here, before the batch changes state, when the token budget is still used up.
+        await this.budget?.choose(this.service(batch.topic), userRid);
         return { batch, rid };
     }
 

@@ -462,12 +462,19 @@ export class ResultsService {
         if (message.userId && sourceRid) this.d.sse.send(message.userId, { command: 'update', target: sourceRid, node: { _status: 'import_failed' } });
     }
 
-    /** /metadata: AI usage figures; `response` files are stored but are not graph nodes. */
+    /**
+     * /metadata: AI usage figures. Always stored as a Usage row (token limits sum them); the
+     * `response` file is kept next to the process's files when it has a directory (single-file
+     * runs; batch jobs carry only the SetProcess rid, and before this every batch job's usage was
+     * lost on the missing path).
+     */
     async handleMetadata(message: any, contentPath: string): Promise<void> {
         const usage = JSON.parse(await fsp.readFile(contentPath, 'utf8'));
         if (message?.file?.type !== 'response') return;
-        const target = path.join(message.process.path, message.file.label);
-        if (!(await exists(target))) await moveFile(contentPath, target);
+        if (message.process?.path && message.file.label) {
+            const target = path.join(message.process.path, message.file.label);
+            if (!(await exists(target))) await moveFile(contentPath, target);
+        }
         const meta = usage?.metadata || {};
         const tokens = meta.tokens || {};
         await this.d.db.sql('INSERT INTO Usage CONTENT :content', {
