@@ -170,6 +170,8 @@ export function serviceRoutes({ registry, files, prompts, filters, serviceHelp, 
                 const id = serviceId(request.params.service);
                 const config = registry.get(id);
                 if (!config) throw Boom.notFound('Service not found');
+                const content = (request.payload as any)?.content;
+                if (typeof content === 'string') return serviceHelp.ingestMarkdown(id, content);
                 return serviceHelp.ingest(id, config, (request.payload as any)?.help_url || (request.query as any)?.help_url);
             },
         },

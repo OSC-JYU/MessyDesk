@@ -18,6 +18,7 @@ let SERVICE_HELP_DIR = '';
 let MAX_HELP_BUNDLE_FILES = 120;
 let MAX_HELP_ARCHIVE_BYTES = 25 * 1024 * 1024;
 let MAX_HELP_ARCHIVE_ENTRIES = 500;
+const MAX_HELP_MARKDOWN_BYTES = 1024 * 1024;
 
 const fse = {
     copyFile: (a: string, b: string) => fsp.copyFile(a, b),
@@ -808,6 +809,30 @@ export class ServiceHelp {
             if (error.response) throw Boom.badGateway(`Could not fetch service help: ${error.response.statusCode}`);
             throw Boom.badGateway(`Could not ingest service help: ${error.message}`);
         }
+    }
+
+    /**
+     * Stores help a consumer sends itself, as markdown (POST /api/services/{id}/help/ingest with
+     * `content`). For services the backend cannot fetch from, such as LLM providers we do not run
+     * (plan/llm-adapter.md 4.4). Links are left as they are; nothing is fetched.
+     */
+    async ingestMarkdown(serviceId: string, markdown: string): Promise<any> {
+        const text = String(markdown || '');
+        if (!text.trim()) throw Boom.badRequest('Help content is empty');
+        if (Buffer.byteLength(text) > MAX_HELP_MARKDOWN_BYTES) throw Boom.entityTooLarge('Help content is too large');
+        const { resolvedServiceDir, htmlPath } = resolveServiceHelpPath(serviceId);
+        await fse.emptyDir(resolvedServiceDir);
+        const title = extractMarkdownTitle(text, serviceId);
+        await fse.writeFile(htmlPath, wrapServiceHelpHtml({ serviceId, title, content: marked.parse(text) }), 'utf8');
+        return {
+            status: 'ok',
+            service: serviceId,
+            source: 'consumer',
+            source_format: 'markdown',
+            content_type: 'text/markdown',
+            bundle: { dir: `/public/help/services/${serviceId}/`, files: 1, truncated: false },
+            output: `/help/services/${serviceId}/index.html`,
+        };
     }
 
     async page(serviceId: string): Promise<string> {
