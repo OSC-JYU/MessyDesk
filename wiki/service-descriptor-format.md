@@ -76,7 +76,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `supported_formats` | string[] | No | File extensions accepted (e.g., `["png", "jpg"]`) |
 | `service_groups` | string[] | No | ServiceGroup `id`s gating which users may use the service/task — see [Service Groups](#service-groups) |
 | `tasks` | object | Yes* | Task definitions (see below) |
-| `external_tasks` | string | No | If set (e.g., `"prompts"`), tasks defined externally |
+| `external_tasks` | string | No | `"prompts"`: the user's prompts are offered as tasks (LLM services), next to the descriptor's own `tasks` (e.g. `autotag`) |
 | `models` | object | No | Model variants for LLM services |
 
 **[verified]** from descriptor files in `MD-consumers/descriptors/` and Python service `service.json` files.
@@ -116,7 +116,13 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 }
 ```
 
-**[verified]** from `MD-consumers/descriptors/md-azure-ai/service.json`.
+Further model fields used by the LLM services (MD-llm `providers/*.json`, `plan/llm-adapter.md`):
+`family` (the same model on several providers; the UI shows it once and asks for the provider),
+`max_input_tokens`, `max_output_tokens`, `max_image_edge`, `temperature: false`,
+`structured_output: false`. The chosen model is stored on the Process as `model`, `model_version`
+and `model_family`.
+
+**[verified]** from MD-llm `providers/*.json` and `src/modules/processing/processing.ts`.
 
 ## Task Behaviour
 

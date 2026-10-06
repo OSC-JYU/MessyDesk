@@ -20,6 +20,7 @@ checked in the handler, `open` = `auth: false`.
 | GET | `/api/sso` | open | UI | `{mail, name}` from `mail`/`displayname` headers |
 | GET | `/api/me` | user | UI | `{rid, admin, group, access, id, mode, settings}` |
 | PUT | `/api/me/settings` | user | UI | partial merge; 400 on unknown key/value |
+| GET | `/api/me/usage` | user | UI | **New (llm-adapter.md 4.9).** `{month_since, groups: [{id, name, period, since, limits, used_by_me, used_by_group}], services: [{service, model, tokens_in, tokens_out, total}]}` |
 | GET | `/api/users` | admin | UI | raw User rows |
 | POST | `/api/users` | admin | UI | `{id, label}` |
 | PUT | `/api/users/{rid}/service-groups` | admin | UI | `{service_groups: []}` |
@@ -132,7 +133,7 @@ checked in the handler, `open` = `auth: false`.
 | POST | `/api/services/install` | admin | UI | |
 | POST | `/api/services/reload` | admin | UI | returns the whole `services` module object |
 | DELETE | `/api/services/{service}` | admin | UI, C (on consumer shutdown) | |
-| POST | `/api/services/{service}/help/ingest` | user | C | backend fetches a URL |
+| POST | `/api/services/{service}/help/ingest` | user | C | backend fetches a URL; **new:** body `{content: "<markdown>"}` stores that markdown instead (consumers of providers we do not run, llm-adapter.md 4.4) |
 | GET | `/api/services/{service}/help` | open | UI | |
 | GET | `/api/services/{service}/help/assets/{path*}` | open | UI | |
 | GET | `/api/help/{slug?}` | open | UI | |
@@ -148,7 +149,8 @@ checked in the handler, `open` = `auth: false`.
 |---|---|---|---|
 | GET | `/api/service-groups` | admin | UI |
 | POST | `/api/service-groups` | admin | UI |
-| PUT | `/api/service-groups/{id}` | admin | UI |
+| PUT | `/api/service-groups/{id}` | admin | UI | **New field** `token_limits: {period, per_user, group_total, per_job_max_output}` (also on POST; `null`/empty removes) |
+| GET | `/api/service-groups/{id}/usage` | admin | UI | **New.** `{id, period, since, limits, total, users: [{user, total}]}` |
 | DELETE | `/api/service-groups/{id}` | admin | UI |
 | POST | `/api/service-groups/{id}/logo` | admin | UI (calls md-sharp `/process` synchronously) |
 | GET | `/api/service-groups/{id}/logo` | user | UI (img src) |

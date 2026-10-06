@@ -1,7 +1,9 @@
 # LLM adapter plan
 
-Status: plan only, no code. Questions answered by ari on 2026-10-06 (section 6): his answers for
-Q11, Q13 and Q14, the recommendations for the rest. Repos read: MessyDesk (`rewrite`), MD-consumers (`rewrite`),
+Status: implemented 2026-10-06 on the `llm-adapter` branches of MessyDesk, MD-consumers and
+MessyDesk-UI, plus the new MD-llm repo; see section 7 for what differs from this plan. Questions
+answered by ari on 2026-10-06 (section 6): his answers for Q11, Q13 and Q14, the recommendations for
+the rest. Repos read: MessyDesk (`rewrite`), MD-consumers (`rewrite`),
 MessyDesk-UI (`rewrite`), MD-Gliner2. Claims are marked **[verified]** with a file reference or
 **[inferred]** / **[check]**.
 
@@ -360,3 +362,38 @@ the performance tests.
 | Q14 | "vLLM" in the request: the vLLM server, vision-language models, or both? | **Decided:** vision LLMs (image prompts, image autotagging); the vLLM server is covered by `llm-openai` too. |
 
 Q1–Q10 and Q12: ari accepted the recommendations (2026-10-06).
+
+## 7. As built (2026-10-06)
+
+| Part | Where |
+|---|---|
+| Prompt params merge, prompts next to fixed tasks, `model_family`, no `pdf` prompts | MessyDesk `processing.ts` (`isPromptTask`, `promptParams`), `matching.ts`, `nodes.ts` |
+| Token limits | MessyDesk `src/modules/usage/token-budget.ts`; checks in `processing.ts` (dispatch, resume) and the claim route; `GET /api/me/usage`, `GET /api/service-groups/{id}/usage` |
+| Help pushed by a consumer | `POST /api/services/{id}/help/ingest` with `{content}` (`ServiceHelp.ingestMarkdown`) |
+| Adapters | MD-consumers `src/adapters/llm/core.mjs`, `llm-openai.mjs`, `llm-gemini.mjs`; old `ollama`, `azure-ai`, `gemini-ai` deleted |
+| `CONFIG_JSON_PATH` | MD-consumers `src/index.mjs` |
+| Provider configs, help, compose | MD-llm `providers/*.json`, `help/index.md`, `compose.llm.yaml` |
+| UI | MessyDesk-UI `crunchers/LlmCruncher.vue`, `crunchers.js` (`llmEntries`, `llmModels`), admin `ServiceGroupsTab.vue` |
+
+Differences from the plan:
+
+- **No `max_concurrency` per consumer.** A consumer runs one job at a time, as every other
+  consumer; parallel calls to one provider come from starting several consumers on the same
+  `TOPIC`, which the queue already supports. Retries live in the adapter (`retry`).
+- **No set-size estimate before Run.** A set run is refused only when the budget is already used
+  up; the claim-time check pauses it at the limit (overshoot: the jobs already running).
+- **Service groups are now enforced at dispatch** for every service with `service_groups`
+  (403 for users outside them); before, they only hid services in the UI.
+- **`DEV_URL` overrides `provider.base_url`**, so one config file works on the host and in a
+  container.
+- **Found and fixed on the way:** batch jobs never produced a Usage row (`/metadata` needed a
+  process directory that batch jobs do not have), so set runs of LLM prompts were not counted at
+  all before.
+
+Verified end to end on 2026-10-06 against ArcadeDB 26.10, the backend, an `llm-openai` consumer
+and a fake OpenAI-compatible server: prompts and the autotag task offered only inside the service
+group (403 outside), text and JSON answers saved, temperature passed and output capped by the
+group, autotag linking only listed labels, usage per group and service, 429 over the limit, a set
+paused at the limit, resume refused while over it and finished after raising it, help page pushed.
+Not yet tried against a real Ollama, OpenAI, Azure or Gemini endpoint.
+
