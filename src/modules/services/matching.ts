@@ -29,7 +29,8 @@ function promptsToTasks(filter: string | undefined, prompts: any[], type: string
     if (filter) return tasks;
     for (const prompt of prompts) {
         prompt.system_params = { prompts: { content: prompt.content } };
-        const key = String(prompt.name).toLowerCase().replace(/ /g, '_');
+        // Not the name: the user's prompt and a public one may share it.
+        const key = String(prompt.uuid || prompt['@rid']);
         if (type === 'Set') {
             if ((extensions.includes('txt') && prompt.type === 'text')
                 || ((extensions.includes('jpg') || extensions.includes('jpeg') || extensions.includes('png')) && prompt.type === 'image')) tasks[key] = prompt;

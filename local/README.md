@@ -4,29 +4,18 @@
 
 ## Start
 
-Clone the repositories side by side (the compose file builds from the sibling directories):
+Clone this repository (branch `rewrite`) and let the script clone the rest next to it (the compose file
+builds from the sibling directories):
 
 ```bash
-git clone https://github.com/OSC-JYU/MessyDesk-UI.git
-git clone https://github.com/OSC-JYU/MD-consumers.git
-git clone https://github.com/OSC-JYU/MD-sharp.git
-git clone https://github.com/OSC-JYU/MD-poppler.git
-git clone https://github.com/OSC-JYU/MD-pypdf_fs.git
-git clone https://github.com/OSC-JYU/MD-zip_fs.git
-git clone https://github.com/OSC-JYU/MD-text-base_fs.git
-git clone https://github.com/OSC-JYU/MD-tesseract.git
-git clone https://github.com/OSC-JYU/MD-docori.git
-git clone https://github.com/OSC-JYU/MD-lingua.git
-git clone https://github.com/OSC-JYU/MD-LibreTranslate.git
-git clone https://github.com/OSC-JYU/MD-gensim.git          # only for --profile linguistics
-git clone https://github.com/OSC-JYU/MD-Gliner2.git         # only for --profile machine_learning
-# and this repository (MessyDesk, branch rewrite)
+git clone -b rewrite https://github.com/OSC-JYU/MessyDesk.git
+cd MessyDesk/local
+./clone-all.sh              # add --all for MD-gensim and MD-Gliner2 (the optional profiles)
 ```
 
 Then:
 
 ```bash
-cd MessyDesk/local
 cp .env.example .env        # set DB_PASSWORD and SERVICE_TOKEN
 podman-compose up -d --build
 ```

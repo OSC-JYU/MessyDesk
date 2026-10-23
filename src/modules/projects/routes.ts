@@ -10,7 +10,7 @@ function rid(value: string): string {
     return r;
 }
 
-export function projectRoutes({ projects, deskGraph, access, nodes, graph, processing, tags, deletes }: Deps): ServerRoute[] {
+export function projectRoutes({ projects, deskGraph, access, nodes, graph, processing, tags, ner, deletes }: Deps): ServerRoute[] {
     return [
         {
             method: 'POST',
@@ -74,7 +74,7 @@ export function projectRoutes({ projects, deskGraph, access, nodes, graph, proce
             path: '/api/projects/{rid}/reindex-search',
             handler: (request) => {
                 const user = currentUser(request);
-                return processing.reindexProject(toRid(rid(request.params.rid)), user.rid, (fileRid) => tags.reindexFileTags(fileRid, user.rid));
+                return processing.reindexProject(toRid(rid(request.params.rid)), user.rid, (fileRid) => tags.reindexFileTags(fileRid, user.rid), () => ner.reindexProject(user.rid, toRid(rid(request.params.rid))));
             },
         },
     ];

@@ -11,25 +11,64 @@
     <nav class="help-nav"><a href="/help">Index</a><a href="/help/how-it-works">How It Works</a><a href="/help/tools">Tools</a><a href="/help/tags">Tags</a><a href="/help/pdf-handling">Pdf Handling</a><a href="/help/zip-handling">Zip Handling</a><a href="/help/editing-files">Editing Files</a><a href="/help/sets">Sets</a><a href="/help/rois">ROIs</a><a href="/help/search">Search</a><a class="active" href="/help/principles">Principles</a><a href="/help/faq">Faq</a></nav>
     <article class="content">
       <h1>Design Principles</h1>
-<p>MessyDesk is built specifically to support academic research, which introduces unique requirements for data handling, reproducibility, and methodology. The platform&#39;s architecture is guided by three core principles.</p>
-<h2>Accessible, Not Dummified</h2>
-<p>The ultimate goal of MessyDesk is to let you run rapid, iterative experiments on your own data. However, making a tool accessible does not mean turning it into an opaque &quot;one-click&quot; solution. </p>
-<p>Researchers must maintain active agency over their pipelines. Instead of hiding the underlying mechanics behind oversimplified wizards, MessyDesk provides an intuitive visual interface that still requires you to make deliberate methodological choices about how your data is filtered, split, and processed.</p>
-<h2>Absolute Transparency</h2>
-<p>In scientific and humanities research, you must be able to understand—and defend—how your source material was processed. MessyDesk relies entirely on trusted, open-source tools (such as Apache Solr, Poppler, and Python) and purposely does not obscure them. </p>
-<p>By keeping these technologies fully visible, MessyDesk allows you to:</p>
+<p>MessyDesk is built to support academic research, which has its own demands for data handling, reproducibility and method. Six principles guide how it is designed. They explain what MessyDesk does, and also what it deliberately does not do.</p>
+<div class="md-columns" style="--md-columns: 3; --md-columns-medium: 2;"><section class="md-column"><p><strong>1. Chainable</strong></p>
+<p>Every output is a file that can be the input of the next tool.</p>
+</section><section class="md-column"><p><strong>2. Low barrier, no hand-holding</strong></p>
+<p>Easy to start, but you are expected to understand what you do.</p>
+</section><section class="md-column"><p><strong>3. You decide</strong></p>
+<p>No hidden automation. Every step is an explicit choice.</p>
+</section></div><div class="md-columns" style="--md-columns: 3; --md-columns-medium: 2;"><section class="md-column"><p><strong>4. Transparent</strong></p>
+<p>Open tools, visible steps, nothing in a black box.</p>
+</section><section class="md-column"><p><strong>5. Humans and machines apart</strong></p>
+<p>Your work and machine output are never mixed.</p>
+</section><section class="md-column"><p><strong>6. Start light</strong></p>
+<p>Use the lightest method that works. Go heavier only if needed.</p>
+</section></div><h2>1. Chainable tools</h2>
+<p>MessyDesk tools are not endpoints that return a block of JSON and stop there. The result of every tool is a real file, shown as a node in your project graph, and that file can be given to any other tool that accepts its type.</p>
 <ul>
-<li>Dig deep into the exact algorithms transforming your data.</li>
-<li>Cite specific, version-controlled library outputs in your publications.</li>
-<li>Ensure your entire digital workflow is completely transparent and reproducible by peer reviewers.</li>
+<li>An image can be cropped, then run through OCR, then translated, then searched.</li>
+<li>A PDF can be split into pages, the pages turned into images, and the images processed further.</li>
+<li>Each result is linked to its input, so a chain of steps stays a connected pipeline.</li>
 </ul>
-<h2>Strict Human–Machine Separation</h2>
-<p>Data integrity relies on knowing who—or what—created a piece of information. MessyDesk strictly enforces a clean separation between human-generated actions and machine-generated outputs:</p>
+<p>You build the chain one step at a time and can branch it anywhere to try a different approach on the same intermediate result.</p>
+<h2>2. Low technical barrier, no hand-holding</h2>
+<p>You do not need to install software, write code or run a command line. The visual interface lets you start working with your material right away.</p>
+<p>The barrier to <em>starting</em> is low. The expectation to <em>understand</em> is not. MessyDesk does not turn research methods into a &quot;one-click&quot; wizard. It assumes you are willing to learn what a tool does, what its parameters mean and what its limits are. The <a href="/help/tools">tool descriptions</a> are there to help, but the methodological choices remain yours.</p>
+<h2>3. No automation: explicit workflow, you decide</h2>
+<p>MessyDesk does not guess what you want and does not run processing in the background on its own. Nothing is OCR&#39;d, translated or analysed unless you chose to run that tool, with those settings, on that file.</p>
 <ul>
-<li><strong>Human Actions:</strong> Your manual annotations, custom metadata tags, drawn polygon ROIs, and explicitly chosen pipeline configurations are treated as primary, authoritative research data.</li>
-<li><strong>Machine Products:</strong> Automated outputs—such as OCR text transcriptions, machine-translated sequences, or AI-detected face polygons—are strictly flagged as algorithmic derivatives.</li>
+<li>Every processing step starts from your explicit action.</li>
+<li>Settings are visible and chosen by you, not hidden defaults.</li>
+<li>The workflow is a record of your decisions, not of what the software decided for you.</li>
 </ul>
-<p>This guarantees that machine errors or algorithmic biases never silently contaminate your hand-curated research findings.</p>
+<blockquote class="md-tip"><p><span class="md-tip-icon" aria-hidden="true">💡</span> <strong>TIP:</strong> If you want to repeat or change a step, you can see exactly how it was made and run it again with different settings.</p>
+</blockquote>
+<h2>4. Transparency</h2>
+<p>In research you must be able to understand and defend how your material was processed. MessyDesk builds on trusted, open-source tools (such as Apache Solr, Poppler and Python libraries) and does not hide them behind a brand.</p>
+<ul>
+<li>Dig into the exact algorithms that transform your data.</li>
+<li>Cite specific, versioned tools and models in your publications.</li>
+<li>Trace any file back to its source through the project graph, and see which tool and settings produced it.</li>
+<li>Add notes on nodes to document your reasoning as you work.</li>
+</ul>
+<p>A workflow you can see is a workflow a peer reviewer can follow and reproduce.</p>
+<h2>5. Strict separation of human labour and machine output</h2>
+<p>Data integrity depends on knowing who, or what, created a piece of information. MessyDesk keeps these two clearly apart:</p>
+<div class="md-columns" style="--md-columns: 2; --md-columns-medium: 2;"><section class="md-column"><p><strong>Human labour</strong></p>
+<p>Your annotations, tags, drawn regions of interest (ROIs), notes and chosen pipeline settings. These are primary research data.</p>
+</section><section class="md-column"><p><strong>Machine output</strong></p>
+<p>OCR text, machine translations, detected objects or faces, summaries and other generated results. These are marked as algorithmic derivatives.</p>
+</section></div><p>Machine errors and biases should never silently end up mixed into your hand-curated findings. Because the two stay separate, you can always tell what you made and what the machine suggested.</p>
+<h2>6. Green computing: start light, go heavier only if needed</h2>
+<p>Heavy models cost energy, money and time, and they are often not needed. MessyDesk encourages the lightest approach that does the job.</p>
+<ol>
+<li>Start with simple, fast tools, for example text extraction from a PDF or classic OCR.</li>
+<li>Look at the results and judge if they are good enough for your question.</li>
+<li>Only if they are not, move to a heavier method such as machine-learning models or generative AI.</li>
+</ol>
+<blockquote class="md-tip"><p><span class="md-tip-icon" aria-hidden="true">💡</span> <strong>TIP:</strong> Try a heavy tool on a small sample first. If a light tool gives the same answer, you have saved a lot of computing.</p>
+</blockquote>
 
     </article>
   </main>

@@ -28,7 +28,7 @@ Queries are sent as HTTP POST with JSON body containing the query language and s
 | `SetProcess` | `uuid`, `status`, `total_files`, `batch_processed` | Batch processing parent |
 | `Entity` | `label`, `type`, `owner` | Named entity or tag |
 | `EntityType` | `label`, `color` | Classification for entities (Tag, Person, Location, etc.) |
-| `TagLink` | `entity_rid`, `target_rid`, `region_id`, `owner`, `created_by`, `service_id`, `task`, `confidence`, `created` | Document type (not a graph edge) linking an Entity to a file; see Entity/Tag System below |
+| `TagLink` | `entity_rid`, `target_rid`, `region_id`, `owner`, `tagged_by`, `created_by`, `service_id`, `task`, `model`, `project_rid`, `confidence`, `created` | Document type (not a graph edge) linking an Entity to a file; see Entity/Tag System below |
 | `Source` | `label`, `status` | External data source (API, cloud storage) |
 | `Prompt` | (varies) | AI prompt storage |
 | `ErrorNode` | (varies) | Processing error record |
@@ -161,19 +161,39 @@ The `set` attribute on a File vertex stores the Set RID. **[inferred]** Once ass
 | Organisation | blue |
 
 Entities are linked to files via `TagLink` (a document type, not a graph edge — see the modules under `src/modules/` `linkEntity`/
-`unLinkEntity`; this replaced the earlier `HAS_ENTITY` edge model). One `TagLink` row per (entity, file) pair,
-plus optionally per `region_id` for a specific ROI/region within that file. Fields distinguish manual tags
-from machine-generated ones:
+`unLinkEntity`; this replaced the earlier `HAS_ENTITY` edge model). One `TagLink` row per (entity, file,
+`region_id`) and maker: one for the user, and one per machine run kind (`service_id`, `task`, `model`), so
+the same tag from two models is listed under both (`TagsService.createTagLink`). Readers that list a
+file's tags (`entitiesForFiles`, `setEntities`, `reindexFileTags`) count each tag once per file.
+Fields distinguish manual tags from machine-generated ones:
 
 - `created_by`: `'user'` (created manually) or `'machine'` (created by autotag, classification tasks only —
   see below)
-- `service_id` / `task`: which processing service+task produced the tag (null for manual tags)
+- `service_id` / `task` / `model`: which service, task and model id produced the tag (null for manual
+  tags; `model` null for runs without a model)
+- `project_rid`: the desk of the target file; the tag lists, including `/api/tags/machine`, filter by it
 - `confidence`: max confidence seen across the run, for machine tags
+- `tagged_by`: the user who attached the tag (for machine links, the user whose request started the run). Two
+  people attaching the same tag to a file keep one link each.
 - `region_id`: currently always null in practice — autotagging is file-level only by design
 
 The `Entity` vertex itself also carries a `created_by` (`'user'`/`'machine'`), separate from `TagLink`'s own
 field of the same name — this is what lets `TagsService.pruneOrphanMachineTag` tell an autotag-created tag apart
 from a user-made tag that happens to have zero links, and safely delete only the former.
+
+**Tag types.** `EntityType` rows belong to the user and are shared by all of that user's desks (seeded with Tag, Person,
+Location, Theme, Quality, Date, Organisation when the user is created). A human tag must have one of the user's types. Users
+add types (`POST /api/entities/types`) and delete them only when no entity of the type exists in any desk; `Tag` is protected
+because autotag creates machine tags with it.
+
+**Desk vocabulary (`DeskTag`).** Human tags belong to desks, not just to a user: a document type `DeskTag
+{project_rid, entity_rid, owner, added_by, created}` says that a desk has a human tag. A new desk has none; creating a tag
+adds it to the desk, and importing a tag from another desk adds a `DeskTag` for the *same* entity (same id), so renaming it
+changes it everywhere. A human tag can be attached only on desks that have it (`TagsService.link`). Machine tags have no
+`DeskTag`: they belong to a desk through the `project_rid` of their links, and an autotag run reuses the desk's own human tag
+with the same label before creating a machine one. `Entity.creator_rid` records who made a tag. Removing a tag from a desk
+deletes its links there, and the tag itself when no desk has it any more; deleting a desk does the same for its vocabulary.
+The tag admin operations (rename, usage, import, remove, delete everywhere) are human-tag-only.
 
 There are two distinct, mutually exclusive mechanisms for making a service task's output browsable in
 the Tags view. Both start from a task's output JSON; which one applies is a **policy decision made per
@@ -188,7 +208,7 @@ task**, not a runtime choice:
   is automatically indexed for browsing in the Tags view, grouped by `(service_id, task, label)`, with
   **no** `Entity`/`TagLink` ever created. Despite the `ner.json` type name and the `getNerLabelGroups`
   function names (historical, from when this only served NER), the mechanism is generic span/region
-  browsing — MD-lingua's `detect_language` (per-segment language detection, not named-entity
+  browsing — MD-lingua's `language_spans` (per-segment language detection, not named-entity
   recognition) is a Faceted ROI-data case, exactly like MD-Gliner2's `extract_entities`.
 
 **Faceted ROI-data never creates tags.** `ner.json` output (per-mention/per-span spans with
@@ -197,7 +217,7 @@ produces `ner.json` (any span-shaped "extract structured data" task) must never 
 `NerService.labelGroups`/`getNerLabelFiles`/`getNerLabelMentions` (`/api/tags/ner/labels*`) scan a
 user's `ner.json` runs directly — grouped by `(service_id, task, label)`, with files resolved via each
 run's `DERIVED_FROM` edge — giving the same browse/drill-down/mention-search UX as Autotag-created
-machine tags below, without a link table. MD-lingua's `detect_language` reuses this exact path: it
+machine tags below, without a link table. MD-lingua's `language_spans` reuses this exact path: it
 writes a double-extension `*.ner.json` output file (same region container shape) rather than a separate
 type, so no core changes were needed to browse it.
 
@@ -205,18 +225,18 @@ Autotag (whole-document classification tasks, with `service.json`'s `"autotag": 
 matching output file arrives, `TagsService.autotag` creates/reuses one `Entity` per distinct label found
 and one `TagLink` per (source file, label). The `Entity.type` used is configurable per task via
 `TagsService.autotag`'s `entityType` param (defaults to `'Tag'`; nothing currently overrides it).
-`TagsService.machineTags`/`TagsService.machineTags` (`/api/tags/machine*`) let the UI browse these
-machine tags grouped by service/task and drill into tagged files. **Policy**: whole-document
+`TagsService.machineTags` (`/api/tags/machine`, optional `project_rid(s)`) lets the UI browse these
+machine tags grouped by service/task/model (with the service's `service_name`) and drill into tagged files. **Policy**: whole-document
 classification tasks (e.g. a hypothetical `classify_text`) set `"autotag": true` unconditionally in
 `service.json` (fixed per task). Span-based "extract structured data" tasks producing `ner.json`
-(MD-Gliner2's `extract_entities`, MD-lingua's `detect_language`) are Faceted ROI-data by default and
+(MD-Gliner2's `extract_entities`, MD-lingua's `language_spans`) are Faceted ROI-data by default and
 must never set that static flag — but such a task **may** additionally declare a user-facing
 `autotag` checkbox param (`service.json`'s `params_help.autotag`) to let the user opt in per run:
 `ProcessingService.queueFile` then sets `msg.task.autotag` from the submitted param value instead of a
 fixed flag (only `Set` tag-filters need real `TagLink` rows — the `ner.json` output is always produced
-and browsable regardless of this toggle). MD-lingua's `detect_language` does this, defaulting the
-param to on, so filtering Sets by detected language works out of the box while per-segment detail
-still comes from Faceted ROI-data.
+and browsable regardless of this toggle). MD-lingua no longer does this: its per-segment task (`language_spans`) never tags, and its tag task
+(`create_language_tags`) is a whole-document task with a fixed `"autotag": true` over a plain
+classification JSON (its output set stays visible on the desk).
 
 When a machine-created tag's last `TagLink` is removed (manual unlink, or file/Set deletion cascading through
 `deleteNode`), `TagsService.pruneOrphanMachineTag` deletes the now-unused `Entity` too — generic across any autotag
@@ -230,7 +250,10 @@ MD-Gliner2's zero-shot extraction) use the description text to improve model acc
 these tags" backend logic exists for this — `autotagFile` already reuses an existing entity by exact
 `(type, label, owner)` match, so a pre-existing tag is simply found and reused rather than duplicated.
 
-Tag filtering (`FiltersService` (mdf-set-filter)) queries `TagLink` and creates new Sets containing matching files.
+Tag filtering (`FiltersService` (mdf-set-filter)) queries `TagLink` and creates new Sets containing matching files. It
+also takes ROI labels (`selected_roi_labels`: service, task, model, label of a `ner.json` run), matched through the Solr
+`roi_run` documents (see search.md), so Faceted ROI-data is filterable without creating tags. Tags and ROI labels
+combine in one include (and/or) or exclude match; "untagged" still means no `TagLink`.
 Solr `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` fields are kept in sync with `TagLink` via
 `TagsService.reindexFileTags` (see `SolrClient.updateTagsForFile`).
 

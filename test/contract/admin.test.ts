@@ -165,6 +165,42 @@ test('disk-mode result (/tmp callback, elg_fs) creates the output from the tmp d
     }
 });
 
+test('reference result (/tmp callback without a tmp file) links to the existing file', { skip: TARGET === 'old' ? 'old backend needs a tmp file' : false }, async () => {
+    const consumer = new FakeConsumer(sampleDescriptor('md-contract-ref-' + uniq('r').split(' ')[1]));
+    await consumer.register();
+    const sse = await new SseListener().open();
+    try {
+        const project = await createProject();
+        const file = (await upload(project['@rid'], [{ name: 'ref.txt', type: 'text/plain', content: 'shared bytes' }])).body;
+        await post(`/api/queue/${consumer.topic}/files/${stripHash(file['@rid'])}`, { id: 'upper' });
+        const job = await consumer.claimWait();
+        const msg = job.payload;
+        const callback = {
+            file: { ...msg.file, type: 'text', extension: 'txt', label: 'ref.txt', source: msg.file },
+            ref_file_rid: msg.file['@rid'],
+            target: msg.file.project_rid,
+            process: msg.process,
+            output_set: msg.output_set,
+            userId: msg.userId,
+            total_files: 1,
+            current_file: 1,
+            file_total: 1,
+            file_count: 1,
+            service: msg.service,
+            task: msg.task,
+            response: { type: 'disk', time: 0.1 },
+        };
+        const res = await post('/api/nomad/process/files/tmp', { message: callback }, { service: true });
+        assert.equal(res.status, 200);
+        const out = await sse.waitFor((e) => e.command === 'add' && e.input === msg.process['@rid'] && e.node?.['@type'] === 'File');
+        assert.equal((await get(`/api/files/${stripHash(out.node['@rid'])}`)).text, 'shared bytes');
+        await consumer.complete(job.id);
+    } finally {
+        sse.close();
+        await consumer.unregister();
+    }
+});
+
 test('graph edge attribute and delete (owner only)', { skip: TARGET === 'old' ? 'old backend has no ownership check' : false }, async () => {
     const consumer = new FakeConsumer(sampleDescriptor('md-contract-edge-' + uniq('e').split(' ')[1]));
     await consumer.register();

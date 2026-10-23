@@ -25,6 +25,7 @@ import { usageTime } from '../usage/token-budget.ts';
 import type { ImportPipeline } from '../import/import.ts';
 import type { NodesService } from '../nodes/nodes.ts';
 import type { ServiceRegistry } from '../services/registry.ts';
+import type { NerService } from '../tags/ner.ts';
 import type { TagsService } from '../tags/tags.ts';
 import type { ThumbnailService } from '../thumbnails/thumbnails.ts';
 
@@ -91,6 +92,7 @@ export interface ResultDeps {
     nodes: NodesService;
     batches: BatchState;
     tags: TagsService;
+    ner: NerService;
     thumbnails: ThumbnailService;
     registry: ServiceRegistry;
     importPipeline: ImportPipeline;
@@ -127,7 +129,11 @@ export class ResultsService {
         const fromPayload = payload?.tmp_file || payload?.tmp_path || payload?.content_file || payload?.content_path || payload?.file_path || payload?.path;
         const fromMessage = message?.tmp_file || message?.tmp_path || message?.content_file || message?.content_path || message?.file_path;
         const candidate = fromPayload || fromMessage;
-        if (!candidate) throw Boom.badData('Missing tmp file reference');
+        if (!candidate) {
+            // A reference output shares the bytes of an existing file, so there is nothing in tmp.
+            if (referenceRid(message)) return '';
+            throw Boom.badData('Missing tmp file reference');
+        }
         const name = path.basename(String(typeof candidate === 'object' && candidate?.path ? candidate.path : candidate));
         if (!name || name === '.' || name === '..') throw Boom.badData('Invalid tmp file name');
         const resolved = path.resolve(tmpRoot, name);
@@ -138,6 +144,7 @@ export class ResultsService {
 
     /** One result file (multipart /files or disk-mode /tmp). */
     async handleFile(message: any, contentPath: string): Promise<void> {
+        if (!contentPath) return this.handleOutput(message, contentPath);
         const isRotate = lower(message?.task?.id) === 'rotate';
         const internalRotate = message?.role === ROLE.EXIF_ROTATE || isInternalVersioning(message);
         if (isRotate && internalRotate) return this.handleRotation(message, contentPath);
@@ -259,7 +266,7 @@ export class ResultsService {
         if (refRid && !refNode) throw Boom.badData(`Reference source file not found: ${refRid}`);
         let info = '';
         if (refRid && typeof refNode?.info === 'string') info = refNode.info;
-        else if (message.file.type === 'text' || String(message.file.type).includes('json') || message.file.type === 'csv') info = (await textDescription(contentPath, message.file.type)) || '';
+        else if (contentPath && (message.file.type === 'text' || String(message.file.type).includes('json') || message.file.type === 'csv')) info = (await textDescription(contentPath, message.file.type)) || '';
         const processRid = message.process['@rid'];
 
         let fileNode: any;
@@ -278,7 +285,18 @@ export class ResultsService {
         if (fileNode.metadata) await store.setAttribute(fileNode['@rid'], 'metadata', fileNode.metadata);
         if (!refRid && fileNode.type === 'ner.json') {
             // Needed to browse NER label groups whether or not the task autotags.
-            await store.setAttributes(fileNode['@rid'], { service_id: message.service?.id || null, task: message.task?.id || null });
+            await store.setAttributes(fileNode['@rid'], { service_id: message.service?.id || null, task: message.task?.id || null, model: message.task?.model?.id || null });
+            // The labels go to the search index for the Tag Filter (non-fatal; "Reindex desk" restores them).
+            await this.d.ner.indexRun({
+                nerRid: fileNode['@rid'],
+                sourceRid: message.file['@rid'],
+                owner: message.userId,
+                project: fileNode.project_rid || message.project_rid || message.file?.project_rid || null,
+                serviceId: message.service?.id || null,
+                task: message.task?.id || null,
+                model: message.task?.model?.id || null,
+                path: fileNode.path,
+            });
         }
         if (!refRid && message.task?.autotag) {
             try {

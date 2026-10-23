@@ -119,6 +119,7 @@ export class GraphService {
         const solrProcesses = new Set<string>();
         const paths = new Set<string>();
         const nerRuns = new Set<string>();
+        const deletedProjects = new Set<string>();
         const files = new Set<string>();
         const singleFiles = new Set<string>();
         const enqueue = (value: unknown) => {
@@ -148,6 +149,7 @@ export class GraphService {
                 if (node['@type'] === 'SetProcess') setProcesses.push(node['@rid']);
                 if (node['@type'] === 'Project') {
                     projects.push(node['@rid']);
+                    deletedProjects.add(node['@rid']);
                     paths.add(this.layout.projectDir(node['@rid']));
                 }
                 const isReference = node['@type'] === 'File' && Boolean(node.ref);
@@ -187,13 +189,15 @@ export class GraphService {
 
         for (const processRid of solrProcesses) await this.solr.dropProcessIndex(processRid);
         for (const nerRid of nerRuns) {
+            await this.solr.dropRoiRun(nerRid);
             const source = { rid: (await this.db.edgesOf('out', 'DERIVED_FROM', [nerRid]))[0]?.source };
             if (!source.rid) continue;
-            const run = await this.db.first(`SELECT service_id, task FROM ${nerRid}`);
-            await this.tags.removeMachineLinksOfRun(source.rid, run?.service_id || null, run?.task || null);
+            const run = await this.db.first(`SELECT service_id, task, model FROM ${nerRid}`);
+            await this.tags.removeMachineLinksOfRun(source.rid, run?.service_id || null, run?.task || null, run?.model || null);
             if (!toDelete.has(source.rid)) await this.tags.reindexFileTags(source.rid, userRid);
         }
         await this.tags.removeLinksOf([...toDelete]);
+        await this.tags.removeDeskTags([...deletedProjects]);
         await this.solr.dropFilesIndex([...files]);
         // In chunks: one statement per node made a 20 000-node delete take minutes.
         const targets = [...toDelete];

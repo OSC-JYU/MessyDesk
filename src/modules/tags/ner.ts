@@ -1,8 +1,10 @@
 // Faceted ROI-data: browsing the regions of `ner.json` outputs (named entities, language spans...)
 // grouped by (service_id, task, label), read straight from the files. No entities or TagLink rows
-// are involved.
+// are involved. The labels of each run are also indexed in Solr, one `roi_run` document per run
+// (see SolrClient.roiLabels), for the label list and the Tag Filter; mention texts stay in the file.
 
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
+import type { RoiRunDoc, SolrClient } from '../../platform/solr/solr.ts';
 import { toRid, tryRid } from '../../platform/ids.ts';
 import { readJson } from '../../platform/storage/fsutil.ts';
 import { projectRidsFrom } from './tags.ts';
@@ -27,9 +29,57 @@ function regionsOf(parsed: any): any[] {
 
 export class NerService {
     private readonly db: ArcadeClient;
+    private readonly solr: SolrClient | null;
 
-    constructor(db: ArcadeClient) {
+    constructor(db: ArcadeClient, solr: SolrClient | null = null) {
         this.db = db;
+        this.solr = solr;
+    }
+
+    /** The distinct labels of a ner.json file's regions (at most 2000, for one Solr document). */
+    static labelsOf(parsed: any): string[] {
+        const labels = new Set<string>();
+        for (const region of regionsOf(parsed)) {
+            const label = typeof region?.label === 'string' ? region.label.trim() : '';
+            if (label && labels.size < 2000) labels.add(label);
+        }
+        return [...labels];
+    }
+
+    /** Indexes the labels of one new ner.json run. Never throws: a missed run is restored by "Reindex desk". */
+    async indexRun(run: Omit<RoiRunDoc, 'labels'> & { path: string }): Promise<void> {
+        if (!this.solr) return;
+        try {
+            const labels = NerService.labelsOf(await readJson(run.path));
+            if (labels.length) await this.solr.indexRoiRuns([{ ...run, labels }]);
+        } catch (error) {
+            console.warn(`ROI label indexing failed for ${run.nerRid}: ${(error as Error).message}`);
+        }
+    }
+
+    /** Rebuilds the ROI documents of a desk from its ner.json files (after the desk's search index was dropped). */
+    async reindexProject(userRid: string, projectRid: string): Promise<{ runs: number; indexed: number }> {
+        if (!this.solr) return { runs: 0, indexed: 0 };
+        const nodes = await this.runs(userRid, { project_rid: projectRid });
+        const edges = await this.db.edgesOf('out', 'DERIVED_FROM', nodes.map((n) => n['@rid']));
+        const sources = new Map(edges.map((e) => [e.target, e.source]));
+        const docs: RoiRunDoc[] = [];
+        for (const node of nodes) {
+            const sourceRid = sources.get(node['@rid']);
+            if (!sourceRid || !node.path) continue;
+            let labels: string[];
+            try { labels = NerService.labelsOf(await readJson(node.path)); } catch { continue; }
+            if (!labels.length) continue;
+            docs.push({ nerRid: node['@rid'], sourceRid, owner: userRid, project: projectRid, serviceId: node.service_id || null, task: node.task || null, model: node.model || null, labels });
+        }
+        await this.solr.indexRoiRuns(docs);
+        return { runs: nodes.length, indexed: docs.length };
+    }
+
+    /** GET /api/tags/ner/labels: the labels of the ROI data of the given desks, from the Solr index. */
+    async indexedLabels(userRid: string, scope: NerScope & { offset?: unknown; limit?: unknown } = {}): Promise<{ items: any[]; hasMore: boolean }> {
+        if (!this.solr) return { items: [], hasMore: false };
+        return this.solr.roiLabels(userRid, { projects: projectRidsFrom(scope), search: String(scope.search || ''), offset: Number(scope.offset) || 0, limit: Number(scope.limit) || 200 });
     }
 
     /** ner.json runs whose source is the given file, newest first. */

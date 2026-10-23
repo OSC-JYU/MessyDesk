@@ -536,12 +536,14 @@ export class ProcessingService {
     }
 
     /** POST /api/projects/{rid}/reindex-search: drops the desk's search docs and re-queues indexing. */
-    async reindexProject(projectRid: string, userRid: string, reindexTags: (fileRid: string) => Promise<unknown>): Promise<any> {
+    async reindexProject(projectRid: string, userRid: string, reindexTags: (fileRid: string) => Promise<unknown>, reindexRoi?: () => Promise<unknown>): Promise<any> {
         const project = toRid(projectRid);
         if (!(await this.access.isProjectOwner(project, userRid))) throw Boom.forbidden('Project not found or access denied');
         const service = this.registry.get(SERVICE.SOLR);
         if (!service?.tasks?.index) throw Boom.badRequest('md-solr index task is not available');
         await this.solr.dropProjectIndex(userRid, project);
+        // The ROI label documents of the desk went with it: rebuilt from the ner.json files.
+        if (reindexRoi) await reindexRoi();
         const variants = [project, project.replace(/^#/, '')];
         const where = 'project_rid IN :projects AND (service_id = "md-solr" OR service = "Solr" OR service = "md-solr" OR topic = "md-solr")';
         const fields = '@rid AS process_rid, input_set, task, task_id, task_payload_json, service, service_id, project_rid, topic';

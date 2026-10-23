@@ -2,7 +2,8 @@
 # Solr schema init for MessyDesk – optimized for archival/OCR-heavy text search
 #
 # The core "messydesk" is created automatically by `solr-precreate` in docker-compose.
-# This script only configures field types, fields and copy-fields via the Schema API.
+# This script only configures field types, fields and copy-fields via the Schema API; it keeps
+# the indexed documents (see SOLR_RESET below).
 # To do a full reset, run:
 #   docker compose exec solr solr delete -c messydesk
 #   docker compose restart solr          # solr-precreate recreates it
@@ -16,9 +17,12 @@ until curl -sf "$SOLR_URL/admin/ping" > /dev/null 2>&1; do
 done
 echo "Solr core is up."
 
-# Delete all existing documents (clean slate for re-indexing)
-curl -s -X POST -H 'Content-Type: application/json' -d '{"delete":{"query":"*:*"},"commit":{}}' "$SOLR_URL/update"
-echo ""
+# This script runs on every start (the solr-init container), so it must keep the index. Set
+# SOLR_RESET=true to delete all documents first (a clean slate for re-indexing).
+if [ "${SOLR_RESET:-false}" = "true" ]; then
+  curl -s -X POST -H 'Content-Type: application/json' -d '{"delete":{"query":"*:*"},"commit":{}}' "$SOLR_URL/update"
+  echo ""
+fi
 
 # Helper: try add-*, fall back to replace-* if it already exists
 schema_upsert() {
@@ -104,6 +108,15 @@ schema_upsert "add-field" '{ "name": "set_process",     "type": "string",       
 schema_upsert "add-field" '{ "name": "process",         "type": "string",        "stored": true, "indexed": true }'
 schema_upsert "add-field" '{ "name": "project",         "type": "string",        "stored": true, "indexed": true }'
 schema_upsert "add-field" '{ "name": "set",             "type": "string",        "stored": true, "indexed": true }'
+
+# ROI label documents (type roi_run): one per ner.json run, for the Tag Filter. roi_key is
+# "service|task|model|label", one value per label of the run.
+schema_upsert "add-field" '{ "name": "roi_run",         "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "roi_source",      "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "roi_service",     "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "roi_task",        "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "roi_model",       "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "roi_key",         "type": "string",        "stored": true, "indexed": true, "multiValued": true }'
 
 # ---------------------------------------------------------------
 # Copy fields

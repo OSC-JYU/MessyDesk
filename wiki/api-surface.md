@@ -117,14 +117,23 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| GET / POST | `/api/entities` | user | grouped by type (`project_rid(s)` scope) / create |
-| GET | `/api/entities/types`, `/api/entities/items`, `/api/entities/sets/{rid}` | user | |
-| POST / DELETE | `/api/entities/{eid}/vertex/{rid}` | user | link / unlink (204 when not yours) |
+| GET / POST | `/api/entities` | user | grouped by type (`project_rid(s)` scope) / create a human tag (`project_rid` and an existing `type` required: it joins the desk's vocabulary) |
+| GET / POST | `/api/entities/types` | user | the user's tag types (`?counts=1` adds `count` and `protected`) / add one (`type`, optional `color`; 400 invalid, 409 duplicate) |
+| DELETE | `/api/entities/types/{type}` | user | only when no tag has the type (409 with the count); `Tag` is protected (400) |
+| GET | `/api/entities/items`, `/api/entities/sets/{rid}` | user | `items`: files with any of `entities` (default) or all of them (`match=and`), paged with `skip` / `limit` (default 24, at most 200): `{ total, skip, limit, items }` |
+| POST / DELETE | `/api/entities/{eid}/vertex/{rid}` | user | link / unlink (204 when not yours, or when the file's desk does not have the human tag) |
+| PATCH / DELETE | `/api/entities/{eid}` | user | rename a human tag in every desk that has it (409 when a desk already has that label) / delete it everywhere; 400 for machine tags |
+| GET | `/api/entities/{eid}/usage` | user | desks and file counts of a human tag, for the rename/delete warnings |
 | POST | `/api/entities/link/{rid}` | user/service | create and link a list |
-| GET / POST | `/api/tags` | user | raw `{result: [...]}` envelope |
-| GET | `/api/tags/machine` | user | Autotag tags grouped by service/task |
-| GET | `/api/tags/ner/labels`, `/api/tags/ner/labels/mentions` | user | Faceted ROI-data browsing |
-| POST | `/api/filters/{id}/files/{rid}` | user | `mdf-set-filter` or a region set |
+| GET / POST | `/api/tags` | user | raw `{result: [...]}` envelope; `GET ?project_rid=` lists the desk's human tags; `POST` needs `project_rid` |
+| GET | `/api/tags/admin` | user | tag admin list: human tags of a desk (`project_rid`) or all, with `desks`, `files`, `creator`; `search`, `skip`, `limit` |
+| POST | `/api/projects/{rid}/tags` | user | create a human tag in the desk (returns the existing one with that type and label) |
+| POST | `/api/projects/{rid}/tags/import` | user | `{entity_rids}` or `{from_project_rid}`: adds tags of other desks (same ids) → `{imported, skipped, conflicts}` |
+| DELETE | `/api/projects/{rid}/tags/{eid}` | user | removes the tag from the desk and its links there; deletes the tag when no desk has it |
+| GET | `/api/tags/machine` | user | Autotag tags grouped by service/task/model, with `service_name`; `project_rid(s)` limits to desks |
+| GET | `/api/tags/ner/labels`, `/api/tags/ner/labels/mentions` | user | Faceted ROI-data browsing (read from the `ner.json` files); `tag_rids` (+ `tag_match`) narrows them to the files with those tags |
+| GET | `/api/tags/roi/labels` | user | ROI labels from the Solr `roi_run` documents, `{items: [{service_id, task, model, label, count}], hasMore}`; `project_rid(s)`, `search`, `offset`, `limit` |
+| POST | `/api/filters/{id}/files/{rid}` | user | `mdf-set-filter` (`selected_entity_rids` and/or `selected_roi_labels`; 502 when ROI labels are asked and Solr is down) or a region set |
 | GET / POST | `/api/prompts` | user | list / create or update own prompt |
 | POST | `/api/search` | user | Solr response; `[]` for an empty query |
 | GET | `/api/search/info` | user | doc counts per project |

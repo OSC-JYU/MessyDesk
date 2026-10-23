@@ -34,7 +34,7 @@ export class PromptsService {
     }
 
     list(userRid: string): Promise<any[]> {
-        return this.db.rows('SELECT FROM Prompt WHERE owner = "public" OR owner = :owner ORDER BY label', { owner: userRid });
+        return this.db.rows('SELECT FROM Prompt WHERE owner = "public" OR owner = :owner ORDER BY name', { owner: userRid });
     }
 
     /**

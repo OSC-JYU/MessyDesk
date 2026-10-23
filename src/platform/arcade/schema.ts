@@ -8,7 +8,7 @@ export const VERTEX_TYPES = [
     'Request', 'Prompt', 'ErrorNode', 'ServiceGroup', 'Person',
 ] as const;
 
-export const DOCUMENT_TYPES = ['Usage', 'TagLink'] as const;
+export const DOCUMENT_TYPES = ['Usage', 'TagLink', 'DeskTag'] as const;
 
 // PROCESSED_BY, PRODUCED, HAS_ITEM, HAS_ENTITY, HAS_SET and HAS_SOURCE are no longer used by any
 // query (plan/decisions.md A3) but are still created so that a database stays usable by the old
@@ -54,6 +54,11 @@ const PROPERTIES = [
     'CREATE PROPERTY SetProcess.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY User.id IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY TagLink.tagged_by IF NOT EXISTS STRING',
+    'CREATE PROPERTY DeskTag.project_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY DeskTag.entity_rid IF NOT EXISTS STRING',
+    'CREATE PROPERTY DeskTag.owner IF NOT EXISTS STRING',
+    'CREATE PROPERTY DeskTag.added_by IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.type IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.label IF NOT EXISTS STRING',
     // Token limits (plan/llm-adapter.md 4.9) sum a group's or a user's Usage in a period.
@@ -88,6 +93,9 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     ['Entity', 'owner, type, label', 'NOTUNIQUE'],
     // The desk filter of the tag lists reads links by desk (plan/decisions.md G4).
     ['TagLink', 'project_rid', 'NOTUNIQUE'],
+    // A desk's human tags, and the desks of a tag (two single-property indexes: see the TagLink note above).
+    ['DeskTag', 'project_rid', 'NOTUNIQUE'],
+    ['DeskTag', 'entity_rid', 'NOTUNIQUE'],
     ['Usage', 'service_group', 'NOTUNIQUE'],
     ['Usage', 'user', 'NOTUNIQUE'],
 ];

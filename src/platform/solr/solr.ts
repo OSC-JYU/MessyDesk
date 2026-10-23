@@ -1,4 +1,4 @@
-// Solr client: search, per-project document counts, and index deletes. Indexing itself is done
+// Solr client: search, per-project document counts, index deletes and the ROI label documents. Indexing itself is done
 // by the md-solr consumer; tag fields are synced through the queue (see tags/tag-sync.ts), with
 // a direct fallback here.
 
@@ -60,6 +60,54 @@ export function fuzzyQuery(query: string): string {
         const variants = ocrVariants(bare);
         return variants.length ? `${sign}(${bare}~1 ${variants.join(' ')})` : `${sign}${bare}~1`;
     }).join(' ');
+}
+
+/**
+ * One document per ner.json run (ROI data: spans or regions with labels): which file the run read
+ * and which labels it found. Not part of text search (`type` is `roi_run`); the labels feed the
+ * tag filter. Mention texts stay in the ner.json file.
+ */
+export interface RoiRunDoc {
+    nerRid: string;
+    sourceRid: string;
+    owner: string;
+    project: string | null;
+    serviceId: string | null;
+    task: string | null;
+    model: string | null;
+    labels: string[];
+}
+
+export interface RoiKey {
+    service_id: string;
+    task: string;
+    model: string;
+    label: string;
+}
+
+/** The facet value of one label of one run kind: `service|task|model|label`. */
+export function roiKey(serviceId: unknown, task: unknown, model: unknown, label: unknown): string {
+    return [serviceId, task, model, label].map((part) => String(part ?? '')).join('|');
+}
+
+export function parseRoiKey(key: string): RoiKey {
+    const [service_id = '', task = '', model = '', ...label] = String(key).split('|');
+    return { service_id, task, model, label: label.join('|') };
+}
+
+export function roiRunDocument(run: RoiRunDoc): Record<string, unknown> {
+    return {
+        id: `roi:${normalizeProjectRid(run.nerRid).replace('#', '')}`,
+        type: 'roi_run',
+        owner: run.owner,
+        ...(run.project ? { project: normalizeProjectRid(run.project) } : {}),
+        roi_run: normalizeProjectRid(run.nerRid),
+        roi_source: normalizeProjectRid(run.sourceRid),
+        roi_service: run.serviceId || '',
+        roi_task: run.task || '',
+        roi_model: run.model || '',
+        roi_key: [...new Set(run.labels)].map((label) => roiKey(run.serviceId, run.task, run.model, label)),
+    };
 }
 
 export class SolrClient {
@@ -200,12 +248,79 @@ export class SolrClient {
         for (let i = 0; i < fileRids.length; i += 500) {
             const chunk = fileRids.slice(i, i + 500).map((r) => `"${escapeSolrValue(r)}"`).join(' OR ');
             try {
-                await this.postJson('/update', { delete: { query: `node:(${chunk})` } });
+                await this.postJson('/update', { delete: { query: `node:(${chunk}) OR roi_source:(${chunk})` } });
             } catch (error) {
                 this.log(`Solr delete error: ${(error as Error).message}`);
             }
         }
         if (fileRids.length) await this.postJson('/update?commit=true', { commit: {} }).catch((error) => this.log(`Solr commit error: ${(error as Error).message}`));
+    }
+
+    /** Writes ROI run documents. Throws when Solr fails; the callers treat that as non-fatal. */
+    async indexRoiRuns(runs: RoiRunDoc[]): Promise<void> {
+        for (let i = 0; i < runs.length; i += 200) {
+            await this.postJson('/update?commitWithin=1000', runs.slice(i, i + 200).map(roiRunDocument));
+        }
+    }
+
+    /** The ROI document of one ner.json run. */
+    dropRoiRun(nerRid: string): Promise<any> {
+        return this.deleteByQuery(`id:"roi:${escapeSolrValue(normalizeProjectRid(nerRid).replace('#', ''))}"`);
+    }
+
+    private roiFilters(userRid: string, projects: string[]): string[] {
+        const fq = [`owner:"${escapeSolrValue(userRid)}"`, 'type:"roi_run"'];
+        const variants = Array.from(new Set(projects.flatMap(projectRidVariants).filter(Boolean)));
+        if (variants.length) fq.push(`(${variants.map((rid) => `project:"${escapeSolrValue(rid)}"`).join(' OR ')})`);
+        return fq;
+    }
+
+    /**
+     * ROI labels with how many runs (files) have them, sorted by run kind and label so a run's labels
+     * come together. `search` matches part of a key (case-insensitive); one page, `hasMore` tells
+     * whether there is another.
+     */
+    async roiLabels(userRid: string, options: { projects?: string[]; search?: string; offset?: number; limit?: number } = {}): Promise<{ items: Array<RoiKey & { count: number }>; hasMore: boolean }> {
+        const limit = Math.min(1000, Math.max(1, Math.floor(Number(options.limit) || 200)));
+        const params = new URLSearchParams({ q: '*:*', rows: '0', wt: 'json', facet: 'true', 'facet.field': 'roi_key', 'facet.sort': 'index', 'facet.mincount': '1', 'facet.limit': String(limit + 1), 'facet.offset': String(Math.max(0, Math.floor(Number(options.offset) || 0))) });
+        const search = String(options.search || '').trim();
+        if (search) {
+            params.set('facet.contains', search);
+            params.set('facet.contains.ignoreCase', 'true');
+        }
+        for (const fq of this.roiFilters(userRid, options.projects || [])) params.append('fq', fq);
+        const facets: any[] = (await this.getJson('/select', params))?.facet_counts?.facet_fields?.roi_key || [];
+        const items: Array<RoiKey & { count: number }> = [];
+        for (let i = 0; i < facets.length; i += 2) items.push({ ...parseRoiKey(facets[i]), count: Number(facets[i + 1] || 0) });
+        return { items: items.slice(0, limit), hasMore: items.length > limit };
+    }
+
+    /**
+     * For files, which of the wanted ROI keys their runs have: Map<source file rid, Set<key>>. Throws
+     * when Solr fails, so a filter never works from partial data.
+     */
+    async roiSources(userRid: string, fileRids: string[], keys: string[]): Promise<Map<string, Set<string>>> {
+        const found = new Map<string, Set<string>>();
+        if (!fileRids.length || !keys.length) return found;
+        const wanted = new Set(keys);
+        const keyQuery = keys.map((k) => `"${escapeSolrValue(k)}"`).join(' OR ');
+        const pageSize = 5000;
+        for (let i = 0; i < fileRids.length; i += 1000) {
+            const terms = fileRids.slice(i, i + 1000).map((r) => normalizeProjectRid(r)).join(',');
+            for (let start = 0; ; start += pageSize) {
+                const response = await this.postJson('/query', {
+                    params: { q: '*:*', fl: 'roi_source,roi_key', rows: pageSize, start, sort: 'id asc', wt: 'json', fq: [...this.roiFilters(userRid, []), `{!terms f=roi_source}${terms}`, `roi_key:(${keyQuery})`] },
+                });
+                const docs: any[] = response?.response?.docs || [];
+                for (const doc of docs) {
+                    const set = found.get(doc.roi_source) || new Set<string>();
+                    for (const key of [doc.roi_key].flat()) if (wanted.has(key)) set.add(key);
+                    found.set(doc.roi_source, set);
+                }
+                if (start + docs.length >= Number(response?.response?.numFound || 0) || !docs.length) break;
+            }
+        }
+        return found;
     }
 
     async dropProjectIndex(userRid: string, projectRid: string): Promise<any> {

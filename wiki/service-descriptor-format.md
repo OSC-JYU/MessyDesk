@@ -91,6 +91,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `behaviour` | string | `"one-to-one"` (default), `"one-to-many"`, `"many-to-one"` |
 | `params` | object | Default parameter values |
 | `params_help` | object | Per-parameter UI help (see below) |
+| `autotag` | boolean | `true`: the output is turned into machine tags on the source file as soon as it arrives |
 
 ### Parameter help
 

@@ -19,19 +19,22 @@ const llm = {
 };
 
 const prompts = [
-    { name: 'Summary', type: 'text', content: 'Summarise.' },
-    { name: 'Describe image', type: 'image', content: 'Describe.' },
-    { name: 'Old pdf', type: 'pdf', content: 'Read.' },
+    { '@rid': '#1:0', uuid: 'u-summary', name: 'Summary', type: 'text', content: 'Summarise.', owner: '#9:0' },
+    { '@rid': '#1:1', uuid: 'u-public-summary', name: 'Summary', type: 'text', content: 'Summarise briefly.', owner: 'public' },
+    { '@rid': '#1:2', uuid: 'u-describe', name: 'Describe image', type: 'image', content: 'Describe.' },
+    { '@rid': '#1:3', uuid: 'u-pdf', name: 'Old pdf', type: 'pdf', content: 'Read.' },
+    { '@rid': '#1:4', name: 'No uuid', type: 'image', content: 'Old prompt.' },
 ];
 
 test('LLM services offer prompts of the node type plus their own tasks', () => {
     const text = servicesForNode({ [llm.id]: llm }, { '@type': 'File', type: 'text', extension: 'txt' }, undefined, {}, structuredClone(prompts));
-    assert.deepEqual(Object.keys(text.for_format[0].tasks).sort(), ['autotag', 'summary']);
+    // two prompts named "Summary" (the user's and a public one) are both offered
+    assert.deepEqual(Object.keys(text.for_format[0].tasks).sort(), ['autotag', 'u-public-summary', 'u-summary']);
     const image = servicesForNode({ [llm.id]: llm }, { '@type': 'File', type: 'image', extension: 'jpg' }, undefined, {}, structuredClone(prompts));
-    assert.deepEqual(Object.keys(image.for_format[0].tasks).sort(), ['autotag', 'describe_image']);
+    assert.deepEqual(Object.keys(image.for_format[0].tasks).sort(), ['#1:4', 'autotag', 'u-describe']);
     // pdf prompts are no longer offered for sets (plan/llm-adapter.md Q12)
     const set = servicesForNode({ [llm.id]: llm }, { '@type': 'Set', types: ['text', 'pdf'], extensions: ['txt', 'pdf'] }, undefined, {}, structuredClone(prompts));
-    assert.deepEqual(Object.keys(set.for_format[0].tasks).sort(), ['autotag', 'summary']);
+    assert.deepEqual(Object.keys(set.for_format[0].tasks).sort(), ['autotag', 'u-public-summary', 'u-summary']);
     // no model for this format: nothing to run
     const pdf = servicesForNode({ [llm.id]: llm }, { '@type': 'File', type: 'pdf', extension: 'pdf' }, undefined, {}, structuredClone(prompts));
     assert.deepEqual(pdf.for_format[0].tasks, {});

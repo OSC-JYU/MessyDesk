@@ -119,10 +119,11 @@ async function main(): Promise<void> {
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
     // Links made before TagLink.project_rid existed get their desk in the background.
     tags.backfillLinkProjects((m) => logger.info(m)).catch((error) => logger.error(`TagLink desk backfill failed: ${(error as Error).message}`));
+    const ner = new NerService(db, solr);
     const graph = new GraphService(db, store, access, tags, solr, layout);
     const deletes = new BackgroundDeletes(graph, store, access, queue, sse, (m) => logger.warn(m));
     deletes.resumePending();
-    const filters = new FiltersService(db, store, layout, access, nodes);
+    const filters = new FiltersService(db, store, layout, access, nodes, solr);
     filters.setFilters(await loadFilters(config.filtersDir, (m) => logger.warn(m)));
 
     const deps: Deps = {
@@ -134,9 +135,9 @@ async function main(): Promise<void> {
         importPipeline, registry,
         serviceHelp: new ServiceHelp({ dir: path.join(config.helpDir, 'services'), bundleMaxFiles: config.help.bundleMaxFiles, archiveMaxBytes: config.help.archiveMaxBytes, archiveMaxEntries: config.help.archiveMaxEntries }),
         processing, batches,
-        results: new ResultsService({ db, store, layout, nodes, batches, tags, thumbnails, registry, importPipeline, sse, logger, apiUrl: config.apiUrl }),
+        results: new ResultsService({ db, store, layout, nodes, batches, tags, ner, thumbnails, registry, importPipeline, sse, logger, apiUrl: config.apiUrl }),
         tags,
-        ner: new NerService(db),
+        ner,
         filters,
         rois: new RoisService(db, store, access, graph),
         prompts: new PromptsService(db),

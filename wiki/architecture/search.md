@@ -29,8 +29,9 @@ The Solr core is pre-created by `docker-compose.yml` via `solr-precreate messyde
 
 Docs also carry `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued, kept in sync from
 `TagLink` \u2014 see Index Management below), though these aren't currently part of the default query/highlight
-fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System) — Faceted ROI-data
-(`ner.json`) isn't indexed into Solr yet, it's browsed directly via `/api/tags/ner/labels*`.
+fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System). Faceted ROI-data (`ner.json`) has no
+tag fields; instead each run is indexed as its own `roi_run` document (below), and its mentions are browsed
+directly from the files via `/api/tags/ner/labels*`.
 
 ### Filters
 
@@ -58,6 +59,22 @@ Solr queries normalize RIDs: accept both `#123:45` and `123:45` formats, escape 
 only) and transitively from `TagsService.autotag`. A single file can have multiple Solr docs (one per indexing
 process, doc `id = fileRidNorm:processRidNorm`), all keyed by the `node` field; all matching docs are updated.
 Errors are non-fatal (logged, not thrown).
+
+## ROI run documents
+
+One document per `ner.json` run (`type: "roi_run"`, `id = roi:<ner rid>`), written by the backend when the output arrives
+(`NerService.indexRun`) and rebuilt from the files by "Reindex desk" (`NerService.reindexProject`):
+`owner`, `project`, `roi_run` (the ner.json file), `roi_source` (the file it read), `roi_service`, `roi_task`,
+`roi_model` and a multivalued string `roi_key`, one value per distinct label: `service|task|model|label`. Mention texts
+are not indexed. The documents do not use `node`, so tag syncing and text search never touch them (all text queries
+filter `type:"text"`).
+
+- `GET /api/tags/roi/labels` facets on `roi_key` (sorted, `facet.contains` for the search box, paged by `facet.offset`/`limit`).
+- The Tag Filter (`mdf-set-filter`) finds the files of a set with `{!terms f=roi_source}` and the wanted `roi_key` values.
+  A Solr failure makes the filter fail (502), never return partial results.
+- Deleted with the run (`dropRoiRun`), with the source file (`dropFilesIndex`) and with the desk (`dropProjectIndex`).
+- The schema fields are in `tools/solr-init-v2.sh`, which runs on every start and keeps the index (`SOLR_RESET=true` wipes it).
+  An existing core gets the `roi_*` fields the next time the script runs; runs from before are indexed by "Reindex desk".
 
 ## Statistics
 
