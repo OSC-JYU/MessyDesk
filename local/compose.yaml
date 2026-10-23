@@ -170,6 +170,17 @@ services:
       <<: *service-env
       SERVICE_LOCAL_URL: http://md-tesseract:8400
 
+  # Page orientation with a small neural network on CPU; its osd.json feeds Auto-rotate (md-sharp).
+  md-docori:
+    <<: *service
+    image: localhost/messydesk/md-docori:local
+    build: ../../MD-docori
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-docori:9012
+      # /app is not writable for uid 1000; outputs go to the data volume, this is only scratch.
+      OUTPUT_FOLDER: /tmp/output
+
   # ---- language services ----------------------------------------------------------------------
 
   md-lingua:
@@ -272,6 +283,13 @@ services:
       <<: *consumer-env
       TOPIC: md-tesseract
       DEV_URL: http://md-tesseract:8400
+
+  consumer-docori:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-docori
+      DEV_URL: http://md-docori:9012
 
   # Solr has no MessyDesk service in front of it: the consumer talks to Solr directly.
   consumer-solr:
