@@ -1,0 +1,103 @@
+{
+  "database": "perf_run2",
+  "when": "2026-10-05T16:50:58.011Z",
+  "results": [
+    {
+      "entities": 100205,
+      "links": 1015000,
+      "files": 20000,
+      "timings": [
+        {
+          "name": "GET /api/entities",
+          "status": 200,
+          "kb": 21485,
+          "n": 3,
+          "p50": 1346,
+          "p95": 1412,
+          "p99": 1412,
+          "max": 1412
+        },
+        {
+          "name": "GET /api/entities?project_rid",
+          "status": 200,
+          "kb": 4258,
+          "n": 3,
+          "p50": 2284,
+          "p95": 2383,
+          "p99": 2383,
+          "max": 2383
+        },
+        {
+          "name": "GET /api/tags",
+          "status": 200,
+          "kb": 2062,
+          "n": 3,
+          "p50": 158,
+          "p95": 159,
+          "p99": 159,
+          "max": 159
+        },
+        {
+          "name": "GET /api/tags/machine",
+          "status": 200,
+          "kb": 1342,
+          "n": 3,
+          "p50": 1761,
+          "p95": 1782,
+          "p99": 1782,
+          "max": 1782
+        },
+        {
+          "name": "GET /api/entities/items (5 tags)",
+          "status": 200,
+          "kb": 3,
+          "n": 3,
+          "p50": 4,
+          "p95": 4,
+          "p99": 4,
+          "max": 4
+        },
+        {
+          "name": "GET /api/entities/sets/{set}",
+          "status": 200,
+          "kb": 1390,
+          "n": 3,
+          "p50": 1399,
+          "p95": 1402,
+          "p99": 1402,
+          "max": 1402
+        },
+        {
+          "name": "GET /api/documents/{file}",
+          "status": 200,
+          "kb": 1,
+          "n": 3,
+          "p50": 4,
+          "p95": 7,
+          "p99": 7,
+          "max": 7
+        },
+        {
+          "name": "GET /api/sets/{set}/files?thumbnails",
+          "status": 200,
+          "kb": 39,
+          "n": 3,
+          "p50": 38,
+          "p95": 39,
+          "p99": 39,
+          "max": 39
+        },
+        {
+          "name": "tag + untag one file",
+          "status": 200,
+          "kb": 0,
+          "n": 3,
+          "p50": 18,
+          "p95": 21,
+          "p99": 21,
+          "max": 21
+        }
+      ]
+    }
+  ]
+}

@@ -70,13 +70,13 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `dev_url` | string | No | Alternative dev endpoint |
 | `location` | string | No | `"on-premise"`, `"cloud"`, etc. |
 | `access` | string | No | `"free"`, `"proprietary"`, `"commercial"` |
-| `category` | string | No | One of `preparation`, `linguistic`, `ml`, `generative`, `system` (see [3.tools.md](../docs/help/3.tools.md)). Missing/invalid values show as "Uncategorized" in the UI; invalid (non-empty) values are rejected at registration. `system` services are internal-only and are filtered out of `getServicesForNode()` entirely, so they never reach the crunchers UI. |
+| `category` | string | No | One of `preparation`, `linguistic`, `ml`, `generative`, `system` (see [3.tools.md](../docs/help/3.tools.md)). Missing/invalid values show as "Uncategorized" in the UI; invalid (non-empty) values are rejected at registration. `system` services are internal-only and are filtered out of `servicesForNode()` entirely, so they never reach the crunchers UI. |
 | `source_url` | string | No | Documentation/source URL |
 | `supported_types` | string[] | No | File types this service accepts (e.g., `["image", "text"]`) |
 | `supported_formats` | string[] | No | File extensions accepted (e.g., `["png", "jpg"]`) |
 | `service_groups` | string[] | No | ServiceGroup `id`s gating which users may use the service/task — see [Service Groups](#service-groups) |
 | `tasks` | object | Yes* | Task definitions (see below) |
-| `external_tasks` | string | No | If set (e.g., `"prompts"`), tasks defined externally |
+| `external_tasks` | string | No | `"prompts"`: the user's prompts are offered as tasks (LLM services), next to the descriptor's own `tasks` (e.g. `autotag`) |
 | `models` | object | No | Model variants for LLM services |
 
 **[verified]** from descriptor files in `MD-consumers/descriptors/` and Python service `service.json` files.
@@ -91,6 +91,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `behaviour` | string | `"one-to-one"` (default), `"one-to-many"`, `"many-to-one"` |
 | `params` | object | Default parameter values |
 | `params_help` | object | Per-parameter UI help (see below) |
+| `autotag` | boolean | `true`: the output is turned into machine tags on the source file as soon as it arrives |
 
 ### Parameter help
 
@@ -116,11 +117,17 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 }
 ```
 
-**[verified]** from `MD-consumers/descriptors/md-azure-ai/service.json`.
+Further model fields used by the LLM services (MD-llm `providers/*.json`, `plan/llm-adapter.md`):
+`family` (the same model on several providers; the UI shows it once and asks for the provider),
+`max_input_tokens`, `max_output_tokens`, `max_image_edge`, `temperature: false`,
+`structured_output: false`. The chosen model is stored on the Process as `model`, `model_version`
+and `model_family`.
+
+**[verified]** from MD-llm `providers/*.json` and `src/modules/processing/processing.ts`.
 
 ## Task Behaviour
 
-**[verified]** from `graph.mjs` `resolveTaskBehaviour()`:
+**[verified]** from `resolveBehaviour()` (src/modules/services/registry.ts):
 
 | Value | Meaning | Output handling |
 |-------|---------|-----------------|
@@ -161,13 +168,13 @@ All Python services in this workspace follow this common pattern:
 ## Service Groups
 
 `service_groups` (top-level and per-task) started out as free-text strings (e.g. `"IMAGE"`, `"OSC"`)
-gating which users can see/run a service or task (`services.mjs` `pickTasks()`: a user only sees a
+gating which users can see/run a service or task (`src/modules/services/registry.ts` `pickTasks()`: a user only sees a
 service/task if `user.service_groups` intersects it). These values are now backed by an admin-managed
-`ServiceGroup` graph vertex type (`graph.mjs` `createServiceGroup`/`getServiceGroups`/etc., routes in
-`routes/service-groups.mjs`), giving each group a stable `id` (the string used in `service_groups`
+`ServiceGroup` graph vertex type (the modules under `src/modules/` `createServiceGroup`/`getServiceGroups`/etc., routes in
+`src/modules/service-groups/service-groups.ts`), giving each group a stable `id` (the string used in `service_groups`
 arrays), a display `name`, a `description`, and an optional `logo`.
 
-**[verified]** from `src/graph.mjs`, `src/routes/service-groups.mjs`, `src/routes/auth.mjs`.
+**[verified]** from `src/modules/` (see [backend structure](architecture/backend-structure.md)), `src/modules/service-groups/service-groups.ts`, `src/modules/users/routes.ts`.
 
 - Managed from the admin-only Service Groups tab in MessyDesk-UI's `AdminMain.vue`; backend routes
   also enforce `access === 'admin'` independently.
@@ -177,7 +184,7 @@ arrays), a display `name`, a `description`, and an optional `logo`.
   `PUT /api/users/{rid}/service-groups`, which replaces `User.service_groups`.
 - Logo upload (`POST /api/service-groups/{id}/logo`) calls the standalone **MD-sharp** service's
   `/process` endpoint directly and synchronously over HTTP (multipart `message` + `content` fields,
-  `fit` task, 200x200 PNG output) — see `src/routes/service-groups.mjs`. This bypasses the
+  `fit` task, 200x200 PNG output) — see `src/modules/service-groups/service-groups.ts`. This bypasses the
   queue/consumer pipeline entirely: a ServiceGroup logo isn't a Project/File graph node, so there is
   no `@rid` for a consumer to attach a result to, and no benefit to going through a MD-consumers
   adapter for a one-off admin action. The response is written straight to disk and returned to the

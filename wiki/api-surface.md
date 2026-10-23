@@ -1,181 +1,158 @@
 # API Surface
 
-Backend HTTP endpoints organized by domain. All endpoints are under `/api` unless noted.
+Backend HTTP routes by domain. All paths are under `/api` except `/events` and static files.
+RIDs in paths are written without `#` (`12:3`). **[verified]** from `src/modules/*/routes.ts`;
+the contract tests in `test/contract/` pin request and response shapes.
 
-**[verified]** from route files in `src/routes/`.
+Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: admin`,
+**service** = consumer token (see [backend structure](architecture/backend-structure.md#authentication)),
+**open** = no auth.
 
-## Projects
+## Session and users
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/projects` | Create project (requires `label`) |
-| GET | `/api/projects` | List user's projects |
-| GET | `/api/projects/storage-summary` | Storage usage per project |
-| POST | `/api/projects/{rid}/upload/{set?}` | Upload file to project (optionally into a set) |
-| GET | `/api/projects/export/{rid}` | Export project |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api` | user | `MessyDesk API` (session check) |
+| GET | `/api/sso` | open | `{mail, name}` from proxy headers |
+| GET | `/api/me` | user | `{rid, group, access, id, mode, settings}` |
+| PUT | `/api/me/settings` | user | partial `{theme, cookie, motion}`; 400 on unknown keys/values |
+| GET / POST | `/api/users` | admin | list / create `{id, label}` (400 invalid, 409 exists) |
+| PUT | `/api/users/{rid}/service-groups` | admin | `{service_groups: []}` |
+| POST | `/api/permissions/request` | open | identity from headers; 409 when already requested or a user |
+| GET | `/api/permissions/request` | admin | |
+| DELETE | `/api/permissions/request/{rid}` | admin | |
+
+## Projects and sets
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/projects` | user | `{label, description, position}`; 400 no label, 409 duplicate label |
+| GET | `/api/projects` | user | own projects with `node_count`, `file_count`, sorted by label |
+| PUT | `/api/projects/{rid}` | user | `{key: label, description or position, value}` |
+| DELETE | `/api/projects/{rid}` | user | cascade delete; returns the rid |
+| GET | `/api/projects/{rid}` | user | desk graph `{nodes, edges}` (Vue Flow) |
+| POST | `/api/projects/update-size` | user | recompute sizes from disk |
+| GET | `/api/projects/storage-summary` | user | `{used_mb, quota_gb, quota_mb, used_percent}` |
+| POST | `/api/projects/{rid}/sets` | user | create a set |
+| POST | `/api/projects/{rid}/sources` | user | create a Source; queues `init` to `md-<type>` |
+| POST | `/api/projects/{rid}/reindex-search` | user | drop the desk's search docs and re-queue indexing |
+| POST | `/api/projects/{rid}/upload/{set?}` | user | multipart `file` (several only into a set). One file returns the node (errors as 400), several return `{uploaded, failed, total}`. 409 when the set was already processed |
+| GET | `/api/sets/{rid}/files` | user | `{file_count, limit, skip, files}` with `thumb`, `entities` |
+| POST | `/api/sets/{rid}/thumbnails` | user | re-queue thumbnails, 202 |
+| POST | `/api/sets/{rid}/files/zip/jobs` | user/service | ZIP export job, 202 `{job_id, status, status_url, download_url}` |
+| GET | `/api/sets/{rid}/files/zip` | user/service | same, with a `message` |
+| GET | `/api/sets/{rid}/files/zip/jobs/{id}` | user | `processing`, `ready`, or 504 `failed` |
+| GET | `/api/sets/{rid}/files/zip/jobs/{id}/download` | user | the ZIP; 409 not ready |
 
 ## Files
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/files/{rid}/thumbnail` | Generate thumbnail |
-| POST | `/api/files/{rid}/version` | Create file version |
-| GET | `/api/documents/{rid}` | Get document content |
-| GET | `/api/thumbnails/{param*}` | Serve thumbnail images; 404 when the thumbnail has not been made yet (the UI draws its own placeholder) |
-| DELETE | `/api/files/{rid}` | Delete file |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/files/{rid}` | user/service | content; sibling `error.json` when the job failed |
+| GET | `/api/files/{rid}/source` | user | content of the file it derives from |
+| GET | `/api/files/{rid}/ancestors` | user | DERIVED_FROM chain; 403 when not yours |
+| GET | `/api/files/{rid}/ner` | user | ner.json runs of a file |
+| POST | `/api/files/{rid}/version` | user | multipart `file`+`operation`+`params`, or JSON `{content}` |
+| POST | `/api/files/{rid}/revert` | user | back to `<path>.original`; 409 when none |
+| POST | `/api/files/{rid}/thumbnail` | user | queue a thumbnail; 503 when no thumbnailer/poppler consumer |
+| GET | `/api/documents/{rid}` | user | node attributes + `entities` |
+| GET | `/api/thumbnails/{path*}` | user | `preview.jpg` / `thumbnail.jpg` next to a file; 404 when not ready or not yours |
+| GET / POST | `/api/images/{rid}/sets/{set_rid}/rois` | user | read / upsert the roi.json |
+| PUT / DELETE | `/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}` | user | update / delete |
 
-## Graph (Generic Vertex/Edge Access)
+## Graph
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/graph/vertices/{rid}` | Get vertex by RID |
-| POST | `/api/graph/vertices/{rid}` | Update vertex attributes |
-| DELETE | `/api/graph/vertices/{rid}` | Delete vertex (cascade) |
-| GET | `/api/graph/traverse/{rid}/{direction}` | Traverse edges |
-| GET | `/api/graph/edges/{rid}` | Get edges for vertex |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/graph/traverse/{rid}/{direction}` | user | `in`, `out` or `both` along DERIVED_FROM |
+| GET | `/api/graph/vertices/{rid}/init` | user | a Source's `init.json` |
+| POST | `/api/graph/vertices/{rid}` | user | `{key, value}` for description, label, info, expand, metadata, response, node_error, path, edited |
+| DELETE | `/api/graph/vertices/{rid}` | user | cascade delete; 409 with active jobs |
+| POST / DELETE | `/api/graph/edges/{rid}` | user | edge attribute / delete (both ends must be yours) |
+| GET | `/api/errors/{rid}` | user | a node's error fields |
 
-## Entities
+## Processing, batches and the queue
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/entities` | List entities |
-| POST | `/api/entities` | Create entity |
-| GET | `/api/entities/types` | List entity types |
-| GET/POST | `/api/entities/{rid}/vertex/{vid}` | Link entity to vertex (creates/removes a `TagLink`) |
-| GET | `/api/entities/sets/{rid}` | Get entities for a set |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/queue/{service}/files/{rid}/{roi?}` | user | run a task on a file; returns the rid |
+| POST | `/api/queue/{service}/sets/{rid}` | user | batch over a set; returns the set rid |
+| POST | `/api/queue/{service}/sources/{rid}` | user | request to a Source |
+| GET | `/api/queue/jobs/active` | user | the caller's active jobs (admins: all) |
+| POST | `/api/queue/jobs/{rid}/dismiss` | user | batch rid or `job_N` |
+| GET | `/api/queue/{topic}/flush` | admin | delete every job of a topic |
+| GET | `/api/batches/{rid}` | user | batch node, or job info for `job_N` |
+| POST | `/api/batches/{rid}/pause`, `/resume`, `/cancel` | user | |
+| POST | `/api/queue/claim` | service | `{topic, adapter_id}` -> `{job}` |
+| POST | `/api/queue/{job_id}/heartbeat`, `/complete`, `/fail` | service | `{adapter_id[, error]}` |
 
-## Tags
+## Consumer callbacks
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/tags` | List the current user's Tag entities |
-| POST | `/api/tags` | Create a Tag entity |
-| GET | `/api/tags/machine` | List classification-autotag tags (TagLink-backed) grouped by (service_id, task, label) with counts |
-| GET | `/api/tags/machine/{entity_rid}/files` | Files tagged by one (service_id, task, entity) combination |
-| GET | `/api/tags/machine/{entity_rid}/mentions` | Paged, searchable mention text for one machine-tag combination |
-| GET | `/api/tags/ner/labels` | List Faceted ROI-data (service_id, task, label) groups found across a user's `ner.json` runs — no TagLink involved |
-| GET | `/api/tags/ner/labels/files` | Files whose `ner.json` contains a given Faceted ROI-data (service_id, task, label) group |
-| GET | `/api/tags/ner/labels/mentions` | Paged, searchable mention text (with per-hit start/end/confidence) for one NER label group |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| POST | `/api/nomad/process/files` | service | multipart `content` + `message`, 500 MB |
+| POST | `/api/nomad/process/files/tmp` | service | `{message, tmp_path}` (disk mode) |
+| POST | `/api/nomad/process/files/done` | service | job finished without output |
+| POST | `/api/nomad/process/files/error` | service | `{error, message}` |
+| POST | `/api/nomad/process/files/metadata` | service | AI usage (`Usage` documents) |
 
-## NER regions
+## Services, help, Nomad
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/files/{rid}/ner` | List `ner.json` runs for a file, each with per-mention regions (label/start/end/confidence) |
-| POST | `/api/files/{rid}/sets/{set_rid}/ner` | Manually create a `ner.json` file node (accepts `service_id`/`task` query params) |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/services` | user | registry keyed by id, with live `consumers` |
+| GET | `/api/services/{id}` | user/service | one descriptor (204 when unknown) |
+| GET | `/api/services/files/{rid}` | user | `{for_type, for_format, filters}` for a node |
+| POST | `/api/services/register` | service | `{source, service}` |
+| POST / DELETE | `/api/services/{id}/adapter/{adapter_id}` | service | consumer heartbeat / goodbye |
+| POST | `/api/services/install` | admin | `kind`: nomad, external or local |
+| POST | `/api/services/reload` | admin | reload the persisted registry |
+| DELETE | `/api/services/{id}` | admin/service | forget a service |
+| POST | `/api/services/{id}/help/ingest` | service/admin | fetch and store the service's help |
+| GET | `/api/services/{id}/help`, `/api/services/{id}/help/assets/{path*}` | open | |
+| GET | `/api/help/{slug?}`, `/api/help/images/{path*}`, `/api/help/styles/{path*}` | open | built help pages |
+| POST / DELETE | `/api/nomad/service/{name}` | admin/service | start (`{nomad_hcl}`) / stop |
 
-## Queue / Pipeline
+## Tags, filters, prompts, search, service groups
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/pipeline/files/{file_rid}/{roi?}` | Trigger processing pipeline |
-| GET | `/api/queue/{topic}/drain/{process_rid?}` | Drain queue |
-| POST | `/api/queue/{topic}/pause` | Pause queue |
-| POST | `/api/queue/{topic}/resume` | Resume queue |
-| POST | `/api/queue/{topic}/cancel` | Cancel queued jobs |
-
-## Search
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/search` | Full-text search |
-| GET | `/api/search/info` | Search statistics |
-
-## Services
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/services` | List registered services |
-| GET | `/api/services/{service}` | Get service descriptor |
-| POST | `/api/services/register` | Register service descriptor (used by consumers; open) |
-| POST | `/api/services/install` | **admin** Install a service (kind: `nomad`\|`external`\|`local`) and persist to registry |
-| DELETE | `/api/services/{service}` | **admin** Forget service (remove from registry) |
-| POST | `/api/services/reload` | **admin** Reload service descriptors from disk |
-| POST | `/api/services/refresh` | Refresh service registry |
-| POST | `/api/services/{service}/adapter/{id}` | Register adapter heartbeat (consumers; open) |
-| DELETE | `/api/services/{service}/adapter/{id}` | Unregister adapter (consumers; open) |
-
-## ROI (Region of Interest)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/images/{rid}/sets/{set_rid}/rois` | Create/update ROIs for image |
-| GET | `/api/images/{rid}/rois/{roi_id}` | Get ROI |
-| PUT | `/api/images/{rid}/rois/{roi_id}` | Update ROI |
-| DELETE | `/api/images/{rid}/rois/{roi_id}` | Delete ROI |
-
-## Nomad (Service Orchestration)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/nomad/status` | Check Nomad cluster status |
-| POST | `/api/nomad/service/{name}` | **admin** Deploy service |
-| DELETE | `/api/nomad/service/{name}` | **admin** Stop service |
-
-## Process Callbacks (from consumers)
-
-| Method | Path | Max Payload | Purpose |
-|--------|------|-------------|---------|
-| POST | `/api/nomad/process/files` | 500MB | Receive processed file result |
-| POST | `/api/nomad/process/files/done` | — | Signal processing complete |
-| POST | `/api/nomad/process/files/error` | — | Signal processing error |
-| POST | `/api/nomad/process/csv/append` | 200MB | CSV append operation |
-| POST | `/api/nomad/process/files/metadata` | 200MB | Metadata extraction result |
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET / POST | `/api/entities` | user | grouped by type (`project_rid(s)` scope) / create a human tag (`project_rid` and an existing `type` required: it joins the desk's vocabulary) |
+| GET / POST | `/api/entities/types` | user | the user's tag types (`?counts=1` adds `count` and `protected`) / add one (`type`, optional `color`; 400 invalid, 409 duplicate) |
+| DELETE | `/api/entities/types/{type}` | user | only when no tag has the type (409 with the count); `Tag` is protected (400) |
+| GET | `/api/entities/items`, `/api/entities/sets/{rid}` | user | `items`: files with any of `entities` (default) or all of them (`match=and`), paged with `skip` / `limit` (default 24, at most 200): `{ total, skip, limit, items }` |
+| POST / DELETE | `/api/entities/{eid}/vertex/{rid}` | user | link / unlink (204 when not yours, or when the file's desk does not have the human tag) |
+| PATCH / DELETE | `/api/entities/{eid}` | user | rename a human tag in every desk that has it (409 when a desk already has that label) / delete it everywhere; 400 for machine tags |
+| GET | `/api/entities/{eid}/usage` | user | desks and file counts of a human tag, for the rename/delete warnings |
+| POST | `/api/entities/link/{rid}` | user/service | create and link a list |
+| GET / POST | `/api/tags` | user | raw `{result: [...]}` envelope; `GET ?project_rid=` lists the desk's human tags; `POST` needs `project_rid` |
+| GET | `/api/tags/admin` | user | tag admin list: human tags of a desk (`project_rid`) or all, with `desks`, `files`, `creator`; `search`, `skip`, `limit` |
+| POST | `/api/projects/{rid}/tags` | user | create a human tag in the desk (returns the existing one with that type and label) |
+| POST | `/api/projects/{rid}/tags/import` | user | `{entity_rids}` or `{from_project_rid}`: adds tags of other desks (same ids) → `{imported, skipped, conflicts}` |
+| DELETE | `/api/projects/{rid}/tags/{eid}` | user | removes the tag from the desk and its links there; deletes the tag when no desk has it |
+| GET | `/api/tags/machine` | user | Autotag tags grouped by service/task/model, with `service_name`; `project_rid(s)` limits to desks |
+| GET | `/api/tags/ner/labels`, `/api/tags/ner/labels/mentions` | user | Faceted ROI-data browsing (read from the `ner.json` files); `tag_rids` (+ `tag_match`) narrows them to the files with those tags |
+| GET | `/api/tags/roi/labels` | user | ROI labels from the Solr `roi_run` documents, `{items: [{service_id, task, model, label, count}], hasMore}`; `project_rid(s)`, `search`, `offset`, `limit` |
+| POST | `/api/filters/{id}/files/{rid}` | user | `mdf-set-filter` (`selected_entity_rids` and/or `selected_roi_labels`; 502 when ROI labels are asked and Solr is down) or a region set |
+| GET / POST | `/api/prompts` | user | list / create or update own prompt |
+| POST | `/api/search` | user | Solr response; `[]` for an empty query |
+| GET | `/api/search/info` | user | doc counts per project |
+| GET / POST / PUT / DELETE | `/api/service-groups[/{id}]` | admin | |
+| POST | `/api/service-groups/{id}/logo` | admin | resized by md-sharp |
+| GET | `/api/service-groups/{id}/logo` | user | PNG |
 
 ## Events
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/events` | Server-Sent Events stream |
-| GET | `/api/queue/events` | Queue-specific events |
+`GET /events` (user): server-sent events, `id: <ms>\r\ndata: <json>\r\n\r\n`, unnamed. A user may
+have several open connections. Commands: `add`, `update`, `process_update`, `process_finished`.
 
-## Auth
+## Removed in the rewrite
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/sso` | SSO endpoint |
-| GET | `/api/me` | Current user identity/access level and UI `settings` (defaults filled in) |
-| PUT | `/api/me/settings` | Save the user's UI settings: `theme` (`light`/`dark`/`system` = Fjord, `navy`, `navy-dark`, `slate`, `warm`, `warm-dark`, `classic`), `cookie` (`classic`/`chocolate`/`matcha`/`strawberry`/`blueberry`), `motion` (`on`/`off`); partial updates merge, unknown keys or values give 400. See `src/userSettings.mjs` |
-| GET | `/api/users` | **admin** List users |
-| POST | `/api/users` | **admin** Create user |
-| PUT | `/api/users/{rid}/service-groups` | **admin** Replace a user's ServiceGroup membership (`service_groups` string array) |
-| GET | `/api/permissions/request` | Permission request |
-| DELETE | `/api/logout` | Logout |
-
-## Service Groups
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/service-groups` | **admin** List ServiceGroups |
-| POST | `/api/service-groups` | **admin** Create a ServiceGroup (`id`, `name`, `description`) |
-| PUT | `/api/service-groups/{id}` | **admin** Update `name`/`description` |
-| DELETE | `/api/service-groups/{id}` | **admin** Delete a ServiceGroup |
-| POST | `/api/service-groups/{id}/logo` | **admin** Upload a logo (multipart); resized to 200x200 async via the `md-sharp` queue, see [service-descriptor-format.md](service-descriptor-format.md#service-groups) |
-| GET | `/api/service-groups/{id}/logo/source` | **admin** Fetched by the md-sharp consumer for the pending resize job |
-| GET | `/api/service-groups/{id}/logo` | Serves the resized PNG logo |
-
-## Filters
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| POST | `/api/filters/{type}/files/{node_id}` | Apply filter to file |
-
-## Prompts
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/prompts` | List prompts |
-| POST | `/api/prompts` | Save prompt |
-
-## Help
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/help/{service}` | Get service help documentation |
-| GET | `/api/help/images/{assetPath*}` | Serve help images |
-
-## Errors
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/errors/{rid}` | Get error details |
+Debug and unused routes were dropped (plan/decisions.md D5, E1, E2): `/events/test*`,
+`/api/pipeline/files/*`, `/api/queue/{topic}/drain/*`, `/api/queue/drain/*`,
+`/api/queue/{topic}/status`, `/api/queue/cleanup`, `/api/queue/sweeper/summary`,
+`PUT /api/files/{rid}`, `POST /api/files/{rid}/sets/{set}/ner`,
+`/api/tags/machine/{rid}/files`, `/api/tags/machine/{rid}/mentions`, `/api/tags/ner/labels/files`,
+`GET /api/graph/vertices/{rid}`, `GET /api/nomad/status`, `/api/nomad/process/csv/append`,
+`GET /api/entities/{rid}`, `DELETE /api/filters/{id}/files/{rid}`, `GET /api/projects/{rid}/files`.
+Pipelines (chaining a task after another through `message.pipeline`) went with them.

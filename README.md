@@ -1,43 +1,53 @@
-# MessyDesk
+# MessyDesk backend
 
-Digital humanities desktop for collecting, organising and processing research materials.
+Digital humanities desktop for collecting, organising and processing research materials. This is
+the rewritten backend: same HTTP API, events, queue messages, database schema and data layout as
+the old `MessyDesk` backend, so MessyDesk-UI and MD-consumers work against it unchanged.
 
-**No release yet — this is under active development.** Interfaces, data formats and APIs can change without notice.
+**No release yet — this is under active development.**
 
-![UI](https://github.com/OSC-JYU/MessyDesk/blob/main/docs/crunchers.png)
+## Run locally
 
-## What it does
+To try the whole thing (backend, UI and the base services) in containers, see
+[local/README.md](local/README.md).
 
-- Extract images and text from PDF
-- Process images
-- Run OCR
-- Run text/image analysis tasks
-- Chain these into pipelines ("crunchers")
-
-## How it works
-
-MessyDesk is a backend + UI for running processing tasks against pluggable services ("crunchers"). Services can run locally, in a Nomad cluster, or externally, and are connected via **service adapters** that translate MessyDesk requests into whatever API a given service exposes.
-
-Tools are grouped into four categories, from fully manual to AI-based, so it's clear how each result was produced:
-- **Preparation & annotation** — manual/deterministic (tagging, cropping, simple OCR, search)
-- **Linguistic & statistical analysis** — deterministic NLP (topic modelling, POS, frequency/similarity analysis)
-- **Task-specific machine learning** — trained non-LLM models (HTR, advanced OCR, NER, PII detection, classification, translation)
-- **Generative AI** — LLM/VLM-based (OCR/HTR, classification, summarisation, Q&A, metadata generation)
-
-See `wiki/` for architecture details and `docs/help/*.md` for user-facing help content.
-
-## Help pages
-
-Help markdown lives in `docs/help/*.md`; images go in `docs/images` and can be referenced by bare filename (e.g. `![Diagram](input_output.png)`).
-
-Build help pages with:
+For backend development: needs Node.js >= 22.5, ArcadeDB and Solr (`docker compose up -d` starts both).
 
 ```bash
-npm run build:help
+npm install
+npm run build
+MODE=development DB_PASSWORD=node_master npm start
 ```
 
-Generated output is written to `public/help` and served by `GET /api/help/{slug?}`.
+The API listens on `http://localhost:8200`. Configuration is environment variables, all listed in
+[wiki/environment-variables.md](wiki/environment-variables.md). The ones you most likely set:
 
+| Variable | Notes |
+|---|---|
+| `DB_PASSWORD` | required |
+| `LEGACY_ARCADEDB` | `true` (default) for ArcadeDB 23.7.1, `false` for newer servers |
+| `SERVICE_TOKEN` | shared secret for MD-consumers (`Authorization: Bearer ...`) |
+| `SERVICE_AUTH_LEGACY_MAIL` | `true` (default) until MD-consumers send the token |
+| `MODE=development` | every request is `DEV_USER` (no proxy needed) |
 
+## Tests
 
+```bash
+npm test                      # unit tests
+# HTTP contract tests against a running backend (they create their own projects):
+BASE_URL=http://localhost:8200 SERVICE_TOKEN=... npm run test:contract
+```
 
+The contract tests also run against the old backend with `TARGET=old`; tests for behaviour that
+changed on purpose are skipped there (see [plan/decisions.md](plan/decisions.md)).
+
+## Layout
+
+- `src/` — TypeScript sources; see [wiki/architecture/backend-structure.md](wiki/architecture/backend-structure.md)
+- `test/contract/`, `test/unit/` — tests
+- `public/` — static files and the built help pages (`npm run build:help` from `docs/help`)
+- `filters/` — filter definitions (`filter.json`)
+- `wiki/` — engineering wiki
+- `plan/` — the rewrite plan, the API inventory and the decisions
+
+Help markdown lives in `docs/help/*.md`; images go in `docs/images`.

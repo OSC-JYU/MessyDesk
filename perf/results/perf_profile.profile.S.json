@@ -1,0 +1,493 @@
+{
+  "database": "perf_profile",
+  "label": "S",
+  "counts": {
+    "User": 1,
+    "Project": 1,
+    "Set": 6,
+    "File": 6000,
+    "SetProcess": 4,
+    "Entity": 1000,
+    "TagLink": 4000,
+    "DERIVED_FROM": 4004,
+    "BELONGS_TO": 2006,
+    "user_files": 0,
+    "set_files": 1000
+  },
+  "when": "2026-10-05T13:58:33.563Z",
+  "results": [
+    {
+      "id": "access.findOwned(file)",
+      "bottleneck": "B1",
+      "code": "access/access.ts:28",
+      "sql": "MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = :rid), while:($depth < 40)} RETURN node, project.@rid AS project_rid LIMIT 1",
+      "median_ms": 27.8,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "Project",
+        "1",
+        "User",
+        "16"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ PREFETCH project\n   + FETCH FROM TYPE Project (2μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (2μs)\n+ PREFETCH user\n   + FETCH FROM TYPE User (1μs)\n      + FETCH FROM BUCKET 16 (User_0) ASC = 1 RECORDS (1μs)\n   + FILTER ITEMS WHERE  (4μs)\n     @rid = :user\n+ SET \n   user\n  AS\n   + FETCH FROM TYPE User ()\n      + FETCH FROM BUCKET 16 (User_0) ASC = 0 RECORDS ()\n   + FILTER ITEMS WHERE  ()\n     @rid = :user\n+ MATCH      ---->\n  {user}.in(\"HAS_OWNER\"){project}\n+ MATCH      ---->\n  {project}.in(){node}\n+ LIMIT ( LIMIT 1)\n+ CALCULATE PROJECTIONS (24μs)\n  node, project.@rid AS project_rid"
+    },
+    {
+      "id": "access.findOwned(output)",
+      "bottleneck": "B1",
+      "code": "access/access.ts:28",
+      "sql": "MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project}<--{as:node, where:(@rid = :rid), while:($depth < 40)} RETURN node, project.@rid AS project_rid LIMIT 1",
+      "median_ms": 19,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "Project",
+        "1",
+        "User",
+        "16"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ PREFETCH project\n   + FETCH FROM TYPE Project (2μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (2μs)\n+ PREFETCH user\n   + FETCH FROM TYPE User (1μs)\n      + FETCH FROM BUCKET 16 (User_0) ASC = 1 RECORDS (1μs)\n   + FILTER ITEMS WHERE  (3μs)\n     @rid = :user\n+ SET \n   user\n  AS\n   + FETCH FROM TYPE User ()\n      + FETCH FROM BUCKET 16 (User_0) ASC = 0 RECORDS ()\n   + FILTER ITEMS WHERE  ()\n     @rid = :user\n+ MATCH      ---->\n  {user}.in(\"HAS_OWNER\"){project}\n+ MATCH      ---->\n  {project}.in(){node}\n+ LIMIT ( LIMIT 1)\n+ CALCULATE PROJECTIONS (8μs)\n  node, project.@rid AS project_rid"
+    },
+    {
+      "id": "access.isProjectOwner",
+      "bottleneck": "-",
+      "code": "access/access.ts:55",
+      "sql": "MATCH {type:Project, as:project, where:(@rid = :rid)}-HAS_OWNER->{type:User, as:p, where:(@rid = :user)} RETURN project.@rid AS rid",
+      "median_ms": 1.9,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "User",
+        "16",
+        "Project",
+        "1"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ PREFETCH p\n   + FETCH FROM TYPE User (2μs)\n      + FETCH FROM BUCKET 16 (User_0) ASC = 1 RECORDS (2μs)\n   + FILTER ITEMS WHERE  (3μs)\n     @rid = :user\n+ PREFETCH project\n   + FETCH FROM TYPE Project (1μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (1μs)\n   + FILTER ITEMS WHERE  (0μs)\n     @rid = :rid\n+ SET \n   project\n  AS\n   + FETCH FROM TYPE Project ()\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 0 RECORDS ()\n   + FILTER ITEMS WHERE  ()\n     @rid = :rid\n+ MATCH      ---->\n  {project}.out(\"HAS_OWNER\"){p}\n+ CALCULATE PROJECTIONS (3μs)\n  project.@rid AS rid"
+    },
+    {
+      "id": "graphStore.projectRidOf(output)",
+      "bottleneck": "B3",
+      "code": "shared/graph-store.ts:427",
+      "sql": "MATCH {type:Project, as:project}<--{as:node, where:(@rid = :rid), while:($depth < 40)} RETURN project.@rid AS rid LIMIT 1",
+      "median_ms": 19,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "Project",
+        "1"
+      ],
+      "indexes": [],
+      "records": 1,
+      "error": null,
+      "plan": "+ PREFETCH project\n   + FETCH FROM TYPE Project (2μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (2μs)\n+ SET \n   project\n  AS\n   + FETCH FROM TYPE Project ()\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 0 RECORDS ()\n+ MATCH      ---->\n  {project}.in(){node}\n+ LIMIT ( LIMIT 1)\n+ CALCULATE PROJECTIONS (6μs)\n  project.@rid AS rid"
+    },
+    {
+      "id": "connectDerivedFrom (WHERE of the UPDATE)",
+      "bottleneck": "B2",
+      "code": "shared/graph-store.ts:413",
+      "sql": "SELECT @rid FROM DERIVED_FROM WHERE @out = #10:2 AND @in = #10:0",
+      "median_ms": 4.2,
+      "rows": 0,
+      "in_list": 0,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,227μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,227μs)\n+ FILTER ITEMS WHERE  (1,506μs)\n  @out = #10:2 AND @in = #10:0\n+ CALCULATE PROJECTIONS ()\n  @rid"
+    },
+    {
+      "id": "deskGraph.processedSetRids",
+      "bottleneck": "B2",
+      "code": "projects/desk-graph.ts:606",
+      "sql": "SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE @in IN :rids AND process_rid IS NOT NULL",
+      "median_ms": 11.2,
+      "rows": 4,
+      "in_list": 6,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,422μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,422μs)\n+ FILTER ITEMS WHERE  (7,051μs)\n  @in IN :rids AND process_rid IS NOT NULL\n+ CALCULATE PROJECTIONS (5μs)\n  @in AS rid\n+ DISTINCT (17μs)"
+    },
+    {
+      "id": "batches.processedInputs",
+      "bottleneck": "B2",
+      "code": "batches/batch-state.ts:90",
+      "sql": "SELECT DISTINCT @in AS rid FROM DERIVED_FROM WHERE process_rid = :rid",
+      "median_ms": 10.2,
+      "rows": 1001,
+      "in_list": 0,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,258μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,258μs)\n+ FILTER ITEMS WHERE  (3,653μs)\n  process_rid = :rid\n+ CALCULATE PROJECTIONS (178μs)\n  @in AS rid\n+ DISTINCT (638μs)"
+    },
+    {
+      "id": "batches.processOfSet",
+      "bottleneck": "B2",
+      "code": "batches/batch-state.ts:107",
+      "sql": "SELECT process_rid FROM DERIVED_FROM WHERE @out = :rid AND process_rid IS NOT NULL LIMIT 1",
+      "median_ms": 2.1,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (185μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 2 RECORDS (185μs)\n+ FILTER ITEMS WHERE  (12μs)\n  @out = :rid AND process_rid IS NOT NULL\n+ LIMIT ( LIMIT 1)\n+ CALCULATE PROJECTIONS (1μs)\n  process_rid"
+    },
+    {
+      "id": "graph.deleteNode: outputs of node",
+      "bottleneck": "B10",
+      "code": "graph/graph.ts:155",
+      "sql": "SELECT @out AS rid, process_rid FROM DERIVED_FROM WHERE @in = :rid",
+      "median_ms": 5.1,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,269μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,269μs)\n+ FILTER ITEMS WHERE  (2,205μs)\n  @in = :rid\n+ CALCULATE PROJECTIONS (7μs)\n  @out AS rid, process_rid"
+    },
+    {
+      "id": "graph.deleteNode: edges either way",
+      "bottleneck": "B10",
+      "code": "graph/graph.ts:160",
+      "sql": "SELECT process_rid FROM DERIVED_FROM WHERE @in = :rid OR @out = :rid",
+      "median_ms": 6.2,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,429μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,429μs)\n+ FILTER ITEMS WHERE  (3,426μs)\n  @in = :rid OR @out = :rid\n+ CALCULATE PROJECTIONS (5μs)\n  process_rid"
+    },
+    {
+      "id": "files.source / sourceFileOf",
+      "bottleneck": "-",
+      "code": "files/files.ts:177",
+      "sql": "MATCH {type:File, as:target, where:(@rid = :rid)}-DERIVED_FROM->{type:File, as:source} RETURN source",
+      "median_ms": 6.2,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [
+        "File",
+        "10"
+      ],
+      "indexes": [],
+      "records": 6000,
+      "error": null,
+      "plan": "+ SET \n   target\n  AS\n   + FETCH FROM TYPE File (2,280μs)\n      + FETCH FROM BUCKET 10 (File_0) ASC = 6000 RECORDS (2,280μs)\n   + FILTER ITEMS WHERE  (1,847μs)\n     @rid = :rid\n+ MATCH      ---->\n  {target}.out(\"DERIVED_FROM\"){source}\n+ CALCULATE PROJECTIONS (4μs)\n  source"
+    },
+    {
+      "id": "grouping: parents of a set (IN list)",
+      "bottleneck": "-",
+      "code": "processing/grouping.ts:63",
+      "sql": "SELECT @out AS target_rid, @in AS source_rid FROM DERIVED_FROM WHERE @out IN :rids",
+      "median_ms": 767,
+      "rows": 1000,
+      "in_list": 1000,
+      "scans": [
+        "DERIVED_FROM",
+        "52"
+      ],
+      "indexes": [],
+      "records": 4004,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE DERIVED_FROM (1,765μs)\n   + FETCH FROM BUCKET 52 (DERIVED_FROM_0) ASC = 4004 RECORDS (1,765μs)\n+ FILTER ITEMS WHERE  (756,393μs)\n  @out IN :rids\n+ CALCULATE PROJECTIONS (460μs)\n  @out AS target_rid, @in AS source_rid"
+    },
+    {
+      "id": "deskGraph.forProject (desk MATCH)",
+      "bottleneck": "B8",
+      "code": "projects/desk-graph.ts:463",
+      "sql": "MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()\n            {as:node, where:((@type=\"Set\" OR @type=\"File\" OR @type=\"SetProcess\" OR @type=\"Source\") AND set IS NULL AND $depth > 0), while:($depth < 20)}\n            RETURN node, node.outE() AS edges",
+      "median_ms": 27.2,
+      "rows": 10,
+      "in_list": 0,
+      "scans": [
+        "Project",
+        "1",
+        "User",
+        "16"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ PREFETCH project\n   + FETCH FROM TYPE Project (4μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (4μs)\n   + FILTER ITEMS WHERE  (4μs)\n     @rid = :project\n+ PREFETCH user\n   + FETCH FROM TYPE User (2μs)\n      + FETCH FROM BUCKET 16 (User_0) ASC = 1 RECORDS (2μs)\n   + FILTER ITEMS WHERE  (1μs)\n     @rid = :user\n+ SET \n   user\n  AS\n   + FETCH FROM TYPE User ()\n      + FETCH FROM BUCKET 16 (User_0) ASC = 0 RECORDS ()\n   + FILTER ITEMS WHERE  ()\n     @rid = :user\n+ MATCH      ---->\n  {user}.in(\"HAS_OWNER\"){project}\n+ MATCH      ---->\n  {project}.in(){node}\n+ CALCULATE PROJECTIONS (51μs)\n  node, node.outE() AS edges"
+    },
+    {
+      "id": "deskGraph.decorateSets (all members)",
+      "bottleneck": "B8",
+      "code": "projects/desk-graph.ts:563",
+      "sql": "SELECT @rid AS rid, set, path, label, type, info, metadata FROM File WHERE set IN :sets ORDER BY label",
+      "median_ms": 81.5,
+      "rows": 6000,
+      "in_list": 6,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (3,417μs)\n  set IN :sets\n+ EXTRACT VALUE FROM INDEX ENTRY (3,856μs)\n  filtering buckets [10]\n+ DISTINCT (338μs)\n+ FILTER ITEMS BY TYPE (418μs) \n  File\n+ CALCULATE PROJECTIONS (11,694μs)\n  @rid AS rid, set, path, label, type, info, metadata\n+ ORDER BY label ASC (14,128μs)"
+    },
+    {
+      "id": "projects.list (count per project)",
+      "bottleneck": "B9",
+      "code": "projects/projects.ts:79",
+      "sql": "MATCH {type:User, as:user, where:(@rid = :user)}<-HAS_OWNER-{type:Project, as:project, where:(@rid = :project)}.in()\n             {as:node, where:((@type=\"Set\" OR @type=\"File\" OR @type=\"Process\" OR @type=\"SetProcess\" OR @type=\"Source\" OR @type=\"Filter\") AND $depth > 0), while:($depth < 40)}\n             RETURN DISTINCT node.@rid AS rid, node.@type AS type",
+      "median_ms": 43.8,
+      "rows": 6010,
+      "in_list": 0,
+      "scans": [
+        "Project",
+        "1",
+        "User",
+        "16"
+      ],
+      "indexes": [],
+      "records": 2,
+      "error": null,
+      "plan": "+ PREFETCH project\n   + FETCH FROM TYPE Project (4μs)\n      + FETCH FROM BUCKET 1 (Project_0) ASC = 1 RECORDS (4μs)\n   + FILTER ITEMS WHERE  (6μs)\n     @rid = :project\n+ PREFETCH user\n   + FETCH FROM TYPE User (1μs)\n      + FETCH FROM BUCKET 16 (User_0) ASC = 1 RECORDS (1μs)\n   + FILTER ITEMS WHERE  (1μs)\n     @rid = :user\n+ SET \n   user\n  AS\n   + FETCH FROM TYPE User ()\n      + FETCH FROM BUCKET 16 (User_0) ASC = 0 RECORDS ()\n   + FILTER ITEMS WHERE  ()\n     @rid = :user\n+ MATCH      ---->\n  {user}.in(\"HAS_OWNER\"){project}\n+ MATCH      ---->\n  {project}.in(){node}\n+ CALCULATE PROJECTIONS (2,315μs)\n  node.@rid AS rid, node.@type AS type\n+ DISTINCT (7,196μs)"
+    },
+    {
+      "id": "files.setFiles count",
+      "bottleneck": "B14",
+      "code": "files/files.ts:260",
+      "sql": "SELECT count(*) AS file_count FROM File WHERE set = :set",
+      "median_ms": 4,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (606μs)\n  set = :set\n+ EXTRACT VALUE FROM INDEX ENTRY (592μs)\n  filtering buckets [10]\n+ FILTER ITEMS BY TYPE (32μs) \n  File\n+ CALCULATE AGGREGATE PROJECTIONS (519μs)\n      count(*) AS _$$$OALIAS$$$_0\n+ GUARANTEE FOR ZERO COUNT \n+ CALCULATE PROJECTIONS (2μs)\n  _$$$OALIAS$$$_0 AS `file_count`"
+    },
+    {
+      "id": "files.setFiles first page",
+      "bottleneck": "B14",
+      "code": "files/files.ts:261",
+      "sql": "SELECT FROM File WHERE set = :set ORDER BY label SKIP :skip LIMIT :limit",
+      "median_ms": 4.9,
+      "rows": 10,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (437μs)\n  set = :set\n+ EXTRACT VALUE FROM INDEX ENTRY (544μs)\n  filtering buckets [10]\n+ FILTER ITEMS BY TYPE (30μs) \n  File\n+ ORDER BY label ASC (1,491μs)\n  (buffer size: 10)\n+ SKIP ( SKIP :skip)\n+ LIMIT ( LIMIT :limit)"
+    },
+    {
+      "id": "files.setFiles last page",
+      "bottleneck": "B14",
+      "code": "files/files.ts:261",
+      "sql": "SELECT FROM File WHERE set = :set ORDER BY label SKIP :skip LIMIT :limit",
+      "median_ms": 5.7,
+      "rows": 10,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (417μs)\n  set = :set\n+ EXTRACT VALUE FROM INDEX ENTRY (489μs)\n  filtering buckets [10]\n+ FILTER ITEMS BY TYPE (28μs) \n  File\n+ ORDER BY label ASC (2,597μs)\n  (buffer size: 1000)\n+ SKIP ( SKIP :skip)\n+ LIMIT ( LIMIT :limit)"
+    },
+    {
+      "id": "set run: setFiles limit 10000",
+      "bottleneck": "B5/B6",
+      "code": "processing/processing.ts:222",
+      "sql": "SELECT FROM File WHERE set = :set ORDER BY label SKIP :skip LIMIT :limit",
+      "median_ms": 26.4,
+      "rows": 1000,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (536μs)\n  set = :set\n+ EXTRACT VALUE FROM INDEX ENTRY (515μs)\n  filtering buckets [10]\n+ FILTER ITEMS BY TYPE (30μs) \n  File\n+ ORDER BY label ASC (2,769μs)\n  (buffer size: 10000)\n+ SKIP ( SKIP :skip)\n+ LIMIT ( LIMIT :limit)"
+    },
+    {
+      "id": "nodes.syncSetManifest items",
+      "bottleneck": "B4",
+      "code": "nodes/nodes.ts:118",
+      "sql": "SELECT @rid AS rid, @type AS node, label, path, type FROM File WHERE set = :set",
+      "median_ms": 9.7,
+      "rows": 1000,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "File[set]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[set] (703μs)\n  set = :set\n+ EXTRACT VALUE FROM INDEX ENTRY (546μs)\n  filtering buckets [10]\n+ FILTER ITEMS BY TYPE (30μs) \n  File\n+ CALCULATE PROJECTIONS (1,055μs)\n  @rid AS rid, @type AS node, label, path, type"
+    },
+    {
+      "id": "tags.groupedEntities (all)",
+      "bottleneck": "B12",
+      "code": "tags/tags.ts:82",
+      "sql": "SELECT type, count(type) AS count, LIST(label) AS labels, icon, color, LIST(@this) AS items FROM Entity WHERE owner = :owner GROUP BY type ORDER BY count DESC",
+      "median_ms": 13.9,
+      "rows": 2,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "Entity[owner]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX Entity[owner] (373μs)\n  owner = :owner\n+ EXTRACT VALUE FROM INDEX ENTRY (443μs)\n  filtering buckets [22]\n+ FILTER ITEMS BY TYPE (37μs) \n  Entity\n+ CALCULATE PROJECTIONS (1,359μs)\n  type, type AS _$$$OALIAS$$$_1, label AS _$$$OALIAS$$$_3, icon, color, @this AS _$$$OALIAS$$$_5\n+ CALCULATE AGGREGATE PROJECTIONS (1,185μs)\n      type, count(_$$$OALIAS$$$_1) AS _$$$OALIAS$$$_0, LIST(_$$$OALIAS$$$_3) AS _$$$OALIAS$$$_2, icon, color, LIST(_$$$OALIAS$$$_5) AS _$$$OALIAS$$$_4\n  GROUP BY type\n+ CALCULATE PROJECTIONS (4μs)\n  type, _$$$OALIAS$$$_0 AS `count`, _$$$OALIAS$$$_2 AS `labels`, icon, color, _$$$OALIAS$$$_4 AS `items`\n+ ORDER BY count DESC (5μs)"
+    },
+    {
+      "id": "tags.groupedEntities (project: files)",
+      "bottleneck": "B12",
+      "code": "tags/tags.ts:83",
+      "sql": "SELECT @rid AS rid FROM File WHERE project_rid IN :projects",
+      "median_ms": 19.7,
+      "rows": 6000,
+      "in_list": 1,
+      "scans": [],
+      "indexes": [
+        "File[project_rid]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX File[project_rid] (3,957μs)\n  project_rid IN :projects\n+ EXTRACT VALUE FROM INDEX ENTRY (2,394μs)\n  filtering buckets [10]\n+ DISTINCT (304μs)\n+ FILTER ITEMS BY TYPE (168μs) \n  File\n+ CALCULATE PROJECTIONS (792μs)\n  @rid AS rid"
+    },
+    {
+      "id": "tags.groupedEntities (project: links IN)",
+      "bottleneck": "B12",
+      "code": "tags/tags.ts:86",
+      "sql": "SELECT DISTINCT entity_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner",
+      "median_ms": 39.9,
+      "rows": 500,
+      "in_list": 6000,
+      "scans": [],
+      "indexes": [
+        "TagLink[target_rid]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX TagLink[target_rid] (15,758μs)\n  target_rid IN :files\n+ EXTRACT VALUE FROM INDEX ENTRY (4,945μs)\n  filtering buckets [44]\n+ DISTINCT (1,530μs)\n+ FILTER ITEMS WHERE  (3,176μs)\n  owner = :owner\n+ FILTER ITEMS BY TYPE (243μs) \n  TagLink\n+ CALCULATE PROJECTIONS (2,502μs)\n  entity_rid\n+ DISTINCT (4,953μs)"
+    },
+    {
+      "id": "tags.setEntities (links IN)",
+      "bottleneck": "B12",
+      "code": "tags/tags.ts:149",
+      "sql": "SELECT entity_rid, count(*) AS count FROM TagLink WHERE target_rid IN :files AND region_id IS NULL AND owner = :owner GROUP BY entity_rid",
+      "median_ms": 13.9,
+      "rows": 496,
+      "in_list": 1000,
+      "scans": [],
+      "indexes": [
+        "TagLink[target_rid]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX TagLink[target_rid] (3,367μs)\n  target_rid IN :files\n+ EXTRACT VALUE FROM INDEX ENTRY (2,253μs)\n  filtering buckets [44]\n+ DISTINCT (716μs)\n+ FILTER ITEMS WHERE  (1,255μs)\n  owner = :owner AND region_id is null\n+ FILTER ITEMS BY TYPE (98μs) \n  TagLink\n+ CALCULATE PROJECTIONS (621μs)\n  entity_rid\n+ CALCULATE AGGREGATE PROJECTIONS (895μs)\n      entity_rid, count(*) AS _$$$OALIAS$$$_0\n  GROUP BY entity_rid\n+ CALCULATE PROJECTIONS (187μs)\n  entity_rid, _$$$OALIAS$$$_0 AS `count`"
+    },
+    {
+      "id": "tags.findEntity",
+      "bottleneck": "B13",
+      "code": "tags/tags.ts:121",
+      "sql": "SELECT FROM Entity WHERE type = :type AND label = :label AND owner = :owner",
+      "median_ms": 3.6,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "Entity[owner]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX Entity[owner] (361μs)\n  owner = :owner\n+ EXTRACT VALUE FROM INDEX ENTRY (726μs)\n  filtering buckets [22]\n+ FILTER ITEMS WHERE  (710μs)\n  type = :type AND label = :label\n+ FILTER ITEMS BY TYPE (0μs) \n  Entity"
+    },
+    {
+      "id": "tags.machineTags",
+      "bottleneck": "B13",
+      "code": "tags/tags.ts:380",
+      "sql": "SELECT service_id, task, entity_rid, count(*) AS count FROM TagLink WHERE created_by = \"machine\" AND owner = :owner GROUP BY service_id, task, entity_rid",
+      "median_ms": 13.9,
+      "rows": 500,
+      "in_list": 0,
+      "scans": [
+        "TagLink",
+        "44"
+      ],
+      "indexes": [],
+      "records": 4000,
+      "error": null,
+      "plan": "+ FETCH FROM TYPE TagLink (2,165μs)\n   + FETCH FROM BUCKET 44 (TagLink_0) ASC = 4000 RECORDS (2,165μs)\n+ FILTER ITEMS WHERE  (4,310μs)\n  created_by = \"machine\" AND owner = :owner\n+ CALCULATE PROJECTIONS (1,598μs)\n  service_id, task, entity_rid\n+ CALCULATE AGGREGATE PROJECTIONS (1,600μs)\n      service_id, task, entity_rid, count(*) AS _$$$OALIAS$$$_0\n  GROUP BY service_id, task, entity_rid\n+ CALCULATE PROJECTIONS (366μs)\n  service_id, task, entity_rid, _$$$OALIAS$$$_0 AS `count`"
+    },
+    {
+      "id": "tags.createTagLink exists?",
+      "bottleneck": "-",
+      "code": "tags/tags.ts:216",
+      "sql": "SELECT @rid AS rid FROM TagLink WHERE entity_rid = :e AND target_rid = :t AND region_id IS NULL",
+      "median_ms": 1.2,
+      "rows": 0,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "TagLink[target_rid]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX TagLink[target_rid] (30μs)\n  target_rid = :t\n+ EXTRACT VALUE FROM INDEX ENTRY (7μs)\n  filtering buckets [44]\n+ FILTER ITEMS WHERE  (5μs)\n  entity_rid = :e AND region_id is null\n+ FILTER ITEMS BY TYPE () \n  TagLink\n+ CALCULATE PROJECTIONS ()\n  @rid AS rid"
+    },
+    {
+      "id": "tags.pruneOrphanMachineTag count",
+      "bottleneck": "-",
+      "code": "tags/tags.ts:263",
+      "sql": "SELECT count(*) AS count FROM TagLink WHERE entity_rid = :e",
+      "median_ms": 1.4,
+      "rows": 1,
+      "in_list": 0,
+      "scans": [],
+      "indexes": [
+        "TagLink[entity_rid]"
+      ],
+      "records": 0,
+      "error": null,
+      "plan": "+ FETCH FROM INDEX TagLink[entity_rid] (32μs)\n  entity_rid = :e\n+ EXTRACT VALUE FROM INDEX ENTRY ()\n  filtering buckets [44]\n+ FILTER ITEMS BY TYPE () \n  TagLink\n+ CALCULATE AGGREGATE PROJECTIONS ()\n      count(*) AS _$$$OALIAS$$$_0\n+ GUARANTEE FOR ZERO COUNT \n+ CALCULATE PROJECTIONS (2μs)\n  _$$$OALIAS$$$_0 AS `count`"
+    }
+  ]
+}

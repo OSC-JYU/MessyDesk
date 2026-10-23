@@ -4,44 +4,67 @@ All configuration across the MessyDesk platform, organized by repository.
 
 ## MessyDesk Backend
 
-**[verified]** from `src/env.mjs` and `src/index.mjs`:
+**[verified]** from `src/config.ts` (every variable the backend reads is there).
 
 ### Database (ArcadeDB)
 
-| Variable | Default | Required | Notes |
-|----------|---------|----------|-------|
-| `DB_HOST` | `http://127.0.0.1` | No | ArcadeDB host URL |
-| `DB_PORT` | `2480` | No | ArcadeDB HTTP API port |
-| `DB_NAME` | `messydesk` | No | Database name; also determines data directory |
-| `DB_USER` | `root` | No | ArcadeDB user |
-| `DB_PASSWORD` | — | **Yes** | ArcadeDB password |
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `DB_HOST` | `http://127.0.0.1` | ArcadeDB host URL |
+| `DB_PORT` | `2480` | ArcadeDB HTTP API port |
+| `DB_NAME` | `messydesk` | Database name; also the default data directory `data/<DB_NAME>` |
+| `DB_USER` | `root` | |
+| `DB_PASSWORD` | — | **Required** |
+| `LEGACY_ARCADEDB` | `true` | `true` for ArcadeDB 23.7.1 (keeps its workarounds), `false` for newer servers (SQL only). See [backend structure](architecture/backend-structure.md#arcadedb-modes-legacy_arcadedb) |
+| `DB_WRITE_RETRIES` | `5` | Attempts for transient database errors (MVCC conflicts, timeouts) |
+| `DB_WRITE_BACKOFF_BASE_MS` / `DB_WRITE_BACKOFF_MAX_MS` | `200` / `5000` | Jittered exponential backoff between attempts |
 
-### Infrastructure
+### Server and paths
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `API_URL` | `http://localhost:8200/` | Backend's own URL (used for self-references) |
-| `SOLR_URL` | `http://localhost:8983/solr` | Solr server |
-| `SOLR_CORE` | `messydesk` | Solr core/collection name |
-| `NOMAD` | `false` | Enable HashiCorp Nomad service orchestration |
+| `PORT` | `8200` | HTTP port |
+| `MODE` | — | `development`: every request is `DEV_USER` |
+| `DEV_USER` | `local.user@localhost` | |
+| `LOG_LEVEL` | `info` | |
+| `API_URL` | `http://localhost:8200/` | Prefix of absolute thumbnail and icon URLs in responses and events |
+| `DATA_DIR` | `data/<DB_NAME>` | Data directory (relative to the working directory unless absolute) |
+| `SERVICE_REGISTRY_PATH` | `<DATA_DIR>/service-registry.json` | Persisted service descriptors |
+| `SET_ZIP_JOB_TTL_MS` | `1800000` | A ZIP export not ready by then reports `failed` |
+| `MAX_VERSION_TEXT_BYTES` | `10485760` | Largest text edit accepted by `POST /api/files/{rid}/version` |
 
-### Server
+### Consumers
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `PORT` | `8200` | HTTP server port |
-| `MODE` | — | Set to `development` for auth bypass |
-| `DEV_USER` | `local.user@localhost` | Default user email in dev mode |
-| `LOG_LEVEL` | — | Winston log level |
+| `SERVICE_TOKEN` | — | Shared secret consumers send as `Authorization: Bearer <token>` |
+| `SERVICE_AUTH_LEGACY_MAIL` | `true` | Also accept the `mail` header of an admin user on consumer routes (current MD-consumers). Set `false` once MD-consumers send the token |
+| `CONSUMER_TTL_SECONDS` | `90` | A consumer not seen for this long is no longer counted as live (they heartbeat every 30 s) |
+
+### Search, Nomad, help
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `SOLR_URL` / `SOLR_CORE` | `http://localhost:8983/solr` / `messydesk` | |
+| `NOMAD` | `false` | `1/true/yes/on`: check Nomad at startup (exit when unreachable) and stop Nomad jobs when their last consumer leaves |
+| `NOMAD_URL` | `http://localhost:4646/v1` | |
+| `PODMAN` | — | Rewrite `driver = "docker"` to podman in Nomad specs |
+| `SERVICE_HELP_BUNDLE_MAX_FILES` / `SERVICE_HELP_ARCHIVE_MAX_BYTES` / `SERVICE_HELP_ARCHIVE_MAX_ENTRIES` | `120` / `26214400` / `500` | Limits for help ingest |
 
 ### Quotas
 
 | Variable | Default | Notes |
 |----------|---------|-------|
-| `DISK_QUOTA_GB` | `100` | Per-user storage quota |
-| `PROJECT_EXPIRATION_DAYS` | `180` | Auto-deletion threshold |
+| `DISK_QUOTA` (or `DISK_QUOTA_GB`) | `100` | Per-user storage quota in GB, shown by the storage summary (not enforced) |
+| `PROJECT_EXPIRATION_DAYS` | `180` | Sets `expiration_date` on new projects (not enforced) |
 
-**Note**: `DISK_QUOTA_GB` reads from env var `DISK_QUOTA` (not `DISK_QUOTA_GB`). **[verified]** from `src/env.mjs`: `Number(process.env.DISK_QUOTA) || 100`.
+### Queue
+
+See [queue-system.md](architecture/queue-system.md#configuration): `QUEUE_DB_PATH`,
+`QUEUE_DB_MAX_ATTEMPTS`, `QUEUE_DB_LEASE_SECONDS`, `QUEUE_DB_KEEP_FAILED_MINUTES`,
+`QUEUE_DB_SWEEPER_ENABLED`, `QUEUE_DB_SWEEPER_INTERVAL_SECONDS`,
+`QUEUE_DB_SWEEPER_DONE_CANCELLED_MINUTES`, `QUEUE_BATCH_ABORT_CONSECUTIVE`,
+`QUEUE_BATCH_ABORT_PERCENT`, `LOG_QUEUE_CONTEXT`.
 
 ## MD-consumers
 

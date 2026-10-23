@@ -1,0 +1,26 @@
+{
+  "scenario": "S9 delete desk",
+  "target": "#19:0",
+  "project": "#19:0",
+  "status": 200,
+  "seconds": 75,
+  "deleted": null,
+  "before": {
+    "project_nodes": 1,
+    "files": 300000,
+    "sets": 30,
+    "set_processes": 20,
+    "processes": 0,
+    "tag_links": 0,
+    "files_on_disk": 0
+  },
+  "after": {
+    "project_nodes": 0,
+    "files": 179851,
+    "sets": 0,
+    "set_processes": 0,
+    "processes": 0,
+    "tag_links": 0,
+    "files_on_disk": 0
+  }
+}

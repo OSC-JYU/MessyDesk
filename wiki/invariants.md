@@ -6,9 +6,12 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ### 1. HAS_OWNER reachability determines access
 
-**[verified]** — `graph.hasAccess()` does `TRAVERSE out() FROM {item_rid}` and checks if user_rid appears in results.
+**[verified]** — `AccessService.findOwned` (src/modules/access/access.ts) matches
+`User <-HAS_OWNER- Project <-- node` following incoming edges from the project (in practice
+`BELONGS_TO` and `DERIVED_FROM` pointing at it) up to 40 levels. Every route that takes a RID uses
+it, and other users' nodes answer 404.
 
-**Consequence**: Any node without an outgoing path to a User vertex (through HAS_OWNER) is invisible to all users. Orphaned nodes become permanently inaccessible.
+**Consequence**: Any node without a path to a Project owned by a User is invisible to all users. Orphaned nodes become permanently inaccessible.
 
 **Risk scenarios**:
 - Manual database edits that remove edges
@@ -27,7 +30,7 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ### 4. Cascade delete is breadth-first and exhaustive
 
-**[verified]** — `deleteNode()` discovers children via:
+**[verified]** — `GraphService.deleteNode()` discovers children via:
 - DERIVED_FROM incoming edges (descendants)
 - DERIVED_FROM edges with matching `process_rid` (process-linked outputs)
 - Set members (files where `set = current_rid`)
@@ -37,17 +40,21 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **Consequence**: Deleting a file deletes all its derivatives recursively. Deleting a set deletes all its member files and their derivatives.
 
+A file's directory is removed only when it is the file's own directory (named after its uuid or
+legacy rid). Files stored inside another file's directory, like `roi.json` next to its image, are
+removed on their own. (The old backend removed the image's whole directory when a ROI was deleted.)
+
 ## Processing Pipeline Invariants
 
 ### 5. SQLite queue retries failed jobs (max 3 attempts)
 
-**[verified]** — The SQLite queue (`src/queue.mjs`) stores jobs with `max_attempts = 3`. On failure, jobs are requeued with exponential backoff (`500ms × 2^(attempts-1)`, capped at 30s). After max attempts, status is set to `failed` with `last_error` recorded.
+**[verified]** — The SQLite queue (`src/modules/queue/queue.ts`) stores jobs with `max_attempts = 3`. On failure, jobs are requeued with exponential backoff (`500ms × 2^(attempts-1)`, capped at 30s). After max attempts, status is set to `failed` with `last_error` recorded.
 
 **Consequence**: Transient service failures are retried automatically. Permanent failures surface as `failed` status in the queue table.
 
 ### 6. SetProcess status gates output materialization
 
-**[verified]** — `processFilesController.mjs` checks `SetProcess.status` before writing each output. If status is `paused`, `cancelling`, `cancelled`, or `done`, the output is silently dropped.
+**[verified]** — `src/modules/results/results.ts` checks `SetProcess.status` before writing each output. If status is `paused`, `cancelling`, `cancelled`, or `done`, the output is silently dropped.
 
 **Consequence**: Pausing a batch during processing means in-flight results may be lost (not queued for later). Services still process, but results are discarded by the backend.
 
@@ -55,13 +62,13 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **[verified]** — Invalid `behaviour` values are rejected with HTTP 400 before any Process nodes are created. Allowed values: `one-to-one`, `one-to-many`, `many-to-one`.
 
-### 8. Search tasks are automatically many-to-one
+### 8. Search tasks write into a search Set
 
-**[verified]** — `resolveTaskBehaviour()` treats Solr/FAISS tasks as `many-to-one` regardless of descriptor setting.
+**[verified]** — `isSearchOutputTask()` (src/modules/processing/processing.ts): a many-to-one task of a Solr/FAISS service, or a task with `search_output: true`, gets an output Set of type `search`. The behaviour itself still comes from the descriptor (the old wiki said search tasks were forced to many-to-one; the code never did that).
 
 ### 9. Project context auto-populated in messages
 
-**[verified]** — `messageFactory.mjs` enriches messages with `project_rid` from file, process, or node traversal. This ensures async processing can always check access control.
+**[verified]** — `src/modules/queue/publisher.ts` enriches messages with `project_rid` from file, process, or node traversal. This ensures async processing can always check access control.
 
 ### 9a. All processing must go through the queue — never inline
 
@@ -69,13 +76,13 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ### 10. PDF upload requires active splitter service
 
-**[verified]** — Upload handler in `src/routes/files.mjs` checks `services.hasActiveConsumer('md-pypdf_fs')` before accepting PDFs. Returns HTTP 503 if unavailable. PDF files are automatically split into single-page PDFs on upload.
+**[verified]** — `FilesService.upload` checks `ServiceRegistry.hasActiveConsumer('md-pypdf_fs')` before accepting a PDF. The file fails with a 503-type error; a single-file upload reports it as HTTP 400 with the message (as before), a multi-file upload lists it in `failed`. PDF files are automatically split into single-page PDFs on upload.
 
 **Consequence**: PDF upload is blocked when the splitter is down. ZIP-extracted PDFs are stored with `processable: false` when the splitter is unavailable.
 
 ### 11. `processable: false` restricts service matching to split-only
 
-**[verified]** — `getServicesForNode()` in `services.mjs` returns only `md-pypdf_fs` split task for files with `processable === false`. Absence of the field means processable. ZIP service ignores this flag.
+**[verified]** — `servicesForNode()` in `src/modules/services/matching.ts` returns only `md-pypdf_fs` split task for files with `processable === false`. Absence of the field means processable. ZIP service ignores this flag.
 
 ### 12. Files with `_status: 'importing'` reject manual processing
 
@@ -83,11 +90,12 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ## File System Invariants
 
-### 10. File paths embed date-based partitioning
+### 10. File paths are sharded by uuid
 
-**[verified]** — `createOriginalFileNode()` computes paths as `data/{db_name}/{year}/{month}/{day}/{uuid}/{filename}`.
-
-**Consequence**: Moving the clock backward during file creation could create unexpected directory structures.
+**[verified]** — `DataLayout.filePath()` (src/platform/storage/layout.ts) builds
+`<DATA_DIR>/projects/<project rid>/files/aa/bb/cc/<uuid hex>/<uuid hex>.<ext>`; the first bytes of
+a UUIDv7 are its timestamp, so files created together share directories. Old RID-based paths
+(`<cluster>/<pos div 1000>/<pos>`) are still understood.
 
 ### 11. UUIDs embed timestamps (custom UUIDv7)
 
@@ -117,6 +125,13 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **[verified]** — `createI18n` in `main.js` sets `locale: 'fi'` with `fallbackLocale` from env.
 
+## Events
+
+### 26. Several event streams per user
+
+**[verified]** — `SseHub` keeps every open `/events` connection of a user and sends each event to
+all of them. (The old backend kept one per user, so a second tab silenced the first.)
+
 ## Service Architecture Invariants
 
 ### 17. Services must not call MessyDesk APIs directly
@@ -127,7 +142,7 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **[verified]** — Consumer re-registers adapter and descriptor every 30 seconds. If a consumer crashes without graceful shutdown (SIGINT), the adapter registration persists until the backend notices heartbeat absence.
 
-**[inferred]**: There is no explicit heartbeat timeout on the backend side. Stale adapter entries may persist.
+**[verified]**: The backend drops an adapter not seen for `CONSUMER_TTL_SECONDS` (default 90), so a crashed consumer stops counting as live (PDF gate, cruncher list).
 
 ### 19. Descriptor source chain has strict priority
 
@@ -141,9 +156,13 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 **Consequence**: If the backend is exposed directly (without the proxy), anyone can impersonate any user by setting the `mail` header.
 
+Consumers use a separate `service` credential (`SERVICE_TOKEN`). While
+`SERVICE_AUTH_LEGACY_MAIL=true`, the `mail` header of an admin user is still accepted on consumer
+routes, because MD-consumers do not send the token yet.
+
 ### 21. Dev mode fails if DB is unreachable
 
-**[verified]** — Even in dev mode, `Graph.myId()` is called for the default user. If ArcadeDB is down, the server returns 503 for all requests.
+**[verified]** — Even in dev mode, `UsersService.find()` is called for the default user. If ArcadeDB is down, the server returns 503 for all requests.
 
 ## ROI Invariants
 
@@ -153,7 +172,9 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ### 23. ROI coordinates are percentage-based
 
-**[verified]** — ROIs store coordinates as percentages (0.0–1.0). Conversion to pixels happens at processing time via `media.ROIPercentagesToPixels()`, using the image's stored metadata dimensions.
+**[inferred]** — The UI stores ROI coordinates as percentages. The backend stores the JSON as
+given and does not convert it; the old `media.ROIPercentagesToPixels()` was never called and was
+not ported.
 
 ## Solr Integration
 
@@ -163,4 +184,4 @@ This page documents invariants, edge cases, and design decisions that are not im
 
 ### 25. Maximum 1000 search results
 
-**[verified]** — Hard cap in `solr.search()`: `Math.min(rows, 1000)`.
+**[verified]** — Hard cap in `SolrClient.search`: `Math.min(rows, 1000)`.

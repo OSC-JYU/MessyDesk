@@ -1,6 +1,8 @@
 node_modules
-styles/.current.json
-*.env
-src/logs
-docs/llm
-sqlite3
+data
+*.log
+dist
+public/help/services/
+
+# local compose secrets
+local/.env

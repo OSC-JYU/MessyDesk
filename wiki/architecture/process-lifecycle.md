@@ -26,37 +26,37 @@ Backend sends SSE update to UI
 
 ### Auto-Import (PDF)
 
-PDF files bypass the manual trigger step. On upload, `afterFileCreated()` in `src/controllers/importPipeline.mjs` automatically:
+PDF files bypass the manual trigger step. On upload, `afterFileCreated()` in `src/modules/import/import.ts` automatically:
 1. Creates a Process node with `role: 'import'`
 2. Creates an output Set for pages
 3. Publishes a split job to `md-pypdf_fs`
 
 The file shows "Importing…" in the UI. On completion, the original file is deleted from disk (if `delete_original` is true) and `_file_removed: true` is set on the node.
 
-## Step 1: Pipeline Trigger
+## Step 1: Trigger
 
-**[verified]** from `src/routes/queues.mjs`:
+**[verified]** from `src/modules/processing/routes.ts`:
 
-User submits a processing request via the UI. The API endpoint is:
+The UI submits a task (`{id, params, model?, ...}`) to one of:
 
 ```
-POST /api/pipeline/files/{file_rid}/{roi?}
+POST /api/queue/{service}/files/{file_rid}/{roi?}
+POST /api/queue/{service}/sets/{set_rid}
+POST /api/queue/{service}/sources/{source_rid}
 ```
-
-Payload includes service ID, task ID, parameters, and optionally a set of files.
 
 ## Step 2: Process Node Creation
 
-**[verified]** from `graph.mjs` `createProcessNode_queue()`:
+**[verified]** from `NodesService.createProcess()` (src/modules/nodes/nodes.ts):
 
-1. Create directory: `data/{project}/processes/{uuid}/files/`
+1. Directory: `<DATA_DIR>/projects/<project>/processes/<uuid shard>/files/`
 2. Create `Process` vertex with: uuid, status `queued`, task, service_id, description, model info
 3. Link to Project via `BELONGS_TO` edge
 4. Save full message as `message.json` in process directory (enables replay/debugging)
 
 ### Task Behaviour Modes
 
-**[verified]** from `graph.mjs` `resolveTaskBehaviour()`:
+**[verified]** from `resolveBehaviour()` (src/modules/services/registry.ts):
 
 Resolution order: task definition → service definition → default `one-to-one`.
 
@@ -65,16 +65,17 @@ Resolution order: task definition → service definition → default `one-to-one
 | `one-to-one` | 1 input file → 1 Process → output file(s) in same context | Rotate image, OCR |
 | `one-to-many` | 1 input file → 1 Process → multiple output files in new Set | Split PDF into pages |
 | `many-to-one` | N input files → 1 SetProcess → 1 aggregated output | Merge documents |
+| `whole-set` | N input files → 1 SetProcess → **one job** with every file in `files` (`[{@rid, label, path, type, extension}]`); `file` is the input Set, so outputs derive from it | Vector index (md-embeddings), clustering |
 
-**Non-obvious**: Search-related tasks (Solr/FAISS) are automatically treated as `many-to-one`. **[verified]**
+**Non-obvious**: a `whole-set` job is published to `<service>_batch` as a many-to-one run with `total_files: 1` and `whole_set: true`, so results and batch progress need no special case; it is offered only on sets. A many-to-one task of a Solr/FAISS service (or one with `search_output: true`) writes its output into a search Set (`isSearchOutputTask`). **[verified]**
 
 ### Output Set Creation
 
-For `one-to-many` tasks, `createOutputSetNode()` creates a new Set linked to the input file via `DERIVED_FROM` with `process_rid` on the edge. **[verified]**
+For `one-to-many` tasks, `NodesService.createOutputSet()` creates a new Set linked to the input file via `DERIVED_FROM` with `process_rid` on the edge. **[verified]**
 
 ## Step 3: Message Construction
 
-**[verified]** from `src/messageFactory.mjs`:
+**[verified]** from `src/modules/queue/publisher.ts`:
 
 Messages are enriched before publishing:
 
@@ -103,11 +104,11 @@ Messages are enriched before publishing:
 
 ### ROI Handling
 
-If processing a Region of Interest, `media.ROIPercentagesToPixels()` converts percentage coordinates to pixel values based on image metadata before message construction. **[verified]** from `media.mjs`.
+**[verified]** The optional `{roi}` path segment of `POST /api/queue/{service}/files/{rid}/{roi}` is ignored: an ROI run is queued like a file run.
 
 ## Step 4: Queue Publication
 
-**[verified]** from `src/queue.mjs`:
+**[verified]** from `src/modules/queue/queue.ts`:
 
 Message published to SQLite queue with topic = service ID (e.g., `md-pypdf_fs`). Jobs have status tracking, retry logic (max 3 attempts), and lease-based claiming.
 
@@ -155,7 +156,7 @@ Adapters send results back to the backend via HTTP:
 
 ## Step 8: Result Materialization
 
-**[verified]** from `src/controllers/processFilesController.mjs`:
+**[verified]** from `src/modules/results/results.ts`:
 
 ### Normal files
 1. Create `File` vertex in graph
@@ -169,7 +170,7 @@ Adapters send results back to the backend via HTTP:
 2. **No bitstream written** — shares source file path on disk
 3. Skip metadata extraction
 
-**[verified]** from `processFilesController.mjs`.
+**[verified]** from `src/modules/results/results.ts`.
 
 ### Batch state checking
 
@@ -177,26 +178,26 @@ Before materializing each file output, the controller checks `SetProcess.status`
 
 ## Step 9: UI Update
 
-**[verified]** from `src/routes/nomad.mjs`:
+**[verified]** from `src/modules/results/routes.ts`:
 
 After successful processing:
 1. `batch_processed` counter incremented with processing time
-2. `process_finished` WebSocket/SSE event sent to user
+2. `process_finished` SSE event sent to user
 3. UI reactively updates file lists
 
 ### Error handling in callbacks
 
-**[verified]** from `src/routes/nomad.mjs`:
+**[verified]** from `src/modules/results/routes.ts`:
 
 | Condition | Behavior |
 |-----------|----------|
 | Thumbnail failure (`role=thumbnail`) | Warning logged, no error node created |
 | Internal versioning failure (`role=internal_versioning`, `role=exif_rotate`) | Logged, no error node created |
-| All other errors | Error node created in graph, `error.json` written to disk, WebSocket update sent |
+| All other errors | Error node created in graph, `error.json` written to disk, SSE update sent |
 
 ## Batch Processing (SetProcess)
 
-**[verified]** from `graph.mjs` and `queues.mjs`:
+**[verified]** from `src/modules/processing/` and `src/modules/batches/`:
 
 For processing multiple files:
 
@@ -216,7 +217,7 @@ For processing multiple files:
 | `POST /api/queue/{topic}/cancel` | Cancel queued jobs |
 | `GET /api/queue/{topic}/drain/{process_rid?}` | Flush queued jobs |
 
-**[verified]** from `src/routes/queues.mjs`.
+**[verified]** from `src/modules/processing/routes.ts`.
 
 ## State Machine
 
@@ -232,4 +233,4 @@ SetProcess status transitions:
     queued → running → cancelling → cancelled
 ```
 
-**[inferred]** from reading status checks in processFilesController and queue routes. The status values are set as strings; there is no formal state machine enforcer.
+**[inferred]** from reading status checks in ResultsService (src/modules/results/results.ts) and queue routes. The status values are set as strings; there is no formal state machine enforcer.

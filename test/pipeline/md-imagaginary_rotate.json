@@ -1,8 +1,0 @@
-{ 
-	"id": "md-imaginary", 
-	"task":"rotate", 
-	"params": {
-		"rotate":90, 
-		"task": "rotate"
-	}
-}

@@ -1,0 +1,24 @@
+{
+  "scenario": "S7 autotag",
+  "files": 1000,
+  "labels_per_file": 5,
+  "vocabulary": 200,
+  "workers": 8,
+  "seconds": 186,
+  "outputs_per_minute": 322,
+  "callback_ms": {
+    "n": 1000,
+    "p50": 1475,
+    "p95": 1637,
+    "p99": 1733,
+    "max": 1896
+  },
+  "callback_errors": 0,
+  "created": {
+    "process_nodes": 5000,
+    "entities": 205,
+    "machine_links": 5000,
+    "md_solr_jobs_listed": 200,
+    "md_solr_jobs_flushed": 5000
+  }
+}

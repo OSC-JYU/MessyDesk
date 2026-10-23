@@ -1,0 +1,34 @@
+{
+  "scenario": "S1 upload",
+  "files": 2000,
+  "chunk": 20,
+  "parallel": 8,
+  "thumbnails": false,
+  "project": "#1:0",
+  "set": "#145:0",
+  "seconds": 8,
+  "files_per_second": 265.8,
+  "uploaded": 2000,
+  "failed_chunks": 0,
+  "members": 2000,
+  "stored_count": 2000,
+  "manifest_items": 2000,
+  "chunk_ms_by_set_size": [
+    {
+      "set_size_from": 0,
+      "n": 57,
+      "p50": 618,
+      "p95": 904,
+      "p99": 927,
+      "max": 927
+    },
+    {
+      "set_size_from": 1000,
+      "n": 43,
+      "p50": 561,
+      "p95": 640,
+      "p99": 662,
+      "max": 662
+    }
+  ]
+}

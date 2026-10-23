@@ -1,0 +1,38 @@
+{
+  "database": "perf26",
+  "config": {
+    "users": 1,
+    "userOffset": 0,
+    "projects": 1,
+    "sets": 10,
+    "files": 10000,
+    "depth": 2,
+    "entities": 1000,
+    "links": 2,
+    "chunk": 100,
+    "parallel": 1
+  },
+  "counts": {
+    "users": 1,
+    "projects": 1,
+    "sets": 30,
+    "files": 100000,
+    "outputs": 200000,
+    "processes": 20,
+    "entities": 1000,
+    "links": 40000,
+    "edges": 300050
+  },
+  "samples": {
+    "user": "#124:0",
+    "project": "#19:0",
+    "set": "#154:1",
+    "file": "#73:2149",
+    "output_file": "#79:2149",
+    "set_process": "#64:0",
+    "output_set": "#160:0",
+    "entity": "#169:46"
+  },
+  "seconds": 36,
+  "finished": "2026-10-05T17:40:38.609Z"
+}

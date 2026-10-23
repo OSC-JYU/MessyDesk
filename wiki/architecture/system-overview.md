@@ -28,6 +28,10 @@ MessyDesk is a document processing platform built around a graph database. Users
 
 ## Component Interaction Diagram
 
+![MessyDesk architecture](architecture.svg)
+
+([PNG](architecture.png))
+
 ```
 ┌─────────────────────────────────┐
 │  MessyDesk-UI (Vue 3, :3000)   │
@@ -61,40 +65,47 @@ MessyDesk is a document processing platform built around a graph database. Users
   (result materialization, graph updates)
 ```
 
-**[verified]** Data flow confirmed by reading `queue.mjs`, and `routes/nomad.mjs`. Consumer interaction defined in proposals.
+**[verified]** Data flow from `src/modules/queue/`, `src/modules/processing/` and `src/modules/results/`.
 
 ## Startup Sequence
 
-The backend (`src/index.mjs`) initializes in this order:
+`src/main.ts` (the composition root):
 
-1. `media.createDataDir(DATA_DIR)` — ensure data directory exists
-2. `nomad.getStatus()` — check Nomad if enabled
-3. `services.loadServiceAdapters(null, NOMAD)` — load service descriptors from the persisted registry (`service-registry.json`) and runtime registrations; the legacy on-disk `services/` directory is no longer read
-4. `queue.init()` — initialize SQLite queue (creates DB file and schema if needed)
-5. `Graph.initDB()` — connect to ArcadeDB, create schema (vertex/edge types and indexes)
-6. Hapi server starts on port 8200
-
-**[verified]** From `src/index.mjs` lines 44–55.
+1. Load `src/config.ts`, create the logger and the data directory tree.
+2. With `NOMAD` set, check Nomad (exit when unreachable).
+3. Create the ArcadeDB database when missing, then ensure types, properties and indexes
+   (`src/platform/arcade/schema.ts`), and the default admin `local.user@localhost`.
+4. Open the SQLite queue and start its sweeper.
+5. Load the service registry (`service-registry.json`) and the filters (`filters/*/filter.json`).
+6. Build the services, register the auth strategies and routes, and start Hapi on `PORT`.
 
 ## Authentication
 
-**Development mode** (`MODE=development`): Every request gets `mail` header set to `DEV_USER` (default `local.user@localhost`). User looked up in graph; 401 if not found, 503 if DB unreachable. **[verified]**
+**Development mode** (`MODE=development`): every request is `DEV_USER` (default
+`local.user@localhost`); 401 if that user does not exist, 503 if the database is down.
 
-**Production mode**: Custom `mail-auth` scheme reads `mail` HTTP header, looks up user via `Graph.myId(mail)`. No token validation — the identity provider is assumed to be an upstream proxy (e.g. Shibboleth, Apache mod_auth) that sets the header. **[verified]** from `src/index.mjs` lines 70–135.
+**Production mode**: the `mail` header, set by an upstream proxy (Shibboleth etc.), is trusted
+and looked up with `UsersService.find` (by e-mail, or by RID when it starts with `#`).
+Consumers use the separate `service` strategy (bearer `SERVICE_TOKEN`). See
+[backend structure](backend-structure.md#authentication).
 
-**Authorization**: Graph-traversal based. `Graph.hasAccess(item_rid, user_rid)` traverses all outgoing edges from the item; if any path reaches the user vertex, access is granted. No role-based access control beyond implicit graph topology. **[verified]** from `graph.mjs`.
+**Authorization**: ownership through the graph. `AccessService.findOwned(rid, user)` follows the
+node's outgoing `DERIVED_FROM`/`BELONGS_TO` edges to a Project that `HAS_OWNER` the user. Admin
+routes also check `access === 'admin'`.
 
 ## Technology Choices
 
 | Decision | Choice | Notes |
 |----------|--------|-------|
-| Web framework | Hapi.js 21 | With `@hapi/inert` (static files), `@hapi/boom` (errors), `susie` (SSE) |
-| Database | ArcadeDB (HTTP API) | No ORM; raw SQL and Cypher queries via `got` HTTP client |
-| Queue | SQLite (WAL mode) | Local file-based queue with retry logic; no external service needed |
-| Frontend framework | Vue 3 + Vuetify 3 | Reactive singleton store (not Vuex/Pinia) |
+| Language | TypeScript | compiled with `tsc` to `dist/`; `npm run build`, `npm start` |
+| Web framework | Hapi 21 | `@hapi/inert` (static files), `@hapi/boom` (errors); SSE written directly (`src/platform/sse/hub.ts`) |
+| Database | ArcadeDB (HTTP API) | SQL with bound parameters through `fetch`; Cypher only in legacy mode |
+| Queue | SQLite (WAL mode) via `node:sqlite` | retries, leases, batch auto-abort |
+| Frontend framework | Vue 3 + Vuetify 3 | |
 | Frontend build | Vite | Dev proxy to backend on :8200 |
-| Module system | ESM throughout | `.mjs` extensions; Node.js ≥22.3 required |
+| Module system | ESM | Node.js >= 22.5 (`node:sqlite`) |
 | Service framework (Python) | FastAPI | CORS enabled globally; multipart file I/O |
 | Logging | Winston + daily-rotate-file | JSON format, 14-day retention, 20MB rotation |
+| Tests | `node:test` | `test/contract/` (HTTP, any backend), `test/unit/` |
 
-**[verified]** All confirmed from `package.json`, `requirements.txt`, and source code.
+**[verified]** from `package.json` and `src/`.

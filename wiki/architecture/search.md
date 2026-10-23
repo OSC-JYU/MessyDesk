@@ -1,10 +1,10 @@
 # Search (Solr Integration)
 
-MessyDesk uses Apache Solr 9.7 for full-text search. The integration is in `src/solr.mjs`.
+MessyDesk uses Apache Solr 9.7 for full-text search. The integration is in `src/platform/solr/solr.ts`.
 
 ## Configuration
 
-**[verified]** from `src/env.mjs`:
+**[verified]** from `src/config.ts`:
 
 | Variable | Default |
 |----------|---------|
@@ -15,7 +15,7 @@ The Solr core is pre-created by `docker-compose.yml` via `solr-precreate messyde
 
 ## Search Query
 
-**[verified]** from `src/solr.mjs` `solr.search()`:
+**[verified]** from `src/platform/solr/solr.ts` `SolrClient.search`:
 
 - Query parser: **eDisMax**
 - Query fields with boosting: `fulltext_exact^10`, `fulltext^2`, `label^3`, `description^1`
@@ -29,8 +29,9 @@ The Solr core is pre-created by `docker-compose.yml` via `solr-precreate messyde
 
 Docs also carry `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued, kept in sync from
 `TagLink` \u2014 see Index Management below), though these aren't currently part of the default query/highlight
-fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System) — Faceted ROI-data
-(`ner.json`) isn't indexed into Solr yet, it's browsed directly via `/api/tags/ner/labels*`.
+fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System). Faceted ROI-data (`ner.json`) has no
+tag fields; instead each run is indexed as its own `roi_run` document (below), and its mentions are browsed
+directly from the files via `/api/tags/ner/labels*`.
 
 ### Filters
 
@@ -44,7 +45,7 @@ Solr queries normalize RIDs: accept both `#123:45` and `123:45` formats, escape 
 
 ## Index Management
 
-**[verified]** from `src/solr.mjs`:
+**[verified]** from `src/platform/solr/solr.ts`:
 
 | Function | Purpose |
 |----------|---------|
@@ -52,16 +53,32 @@ Solr queries normalize RIDs: accept both `#123:45` and `123:45` formats, escape 
 | `solr.dropUserIndex(userRID)` | Delete all documents owned by a user |
 | `solr.dropProjectIndex(userRID, projectRID)` | Delete all documents in a project |
 | `solr.dropSetIndex(set_rid)` | Delete documents in a set/process |
-| `solr.updateTagsForFile(file_rid)` | Sync `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued) on every doc for a file from current `TagLink` rows, via atomic `{"set": [...]}` partial update |
+| `SolrClient.updateTagsForFile`(file_rid)` | Sync `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued) on every doc for a file from current `TagLink` rows, via atomic `{"set": [...]}` partial update |
 
-`updateTagsForFile` is invoked from `graph.reindexFileTags`, called from `linkEntity`/`unLinkEntity` (file-level
-only) and transitively from `graph.autotagFile`. A single file can have multiple Solr docs (one per indexing
+`updateTagsForFile` is invoked from `TagsService.reindexFileTags`, called from `linkEntity`/`unLinkEntity` (file-level
+only) and transitively from `TagsService.autotag`. A single file can have multiple Solr docs (one per indexing
 process, doc `id = fileRidNorm:processRidNorm`), all keyed by the `node` field; all matching docs are updated.
 Errors are non-fatal (logged, not thrown).
 
+## ROI run documents
+
+One document per `ner.json` run (`type: "roi_run"`, `id = roi:<ner rid>`), written by the backend when the output arrives
+(`NerService.indexRun`) and rebuilt from the files by "Reindex desk" (`NerService.reindexProject`):
+`owner`, `project`, `roi_run` (the ner.json file), `roi_source` (the file it read), `roi_service`, `roi_task`,
+`roi_model` and a multivalued string `roi_key`, one value per distinct label: `service|task|model|label`. Mention texts
+are not indexed. The documents do not use `node`, so tag syncing and text search never touch them (all text queries
+filter `type:"text"`).
+
+- `GET /api/tags/roi/labels` facets on `roi_key` (sorted, `facet.contains` for the search box, paged by `facet.offset`/`limit`).
+- The Tag Filter (`mdf-set-filter`) finds the files of a set with `{!terms f=roi_source}` and the wanted `roi_key` values.
+  A Solr failure makes the filter fail (502), never return partial results.
+- Deleted with the run (`dropRoiRun`), with the source file (`dropFilesIndex`) and with the desk (`dropProjectIndex`).
+- The schema fields are in `tools/solr-init-v2.sh`, which runs on every start and keeps the index (`SOLR_RESET=true` wipes it).
+  An existing core gets the `roi_*` fields the next time the script runs; runs from before are indexed by "Reindex desk".
+
 ## Statistics
 
-`solr.getUserProjectDocCounts(userRID)` uses faceting to return per-project document counts:
+`SolrClient.projectDocCounts(userRid)` uses faceting to return per-project document counts:
 
 ```json
 {
@@ -87,9 +104,41 @@ Documents are indexed via the Solr adapter in MD-consumers:
 
 ## Search endpoint
 
-**[verified]** from `src/routes/search.mjs`:
+**[verified]** from `src/modules/misc/routes.ts`:
 
 | Endpoint | Purpose |
 |----------|---------|
 | `POST /api/search` | Full-text search with query, project filter, pagination |
 | `GET /api/search/info` | Search statistics (document counts per project) |
+
+## Semantic and similarity search (vector and TF-IDF indexes)
+
+**[verified]** from `src/modules/semantic/`:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/search/semantic/indexes` | The caller's indexes (File nodes of type `vector_index` or `similarity_index`): `type`, model, rows and file count from the index file's header, the indexed set, the desk, and `large` above 200 000 rows |
+| `POST /api/search/semantic` | `{ index, query, k, level: chunk\|doc, threshold? }` → 202 `{ search_id }`. Queries are at most 2 000 characters for a vector index and 50 000 for a similarity index (a pasted text) |
+| `GET /api/search/semantic/{id}` | `queued` / `done` (with `hits` and `comparison`) / `failed` (with `error`); kept 10 minutes, only for the searcher |
+
+A search is a job on the **single-file queue** of the service that built the index (the
+producing process's `service_id`, default `md-embeddings` for vector indexes and `md-gensim` for
+similarity indexes), with `role: semantic_search`,
+`search_id` and `task: {id: 'search'}`. Consumers claim the single-file queue before the batch
+queue, so a search waits at most for the job a consumer is already running. The service answers
+with `response.type = "results"`; the consumer reports it with `/api/nomad/process/files/done`,
+and the backend routes it to `SemanticSearch.deliver` instead of the results module. Hits are
+checked with `AccessService.findOwned` for the user of the pending search (never the message's
+`userId`), given labels and snippets from the source text, and announced with the SSE event
+`{ command: 'semantic_results', search_id, status }`. Failed searches arrive through `/error`.
+Search jobs are not shown in the jobs panel.
+
+Another vector backend (e.g. a vector database service) answers the same job with the same
+results, so the routes and the UI stay the same.
+
+A **similarity index** (md-gensim, TF-IDF) is searched the same way, from the Search tab or from
+the index file's viewer, where the user pastes a whole text to find the passages it shares with
+the indexed texts (text reuse). Its hits also carry where the match is in the query
+(`query_start_char`, `query_end_char`, `query_start_token`), and `comparison` gives the passage
+length (`window_size`), `overlap`, `threshold` and how many of the query's passages matched
+(`query_windows`, `matched_windows`).

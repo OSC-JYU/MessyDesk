@@ -77,6 +77,12 @@ body {
   margin-top: 0;
 }
 
+.md-column > p:first-child > strong:only-child {
+  display: block;
+  color: #0a4c50;
+  font-size: 1.05em;
+}
+
 .md-column > :last-child {
   margin-bottom: 0;
 }

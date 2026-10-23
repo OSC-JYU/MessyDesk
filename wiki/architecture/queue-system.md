@@ -6,7 +6,7 @@ MessyDesk uses a SQLite-based queue for all job processing. The queue is managed
 
 ## Implementation
 
-**[verified]** from `src/queue.mjs` (branch: `sqlite-queue`):
+**[verified]** from `src/modules/queue/queue.ts`:
 
 The queue is stored in a SQLite file at `data/{db_name}/queue.sqlite` with WAL mode for concurrent read/write.
 
@@ -40,7 +40,22 @@ CREATE INDEX idx_queue_cleanup
     ON queue_jobs(status, updated_at);
 ```
 
-**[verified]** from `src/queue.mjs` `_openDb()`.
+**[verified]** from `src/modules/queue/queue.ts` `_openDb()`.
+
+### Batch state
+
+```sql
+CREATE TABLE batch_state (
+    process_rid TEXT PRIMARY KEY,
+    state TEXT NOT NULL,          -- paused | cancelled
+    updated_at TEXT NOT NULL
+);
+```
+
+Paused and cancelled batches are kept here so a restart does not forget them (the old backend
+kept them in memory). `claim()` skips jobs of paused batches and finalises jobs of cancelled ones;
+`fail()` of a cancelled batch's job does not retry. The old backend ignores this table, so a
+rollback keeps working.
 
 ### Pragmas
 
@@ -52,32 +67,28 @@ PRAGMA synchronous = NORMAL;
 
 ## Queue API
 
-The backend exposes the following internal methods (called by route handlers):
+`JobQueue` (`src/modules/queue/queue.ts`) knows nothing about the graph:
 
 | Method | Purpose |
 |--------|---------|
-| `queue.init()` | Open/create SQLite database |
-| `queue.publish(topic, data)` | Enqueue a job (enriches message via `createProcessQueueMessage`) |
-| `queue.getQueueStatus(topic)` | Count jobs by status for a topic |
-| `queue.drainQueue(topic, process_rid)` | Delete queued jobs for a topic/process |
-| `queue.drainQueueByProcess(process_rid)` | Delete queued jobs by process RID |
-| `queue.flushQueue(topic)` | Delete all jobs for a topic |
-| `queue.cleanupOlderThan(options)` | Delete stale jobs by age/status (`dry_run` supported) |
-| `queue.createSetProcessNodesAndPublish(msg)` | Create process node + publish (batch-aware) |
-| `queue.pauseBatch(process_rid)` | Mark batch paused + drain queued messages |
-| `queue.resumeBatch(process_rid)` | Clear pause state |
-| `queue.cancelBatch(process_rid)` | Mark cancelled + drain queued messages |
-| `queue.claim(topic, adapterId)` | Atomic claim of next available job (consumer-facing) |
-| `queue.heartbeat(jobId, adapterId)` | Extend lease for a running job |
-| `queue.complete(jobId, adapterId)` | Mark job done |
-| `queue.fail(jobId, error, adapterId)` | Retry (with backoff) or mark permanently failed |
-| `queue.getActiveJobs()` | List active/queued jobs grouped by batch |
+| `open()` / `close()` | Open (creating tables) / close the SQLite file |
+| `publish(queue, message)` | Enqueue a job; `queue_options.max_attempts` overrides the default |
+| `claim(topic, adapterId)` | Claim the oldest due job from `<topic>`, then `<topic>_batch` |
+| `heartbeat(jobId, adapterId)` | Extend the lease of a running job |
+| `complete(jobId, adapterId)` | Mark done (single jobs are deleted right away) |
+| `fail(jobId, error, adapterId)` | Retry with backoff, or fail permanently and maybe auto-abort the batch |
+| `pauseBatch` / `resumeBatch` / `cancelBatch(processRid)` | Batch control (queued jobs are deleted) |
+| `cancelJob`, `dismiss`, `flush`, `activeJobs(userRid)`, `ownerOf(rid)` | Jobs panel and admin |
+| `hasActiveJobsFor(rid)` | Deletion guard |
 
-**[verified]** from `src/queue.mjs`.
+`Publisher` (`src/modules/queue/publisher.ts`) wraps `publish`: it fills in `project_rid` (from
+the file, the process, or a graph lookup) and `set_rid` for set processing, so consumers always get
+the access context. Building messages and creating Process/SetProcess nodes is done by
+`ProcessingService` before publishing.
 
 ## Consumer HTTP API
 
-Consumers access the queue via HTTP endpoints exposed by the backend (`src/routes/queues.mjs`):
+Consumers access the queue via HTTP endpoints exposed by the backend (`src/modules/processing/routes.ts`). They need the `service` credential (see [backend structure](backend-structure.md#authentication)):
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
@@ -85,12 +96,12 @@ Consumers access the queue via HTTP endpoints exposed by the backend (`src/route
 | `/api/queue/{job_id}/heartbeat` | POST | Extend lease. Body: `{ adapter_id }` |
 | `/api/queue/{job_id}/complete` | POST | Mark job done. Body: `{ adapter_id }` |
 | `/api/queue/{job_id}/fail` | POST | Report failure. Body: `{ adapter_id, error }`. Triggers retry or marks failed |
-| `/api/queue/jobs/active` | GET | List all active/queued jobs (for UI hydration) |
-| `/api/queue/{topic}/status` | GET | Query queue state counts by status |
-| `/api/queue/cleanup` | POST | Cleanup jobs older than threshold. Body: `{ older_than_minutes, statuses?, dry_run? }` |
-| `/api/queue/sweeper/summary` | GET | Return in-memory sweeper summary (last run, totals, last error) |
 
-**[verified]** — Implemented in `src/routes/queues.mjs`.
+For the UI (user auth): `GET /api/queue/jobs/active` (the caller's active jobs grouped by batch;
+admins see all), `POST /api/queue/jobs/{rid}/dismiss`, `GET /api/queue/{topic}/flush` (admin).
+The status, cleanup and sweeper-summary routes of the old backend were removed.
+
+**[verified]** — Implemented in `src/modules/processing/routes.ts`.
 
 ### Claim Response Shape
 
@@ -112,11 +123,11 @@ If no work is available: `{ "job": null }`
 
 When a user attempts to delete a graph node (`DELETE /api/graph/vertices/{rid}`), the backend checks for active queue jobs referencing that RID (as `process_rid` or `set_process_rid`). If found, deletion is blocked with HTTP 409 Conflict.
 
-**[verified]** from `src/routes/graph.mjs`.
+**[verified]** from `src/modules/graph/routes.ts`.
 
 ## Retry Logic
 
-**[verified]** from `src/queue.mjs`:
+**[verified]** from `src/modules/queue/queue.ts`:
 
 Jobs are retried on failure up to `max_attempts` (default 3, configurable per-message via `queue_options.max_attempts`). The queue stores `next_retry_at` to implement exponential backoff (500ms × 2^(attempts-1), capped at 30s).
 
@@ -136,19 +147,19 @@ When a batch job permanently fails, the queue checks whether the batch should be
 When auto-abort fires:
 - Remaining queued jobs are cancelled via `cancelBatch()`
 - The batch SetProcess node is marked `cancelled` in the graph DB
-- The user receives a WebSocket notification with `abort_reason` (`failure_threshold` or `consecutive_failures`)
+- The user receives an SSE `process_finished` event with `abort_reason` (`failure_threshold` or `consecutive_failures`)
 
 Per-message overrides: `queue_options.abort_consecutive` and `queue_options.abort_percent`.
 
 ## Batch-Aware Publishing
 
-**[verified]** from `queue.createSetProcessNodesAndPublish()`:
+**[verified]** from `ProcessingService.dispatchBatchFiles`:
 
-Before publishing a batch file message:
-1. Checks parent SetProcess status (`paused`, `cancelling`, `cancelled`, `done` → skip)
-2. If no Process node exists, creates one via `Graph.createProcessNode_queue()`
-3. Writes `message.json` to process directory
-4. Publishes to `{service_id}_batch` queue
+One job per input file goes to `<service>_batch`, each with the SetProcess as `process` and
+`set_process`, `current_file`/`total_files`, `set_rid` and `output_set`. Before each publish the
+SetProcess status is checked; `paused`, `cancelling`, `cancelled` or `done` stops the dispatch.
+Tag syncs to Solr (`update_tags`) are the one job without a set that still goes to `md-solr_batch`,
+with its own Process node.
 
 ## Configuration
 
@@ -156,6 +167,7 @@ Before publishing a batch file message:
 |----------|---------|---------|
 | `QUEUE_DB_PATH` | `data/{db_name}/queue.sqlite` | Database file path |
 | `QUEUE_DB_MAX_ATTEMPTS` | `3` | Max retry attempts per job |
+| `QUEUE_DB_LEASE_SECONDS` | `120` | Lease of a claimed job; a job whose lease ran out can be claimed again |
 | `QUEUE_BATCH_ABORT_CONSECUTIVE` | `5` | Max consecutive permanent failures before auto-abort |
 | `QUEUE_BATCH_ABORT_PERCENT` | `50` | Max failure percentage before auto-abort |
 | `QUEUE_DB_KEEP_FAILED_MINUTES` | `1440` | Keep failed jobs for this many minutes before cleanup |
@@ -166,9 +178,9 @@ Before publishing a batch file message:
 
 ## Automatic Cleanup Sweeper
 
-**[verified]** from `src/queue.mjs`:
+**[verified]** from `src/modules/queue/queue.ts`:
 
-The backend starts a periodic sweeper when `queue.init()` runs.
+`main.ts` starts the sweeper after opening the queue (and runs it once at startup).
 
 On each sweep:
 
@@ -177,19 +189,9 @@ On each sweep:
 
 The sweep interval is configured by `QUEUE_DB_SWEEPER_INTERVAL_SECONDS`.
 
-### Sweeper Summary Endpoint
-
-`GET /api/queue/sweeper/summary` returns runtime sweeper stats, including:
-
-- `enabled`, `running`, `has_timer`
-- `interval_seconds`, `done_cancelled_minutes`, `keep_failed_minutes`
-- `started_at`, `last_run_started_at`, `last_run_finished_at`
-- `last_deleted_done_cancelled`, `last_deleted_failed`, `last_deleted_total`
-- `total_runs`, `total_deleted_done_cancelled`, `total_deleted_failed`, `total_deleted`
-- `last_error`, `now`
-
 ### Retention Notes
 
 - Single-file jobs are deleted immediately on `complete()` (no batch history needed).
 - Batch jobs are cleaned when the batch has no active jobs (`queued`/`running`) and by the periodic sweeper.
 - Failed rows are retained for diagnostics according to `QUEUE_DB_KEEP_FAILED_MINUTES`.
+- `batch_state` rows older than a week whose batch has no jobs left are removed.

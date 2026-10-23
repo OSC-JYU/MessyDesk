@@ -26,6 +26,23 @@ Services can be implemented in any language as long as they follow the request a
 ## Storage Modes
 
 Use environment variable `STORAGE_MODE` (`http` or `disk`). `FILE_STORAGE_MODE` can be supported as backward-compatible alias.
+A service must fall back to `http` when `MD_PATH` is not set: it may run on another server without
+MessyDesk's storage. Its `/config` reports the mode (`adapter: elg_fs` for disk, `elg` for http);
+both names are the same adapter in MD-consumers.
+
+### Write policy
+
+- **Consumers write to disk.** They run on the backend's server or have its data directory
+  mounted (`MD_PATH`). Every output ends up in `data/<db>/tmp` and is reported with the
+  `/api/nomad/process/files/tmp` callback; consumers do not upload files to the backend.
+  Inputs for http services are read from disk as well.
+- **Services may write to disk** (disk mode) or return files over HTTP (http mode); in http mode
+  the consumer downloads them straight into `data/<db>/tmp`. A file is never sent service ->
+  consumer -> backend over the network.
+- Files are written under a temporary name and renamed when complete, so the backend never moves
+  a half-written file. Only the backend places files in project folders.
+- Without `MD_PATH` a consumer falls back to uploading outputs (`/api/nomad/process/files`), with a
+  warning.
 
 - `http` mode:
 	- Service receives uploaded content via multipart/form-data.
@@ -155,8 +172,10 @@ Example callback payload:
 
 Adapter staging requirement:
 - Adapter must call `/api/nomad/process/files/tmp` once per output file.
-- Adapter must not perform file existence checks, path rewriting, or file staging/copying.
-- Adapter forwards service-provided file reference as filename-only `tmp_path`.
+- For a disk answer the adapter forwards the service-provided file reference as filename-only
+  `tmp_path`, without checking or copying it.
+- For an http answer the adapter downloads the file into `data/<db>/tmp` itself (temporary name,
+  then rename) and reports that name.
 
 Service disk-output requirement:
 - File-storage services must write output files into `data/<db>/tmp`.

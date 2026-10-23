@@ -1,0 +1,347 @@
+# MessyDesk with its base services on one machine. See local/README.md.
+#
+#   cp .env.example .env
+#   podman-compose up -d --build      (or: docker compose up -d --build)
+#   podman-compose --profile linguistics up -d --build         (adds the text analysis services)
+#   podman-compose --profile machine_learning up -d --build    (adds the ML services)
+#
+# Open http://localhost:8200. Build contexts point at sibling checkouts (../../MD-sharp and so on),
+# so clone the repositories next to MessyDesk-new first.
+#
+# No Nomad: every service runs as a plain container and its consumer reaches it by DEV_URL.
+# Services and consumers share one data volume, mounted as the backend's data/ and as data/
+# under MD_PATH everywhere else, so files move on disk instead of over HTTP.
+#
+# SELinux (RHEL, Fedora): every mount carries a relabel option, ignored where SELinux is off.
+# :z on the shared md-data volume, which many containers use at once; :Z on mounts that belong to
+# one container only. A new mount needs one of them too, or the container gets "permission denied".
+# Each container also gets its own random SELinux categories, and the files it creates carry them,
+# so a file one service writes to md-data would be off limits to the backend. Every container on
+# md-data therefore runs with the same level (x-shared-label).
+
+name: messydesk
+
+x-service-env: &service-env
+  MD_PATH: /md
+  STORAGE_MODE: disk
+  DB_NAME: ${DB_NAME:-messydesk}
+  MD_URL: http://backend:8200
+
+x-shared-label: &shared-label
+  - label=level:s0:c100,c200
+
+x-consumer: &consumer
+  image: localhost/messydesk/md-consumer:local
+  build: ../../MD-consumers
+  restart: unless-stopped
+  depends_on: [backend]
+  volumes:
+    - md-data:/md/data:z
+  security_opt: *shared-label
+  # The consumer keeps scratch files in ./data, and /src is not writable for its node user.
+  tmpfs:
+    - /src/data:mode=1777
+
+x-consumer-env: &consumer-env
+  MD_URL: http://backend:8200
+  SERVICE_TOKEN: ${SERVICE_TOKEN:?set SERVICE_TOKEN in .env}
+  MD_PATH: /md
+  STORAGE_MODE: disk
+
+x-service: &service
+  restart: unless-stopped
+  # The node images run as uid 1000 (node); the Python ones are set to the same uid so every
+  # file on the shared volume has one owner.
+  user: "1000:1000"
+  # Started after the backend, whose image owns the data/ mount point (uid 1000): the volume takes
+  # that owner when the backend mounts it first.
+  depends_on: [backend]
+  volumes:
+    - md-data:/md/data:z
+  security_opt: *shared-label
+
+services:
+
+  # ---- storage --------------------------------------------------------------------------------
+
+  arcadedb:
+    image: docker.io/arcadedata/arcadedb:23.7.1
+    restart: unless-stopped
+    environment:
+      JAVA_OPTS: -Darcadedb.server.rootPassword=${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - arcadedb-data:/home/arcadedb/databases:Z
+
+  solr:
+    image: docker.io/library/solr:9.7
+    restart: unless-stopped
+    command: ["solr-precreate", "messydesk"]
+    volumes:
+      - solr-data:/var/solr:Z
+
+  solr-init:
+    image: docker.io/library/alpine:3.20
+    depends_on: [solr]
+    environment:
+      SOLR_URL: http://solr:8983/solr/messydesk
+    volumes:
+      - ../tools/solr-init-v2.sh:/solr-init.sh:ro,Z
+    entrypoint: ["sh", "-c", "apk add --no-cache bash curl >/dev/null && bash /solr-init.sh"]
+    restart: "no"
+
+  # ---- backend and UI -------------------------------------------------------------------------
+
+  backend:
+    image: localhost/messydesk/messydesk:local
+    build:
+      context: ..
+      dockerfile: local/Dockerfile
+      additional_contexts:
+        ui: ../../MessyDesk-UI
+    restart: unless-stopped
+    depends_on: [arcadedb, solr]
+    ports:
+      - "${MD_PORT:-8200}:8200"
+    environment:
+      MODE: ${MODE:-development}
+      DEV_USER: ${DEV_USER:-local.user@localhost}
+      DB_HOST: http://arcadedb
+      DB_NAME: ${DB_NAME:-messydesk}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SOLR_URL: http://solr:8983/solr
+      SERVICE_TOKEN: ${SERVICE_TOKEN}
+      SERVICE_AUTH_LEGACY_MAIL: "false"
+      API_URL: http://localhost:${MD_PORT:-8200}/
+    volumes:
+      - md-data:/src/data:z
+    security_opt: *shared-label
+
+  # ---- base services --------------------------------------------------------------------------
+
+  md-sharp:
+    <<: *service
+    image: localhost/messydesk/md-sharp:local
+    build: ../../MD-sharp
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-sharp:9000
+
+  md-poppler:
+    <<: *service
+    image: localhost/messydesk/md-poppler:local
+    build: ../../MD-poppler
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-poppler:8300
+
+  md-pypdf:
+    <<: *service
+    image: localhost/messydesk/md-pypdf_fs:local
+    build: ../../MD-pypdf_fs
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-pypdf:9002
+
+  md-zip:
+    <<: *service
+    image: localhost/messydesk/md-zip_fs:local
+    build: ../../MD-zip_fs
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-zip:9004
+    # Scratch directory under /app, which uid 1000 cannot create.
+    tmpfs:
+      - /app/output:mode=1777
+
+  md-text-base:
+    <<: *service
+    image: localhost/messydesk/md-text-base_fs:local
+    build: ../../MD-text-base_fs
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-text-base:9008
+      OUTPUT_FOLDER: /tmp/output
+
+  md-tesseract:
+    <<: *service
+    image: localhost/messydesk/md-tesseract:local
+    build: ../../MD-tesseract
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-tesseract:8400
+
+  # Page orientation with a small neural network on CPU; its osd.json feeds Auto-rotate (md-sharp).
+  md-docori:
+    <<: *service
+    image: localhost/messydesk/md-docori:local
+    build: ../../MD-docori
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-docori:9012
+      # /app is not writable for uid 1000; outputs go to the data volume, this is only scratch.
+      OUTPUT_FOLDER: /tmp/output
+
+  # ---- language services ----------------------------------------------------------------------
+
+  md-lingua:
+    <<: *service
+    image: localhost/messydesk/md-lingua:local
+    build: ../../MD-lingua
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-lingua:9011
+      OUTPUT_DIR: /tmp/output
+
+  # The upstream image, with no MessyDesk wrapper: consumer-libretranslate calls its API
+  # (MD-LibreTranslate holds only the descriptor). Models for LIBRETRANSLATE_LANGUAGES are
+  # downloaded on the first start, which takes a few minutes, and kept in a volume.
+  libretranslate:
+    image: docker.io/libretranslate/libretranslate:v1.9.6
+    restart: unless-stopped
+    environment:
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,fi,sv,de}
+      LT_UPDATE_MODELS: "true"
+    volumes:
+      - libretranslate-models:/home/libretranslate/.local:Z
+
+  # ---- text analysis (profile linguistics) ----------------------------------------------------
+  # Not started by default: podman-compose --profile linguistics up -d
+
+  # Word counts, TF-IDF similarity indexes (text reuse) and topic models.
+  md-gensim:
+    <<: *service
+    profiles: [linguistics]
+    image: localhost/messydesk/md-gensim:local
+    build: ../../MD-gensim
+    environment:
+      <<: *service-env
+      SERVICE_LOCAL_URL: http://md-gensim:9009
+      # /app is not writable for uid 1000; outputs go to the data volume, this is only scratch.
+      GENSIM_STORE_DIR: /tmp/store
+
+  # ---- machine learning (profile machine_learning) --------------------------------------------
+  # Not started by default: podman-compose --profile machine_learning up -d
+
+  # Works over HTTP (the consumer moves the files), so it needs no shared volume. The model is
+  # part of the image (downloaded when it is built, about 2.5 GB in all).
+  md-gliner2:
+    profiles: [machine_learning]
+    image: localhost/messydesk/md-gliner2:local
+    build: ../../MD-Gliner2
+    restart: unless-stopped
+    environment:
+      SERVICE_LOCAL_URL: http://md-gliner2:9010
+      DEVICE: cpu
+
+  # ---- consumers: one per queue topic ---------------------------------------------------------
+
+  consumer-thumbnailer:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-thumbnailer
+      DEV_URL: http://md-sharp:9000
+
+  consumer-sharp:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-sharp
+      DEV_URL: http://md-sharp:9000
+
+  consumer-poppler:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-poppler
+      DEV_URL: http://md-poppler:8300
+
+  consumer-pypdf:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-pypdf_fs
+      DEV_URL: http://md-pypdf:9002
+
+  consumer-zip:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-zip_fs
+      DEV_URL: http://md-zip:9004
+
+  consumer-text-base:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-text-base_fs
+      DEV_URL: http://md-text-base:9008
+
+  consumer-tesseract:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-tesseract
+      DEV_URL: http://md-tesseract:8400
+
+  consumer-docori:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-docori
+      DEV_URL: http://md-docori:9012
+
+  # Solr has no MessyDesk service in front of it: the consumer talks to Solr directly.
+  consumer-solr:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-solr
+      DEV_URL: http://solr:8983
+      SERVICE_JSON_PATH: /src/src/descriptors/md-solr/service.json
+      REQUIRE_DEV_URL_UP: "false"
+
+  consumer-lingua:
+    <<: *consumer
+    environment:
+      <<: *consumer-env
+      TOPIC: md-lingua
+      DEV_URL: http://md-lingua:9011
+
+  # LibreTranslate serves no /config, so the descriptor comes from the MD-LibreTranslate checkout.
+  consumer-libretranslate:
+    <<: *consumer
+    depends_on: [backend, libretranslate]
+    volumes:
+      - md-data:/md/data:z
+      - ../../MD-LibreTranslate/service.json:/descriptors/md-libretranslate/service.json:ro,Z
+    environment:
+      <<: *consumer-env
+      TOPIC: md-libretranslate
+      DEV_URL: http://libretranslate:5000
+      SERVICE_JSON_PATH: /descriptors/md-libretranslate/service.json
+      REQUIRE_DEV_URL_UP: "false"
+
+  consumer-gensim:
+    <<: *consumer
+    profiles: [linguistics]
+    depends_on: [backend, md-gensim]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-gensim
+      DEV_URL: http://md-gensim:9009
+
+  consumer-gliner2:
+    <<: *consumer
+    profiles: [machine_learning]
+    depends_on: [backend, md-gliner2]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-gliner2
+      DEV_URL: http://md-gliner2:9010
+
+volumes:
+  md-data: {}
+  arcadedb-data: {}
+  solr-data: {}
+  libretranslate-models: {}

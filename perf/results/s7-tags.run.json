@@ -1,0 +1,297 @@
+{
+  "database": "perf_run2",
+  "when": "2026-10-05T16:37:50.287Z",
+  "results": [
+    {
+      "entities": 1000,
+      "links": 10000,
+      "files": 20000,
+      "timings": [
+        {
+          "name": "GET /api/entities",
+          "status": 200,
+          "kb": 208,
+          "n": 5,
+          "p50": 18,
+          "p95": 19,
+          "p99": 19,
+          "max": 19
+        },
+        {
+          "name": "GET /api/entities?project_rid",
+          "status": 200,
+          "kb": 208,
+          "n": 5,
+          "p50": 207,
+          "p95": 208,
+          "p99": 208,
+          "max": 208
+        },
+        {
+          "name": "GET /api/tags",
+          "status": 200,
+          "kb": 37,
+          "n": 5,
+          "p50": 7,
+          "p95": 7,
+          "p99": 7,
+          "max": 7
+        },
+        {
+          "name": "GET /api/tags/machine",
+          "status": 200,
+          "kb": 57,
+          "n": 5,
+          "p50": 26,
+          "p95": 27,
+          "p99": 27,
+          "max": 27
+        },
+        {
+          "name": "GET /api/entities/items (5 tags)",
+          "status": 200,
+          "kb": 10,
+          "n": 5,
+          "p50": 4,
+          "p95": 5,
+          "p99": 5,
+          "max": 5
+        },
+        {
+          "name": "GET /api/entities/sets/{set}",
+          "status": 200,
+          "kb": 92,
+          "n": 5,
+          "p50": 108,
+          "p95": 123,
+          "p99": 123,
+          "max": 123
+        },
+        {
+          "name": "GET /api/documents/{file}",
+          "status": 200,
+          "kb": 1,
+          "n": 5,
+          "p50": 4,
+          "p95": 5,
+          "p99": 5,
+          "max": 5
+        },
+        {
+          "name": "GET /api/sets/{set}/files?thumbnails",
+          "status": 200,
+          "kb": 7,
+          "n": 5,
+          "p50": 37,
+          "p95": 39,
+          "p99": 39,
+          "max": 39
+        },
+        {
+          "name": "tag + untag one file",
+          "status": 200,
+          "kb": 0,
+          "n": 5,
+          "p50": 25,
+          "p95": 25,
+          "p99": 25,
+          "max": 25
+        }
+      ]
+    },
+    {
+      "entities": 10000,
+      "links": 100000,
+      "files": 20000,
+      "timings": [
+        {
+          "name": "GET /api/entities",
+          "status": 200,
+          "kb": 2113,
+          "n": 5,
+          "p50": 136,
+          "p95": 145,
+          "p99": 145,
+          "max": 145
+        },
+        {
+          "name": "GET /api/entities?project_rid",
+          "status": 200,
+          "kb": 2113,
+          "n": 5,
+          "p50": 538,
+          "p95": 561,
+          "p99": 561,
+          "max": 561
+        },
+        {
+          "name": "GET /api/tags",
+          "status": 200,
+          "kb": 379,
+          "n": 5,
+          "p50": 43,
+          "p95": 46,
+          "p99": 46,
+          "max": 46
+        },
+        {
+          "name": "GET /api/tags/machine",
+          "status": 200,
+          "kb": 597,
+          "n": 5,
+          "p50": 240,
+          "p95": 248,
+          "p99": 248,
+          "max": 248
+        },
+        {
+          "name": "GET /api/entities/items (5 tags)",
+          "status": 200,
+          "kb": 1,
+          "n": 5,
+          "p50": 3,
+          "p95": 4,
+          "p99": 4,
+          "max": 4
+        },
+        {
+          "name": "GET /api/entities/sets/{set}",
+          "status": 200,
+          "kb": 845,
+          "n": 5,
+          "p50": 328,
+          "p95": 338,
+          "p99": 338,
+          "max": 338
+        },
+        {
+          "name": "GET /api/documents/{file}",
+          "status": 200,
+          "kb": 1,
+          "n": 5,
+          "p50": 4,
+          "p95": 6,
+          "p99": 6,
+          "max": 6
+        },
+        {
+          "name": "GET /api/sets/{set}/files?thumbnails",
+          "status": 200,
+          "kb": 11,
+          "n": 5,
+          "p50": 38,
+          "p95": 40,
+          "p99": 40,
+          "max": 40
+        },
+        {
+          "name": "tag + untag one file",
+          "status": 200,
+          "kb": 0,
+          "n": 5,
+          "p50": 47,
+          "p95": 47,
+          "p99": 47,
+          "max": 47
+        }
+      ]
+    },
+    {
+      "entities": 100000,
+      "links": 1000000,
+      "files": 20000,
+      "timings": [
+        {
+          "name": "GET /api/entities",
+          "status": 200,
+          "kb": 21442,
+          "n": 5,
+          "p50": 1392,
+          "p95": 1421,
+          "p99": 1421,
+          "max": 1421
+        },
+        {
+          "name": "GET /api/entities?project_rid",
+          "status": 200,
+          "kb": 4258,
+          "n": 5,
+          "p50": 2509,
+          "p95": 2528,
+          "p99": 2528,
+          "max": 2528
+        },
+        {
+          "name": "GET /api/tags",
+          "status": 200,
+          "kb": 2062,
+          "n": 5,
+          "p50": 1168,
+          "p95": 1187,
+          "p99": 1187,
+          "max": 1187
+        },
+        {
+          "name": "GET /api/tags/machine",
+          "status": 200,
+          "kb": 1262,
+          "n": 5,
+          "p50": 1884,
+          "p95": 1896,
+          "p99": 1896,
+          "max": 1896
+        },
+        {
+          "name": "GET /api/entities/items (5 tags)",
+          "status": 200,
+          "kb": 1,
+          "n": 5,
+          "p50": 3,
+          "p95": 5,
+          "p99": 5,
+          "max": 5
+        },
+        {
+          "name": "GET /api/entities/sets/{set}",
+          "status": 200,
+          "kb": 1390,
+          "n": 5,
+          "p50": 1435,
+          "p95": 1468,
+          "p99": 1468,
+          "max": 1468
+        },
+        {
+          "name": "GET /api/documents/{file}",
+          "status": 200,
+          "kb": 1,
+          "n": 5,
+          "p50": 4,
+          "p95": 5,
+          "p99": 5,
+          "max": 5
+        },
+        {
+          "name": "GET /api/sets/{set}/files?thumbnails",
+          "status": 200,
+          "kb": 43,
+          "n": 5,
+          "p50": 39,
+          "p95": 40,
+          "p99": 40,
+          "max": 40
+        },
+        {
+          "name": "tag + untag one file",
+          "status": 200,
+          "kb": 0,
+          "n": 5,
+          "p50": 306,
+          "p95": 331,
+          "p99": 331,
+          "max": 331
+        }
+      ]
+    }
+  ]
+}

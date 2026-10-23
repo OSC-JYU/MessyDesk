@@ -1,0 +1,375 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1080" width="1600" height="1080" font-family="'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif">
+  <title>MessyDesk architecture</title>
+  <defs>
+    <!-- Fjord theme tokens (MessyDesk-UI src/styles/tokens.css) -->
+    <linearGradient id="graph" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#1d4f6e" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="#8fd4c2" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0d3b3a"/>
+      <stop offset="1" stop-color="#1d4f6e"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#0d3b3a" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#47625e"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0f6e6a"/>
+    </marker>
+    <marker id="arrow-cookie" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b27a3c"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1d5a8c"/>
+    </marker>
+    <pattern id="dots" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#cfdfdc"/>
+    </pattern>
+    <!-- a cruncher cookie, the UI's symbol for a service -->
+    <g id="cookie">
+      <circle r="11" fill="#d9a25f" stroke="#b27a3c" stroke-width="1.5"/>
+      <circle cx="-4" cy="-3" r="1.8" fill="#5a3413"/>
+      <circle cx="3.5" cy="-4.5" r="1.5" fill="#5a3413"/>
+      <circle cx="4" cy="3" r="1.9" fill="#5a3413"/>
+      <circle cx="-3" cy="4.5" r="1.4" fill="#5a3413"/>
+    </g>
+  </defs>
+
+  <style>
+    .title { font-family: 'Junicode', 'Palatino Linotype', Georgia, serif; }
+    .h { font-size: 19px; font-weight: 600; fill: #143532; }
+    .t { font-size: 14px; fill: #143532; }
+    .m { font-size: 12.5px; fill: #47625e; }
+    .mono { font-family: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace; font-size: 12px; fill: #47625e; }
+    .w { fill: #ffffff; }
+    .wm { fill: #a9d6cf; }
+    .lbl { font-size: 12px; fill: #47625e; }
+    .lbl-bg { fill: #eaf2f1; }
+  </style>
+
+  <!-- page -->
+  <rect width="1600" height="1080" fill="#eaf2f1"/>
+  <rect y="70" width="1600" height="1010" fill="url(#dots)" opacity="0.7"/>
+
+  <!-- header, like the app bar -->
+  <rect width="1600" height="70" fill="url(#header)"/>
+  <g transform="translate(40,35)">
+    <circle r="17" fill="none" stroke="#ffffff" stroke-width="2"/>
+    <path d="M-9,4 C-6,-8 0,10 4,-3 S9,-6 10,2" fill="none" stroke="#8fd4c2" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+  <text x="70" y="44" class="title w" font-size="28">MessyDesk</text>
+  <text x="222" y="44" class="title wm" font-size="22">· architecture</text>
+  <text x="1560" y="43" text-anchor="end" font-size="13" class="wm">backend · queue · consumers · services · Nomad</text>
+
+  <!-- ===================== left column: people side ===================== -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="110" width="290" height="132" rx="14" fill="#ffffff" stroke="#cfdfdc"/>
+  </g>
+  <rect x="40" y="110" width="290" height="8" rx="4" fill="#0f6e6a"/>
+  <text x="62" y="148" class="h">Browser</text>
+  <text x="62" y="172" class="t">MessyDesk-UI · Vue 3 + Vuetify</text>
+  <text x="62" y="195" class="m">desk graph (Vue Flow), file viewers,</text>
+  <text x="62" y="213" class="m">crunchers, search, jobs panel</text>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="290" width="290" height="92" rx="14" fill="#ffffff" stroke="#cfdfdc"/>
+  </g>
+  <text x="62" y="325" class="h">Proxy</text>
+  <text x="62" y="349" class="t">Shibboleth / SSO</text>
+  <text x="62" y="369" class="m">sets the <tspan class="mono">mail</tspan> header = the user</text>
+
+  <path d="M185,242 L185,286" stroke="#47625e" stroke-width="2" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+  <path d="M330,336 L378,336" stroke="#47625e" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M378,190 L334,190" stroke="#0f6e6a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow-teal)"/>
+  <rect x="336" y="160" width="40" height="18" rx="4" class="lbl-bg"/>
+  <text x="356" y="173" text-anchor="middle" class="lbl" fill="#0f6e6a">SSE</text>
+  <rect x="334" y="344" width="44" height="18" rx="4" class="lbl-bg"/>
+  <text x="356" y="357" text-anchor="middle" class="lbl">/api</text>
+
+  <!-- flow steps -->
+  <text x="40" y="440" class="title" font-size="22" fill="#0d3b3a">One processing run</text>
+  <g font-size="13.5" fill="#143532">
+    <g transform="translate(52,474)"><circle r="12" fill="#0f6e6a"/><text y="5" text-anchor="middle" class="w" font-size="13" font-weight="600">1</text></g>
+    <text x="74" y="470">User picks a cruncher (service, task, model)</text>
+    <text x="74" y="488" class="m">POST /api/queue/{service}/files|sets/{rid}</text>
+
+    <g transform="translate(52,526)"><circle r="12" fill="#0f6e6a"/><text y="5" text-anchor="middle" class="w" font-size="13" font-weight="600">2</text></g>
+    <text x="74" y="522">Backend checks ownership, creates the</text>
+    <text x="74" y="540" class="m">Process node and queues the job (SQLite)</text>
+
+    <g transform="translate(52,578)"><circle r="12" fill="#0f6e6a"/><text y="5" text-anchor="middle" class="w" font-size="13" font-weight="600">3</text></g>
+    <text x="74" y="574">Consumer claims it (polling, lease,</text>
+    <text x="74" y="592" class="m">heartbeat; retries with backoff)</text>
+
+    <g transform="translate(52,630)"><circle r="12" fill="#d9a25f" stroke="#b27a3c"/><text y="5" text-anchor="middle" font-size="13" font-weight="600" fill="#5a3413">4</text></g>
+    <text x="74" y="626">Consumer calls the service /process</text>
+    <text x="74" y="644" class="m">disk mode: path · http mode: upload</text>
+
+    <g transform="translate(52,682)"><circle r="12" fill="#d9a25f" stroke="#b27a3c"/><text y="5" text-anchor="middle" font-size="13" font-weight="600" fill="#5a3413">5</text></g>
+    <text x="74" y="678">Output lands in data/&lt;db&gt;/tmp</text>
+    <text x="74" y="696" class="m">written by the service or the consumer</text>
+
+    <g transform="translate(52,734)"><circle r="12" fill="#0f6e6a"/><text y="5" text-anchor="middle" class="w" font-size="13" font-weight="600">6</text></g>
+    <text x="74" y="730">Consumer reports it: /files/tmp</text>
+    <text x="74" y="748" class="m">a name, never the file itself</text>
+
+    <g transform="translate(52,786)"><circle r="12" fill="#0f6e6a"/><text y="5" text-anchor="middle" class="w" font-size="13" font-weight="600">7</text></g>
+    <text x="74" y="782">Backend moves the file into the project,</text>
+    <text x="74" y="800" class="m">adds the File node, tells the UI over SSE</text>
+  </g>
+
+  <!-- ===================== backend ===================== -->
+  <g filter="url(#shadow)">
+    <rect x="380" y="110" width="520" height="460" rx="16" fill="#ffffff" stroke="#5f8b86" stroke-width="1.5"/>
+  </g>
+  <path d="M396,110 H884 A16,16 0 0 1 900,126 V156 H380 V126 A16,16 0 0 1 396,110 Z" fill="#0d3b3a"/>
+  <text x="402" y="141" class="title w" font-size="21">MessyDesk backend</text>
+  <text x="880" y="140" text-anchor="end" font-size="13" class="wm">TypeScript · Hapi 21 · :8200</text>
+
+  <g font-size="13">
+    <!-- module chips -->
+    <g transform="translate(402,176)">
+      <rect width="230" height="70" rx="10" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.35"/>
+      <text x="14" y="26" font-weight="600" fill="#0f6e6a">access</text>
+      <text x="14" y="46" class="m">one ownership rule: every node</text>
+      <text x="14" y="62" class="m">leads to the user's Project</text>
+    </g>
+    <g transform="translate(648,176)">
+      <rect width="230" height="70" rx="10" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.35"/>
+      <text x="14" y="26" font-weight="600" fill="#0f6e6a">processing</text>
+      <text x="14" y="46" class="m">builds the jobs of every behaviour:</text>
+      <text x="14" y="62" class="m">1→1, 1→N, N→1, whole set</text>
+    </g>
+    <g transform="translate(402,260)">
+      <rect width="230" height="70" rx="10" fill="#e2ecf6" stroke="#1d5a8c" stroke-opacity="0.35"/>
+      <text x="14" y="26" font-weight="600" fill="#1d5a8c">queue</text>
+      <text x="14" y="46" class="m">SQLite (WAL): leases, retries,</text>
+      <text x="14" y="62" class="m">batch pause/cancel, auto-abort</text>
+    </g>
+    <g transform="translate(648,260)">
+      <rect width="230" height="70" rx="10" fill="#e2ecf6" stroke="#1d5a8c" stroke-opacity="0.35"/>
+      <text x="14" y="26" font-weight="600" fill="#1d5a8c">results</text>
+      <text x="14" y="46" class="m">callbacks /api/nomad/process/files/*</text>
+      <text x="14" y="62" class="m">→ File nodes, sets, batch progress</text>
+    </g>
+    <g transform="translate(402,344)">
+      <rect width="230" height="70" rx="10" fill="#f3f8f7" stroke="#cfdfdc"/>
+      <text x="14" y="26" font-weight="600" fill="#143532">services</text>
+      <text x="14" y="46" class="m">registry, consumer liveness,</text>
+      <text x="14" y="62" class="m">which crunchers fit a node</text>
+    </g>
+    <g transform="translate(648,344)">
+      <rect width="230" height="70" rx="10" fill="#f3f8f7" stroke="#cfdfdc"/>
+      <text x="14" y="26" font-weight="600" fill="#143532">SSE hub · files · tags</text>
+      <text x="14" y="46" class="m">live updates, uploads, downloads,</text>
+      <text x="14" y="62" class="m">entities, search (Solr)</text>
+    </g>
+  </g>
+  <!-- auth strip -->
+  <rect x="402" y="430" width="476" height="56" rx="10" fill="#fff3e0" stroke="#9a5b00" stroke-opacity="0.3"/>
+  <text x="418" y="454" font-size="13" font-weight="600" fill="#9a5b00">two ways in</text>
+  <text x="418" y="474" class="m">users: <tspan class="mono">mail</tspan> header · consumers: <tspan class="mono">Authorization: Bearer SERVICE_TOKEN</tspan></text>
+  <text x="402" y="514" class="m">Routes only parse and check; services hold the rules;</text>
+  <text x="402" y="532" class="m">every query to ArcadeDB uses bound parameters.</text>
+  <text x="402" y="554" class="m">Heavy work never runs here: it goes through the queue.</text>
+
+  <!-- stores under the backend -->
+  <g transform="translate(400,615)" filter="url(#shadow)">
+    <path d="M0,16 C0,-5 200,-5 200,16 V96 C200,117 0,117 0,96 Z" fill="#ffffff" stroke="#1d5a8c" stroke-width="1.5"/>
+    <ellipse cx="100" cy="16" rx="100" ry="16" fill="#e2ecf6" stroke="#1d5a8c" stroke-width="1.5"/>
+  </g>
+  <text x="500" y="672" text-anchor="middle" class="h">ArcadeDB</text>
+  <text x="500" y="694" text-anchor="middle" class="m">graph: Project · Set · File</text>
+  <text x="500" y="711" text-anchor="middle" class="m">Process · Entity · TagLink</text>
+
+  <g transform="translate(660,615)" filter="url(#shadow)">
+    <path d="M0,16 C0,-5 200,-5 200,16 V96 C200,117 0,117 0,96 Z" fill="#ffffff" stroke="#1d5a8c" stroke-width="1.5"/>
+    <ellipse cx="100" cy="16" rx="100" ry="16" fill="#e2ecf6" stroke="#1d5a8c" stroke-width="1.5"/>
+  </g>
+  <text x="760" y="672" text-anchor="middle" class="h">Solr</text>
+  <text x="760" y="694" text-anchor="middle" class="m">full-text index</text>
+  <text x="760" y="711" text-anchor="middle" class="m">filtered by owner</text>
+
+  <path d="M500,570 L500,608" stroke="#1d5a8c" stroke-width="2" marker-end="url(#arrow-blue)" marker-start="url(#arrow-blue)"/>
+  <path d="M760,570 L760,608" stroke="#1d5a8c" stroke-width="2" marker-end="url(#arrow-blue)" marker-start="url(#arrow-blue)"/>
+  <rect x="508" y="580" width="78" height="18" rx="4" class="lbl-bg"/>
+  <text x="547" y="593" text-anchor="middle" class="lbl">SQL / HTTP</text>
+  <rect x="768" y="580" width="54" height="18" rx="4" class="lbl-bg"/>
+  <text x="795" y="593" text-anchor="middle" class="lbl">search</text>
+
+  <!-- ===================== Nomad cluster ===================== -->
+  <rect x="960" y="100" width="600" height="676" rx="20" fill="#ffffff" fill-opacity="0.55" stroke="#1d4f6e" stroke-width="2" stroke-dasharray="10 7"/>
+  <g transform="translate(984,118)">
+    <rect width="552" height="54" rx="12" fill="url(#graph)"/>
+    <!-- Nomad-like hexagon mark -->
+    <g transform="translate(30,27)">
+      <path d="M0,-17 L15,-8.5 L15,8.5 L0,17 L-15,8.5 L-15,-8.5 Z" fill="none" stroke="#ffffff" stroke-width="2"/>
+      <path d="M-6,7 V-7 L6,7 V-7" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round"/>
+    </g>
+    <text x="58" y="25" class="title w" font-size="20">Nomad cluster</text>
+    <text x="58" y="44" font-size="12.5" class="w" opacity="0.9">runs consumers and services as podman jobs · service discovery · health checks</text>
+  </g>
+
+  <!-- column labels -->
+  <text x="1040" y="200" text-anchor="middle" font-size="12" font-weight="600" fill="#0f6e6a" letter-spacing="1">CONSUMER</text>
+  <text x="1418" y="200" text-anchor="middle" font-size="12" font-weight="600" fill="#b27a3c" letter-spacing="1">SERVICE (CRUNCHER)</text>
+
+  <!-- row helper: consumer chip at x 984..1170, service chip at x 1290..1540 -->
+  <!-- row 1: embeddings -->
+  <g filter="url(#shadow)">
+    <rect x="984" y="212" width="190" height="78" rx="12" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.5"/>
+    <rect x="1290" y="212" width="250" height="78" rx="12" fill="#ffffff" stroke="#d9a25f" stroke-width="1.5"/>
+  </g>
+  <text x="1000" y="240" font-size="14" font-weight="600" fill="#0f6e6a">md-embeddings</text>
+  <text x="1000" y="260" class="m">adapter elg</text>
+  <text x="1000" y="277" class="mono">TOPIC=md-embeddings</text>
+  <use href="#cookie" x="1314" y="240"/>
+  <text x="1334" y="245" font-size="14" font-weight="600" fill="#143532">MD-embeddings</text>
+  <text x="1306" y="267" class="m">Gemma, BGE-M3, E5 · GPU or CPU</text>
+  <text x="1306" y="283" class="m">disk mode (MD_PATH) or http mode</text>
+
+  <!-- row 2: image / ocr -->
+  <g filter="url(#shadow)">
+    <rect x="984" y="308" width="190" height="78" rx="12" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.5"/>
+    <rect x="1290" y="308" width="250" height="78" rx="12" fill="#ffffff" stroke="#d9a25f" stroke-width="1.5"/>
+  </g>
+  <text x="1000" y="336" font-size="14" font-weight="600" fill="#0f6e6a">md-sharp …</text>
+  <text x="1000" y="356" class="m">adapter elg</text>
+  <text x="1000" y="373" class="mono">one per service</text>
+  <use href="#cookie" x="1314" y="336"/>
+  <text x="1334" y="341" font-size="14" font-weight="600" fill="#143532">MD-sharp, tesseract, …</text>
+  <text x="1306" y="363" class="m">images, OCR, PDF split, zip, NER</text>
+  <text x="1306" y="379" class="m">stateless: file in, files out</text>
+
+  <!-- row 3: AI -->
+  <g filter="url(#shadow)">
+    <rect x="984" y="404" width="190" height="78" rx="12" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.5"/>
+    <rect x="1290" y="404" width="250" height="78" rx="12" fill="#ffffff" stroke="#d9a25f" stroke-width="1.5"/>
+  </g>
+  <text x="1000" y="432" font-size="14" font-weight="600" fill="#0f6e6a">ollama · azure-ai</text>
+  <text x="1000" y="452" class="m">LLM adapters</text>
+  <text x="1000" y="469" class="mono">prompts as tasks</text>
+  <use href="#cookie" x="1314" y="432"/>
+  <text x="1334" y="437" font-size="14" font-weight="600" fill="#143532">Ollama / Azure AI</text>
+  <text x="1306" y="459" class="m">on-premise LLMs, or external APIs</text>
+  <text x="1306" y="475" class="m">(gated by service groups)</text>
+
+  <!-- row 4: solr -->
+  <g filter="url(#shadow)">
+    <rect x="984" y="500" width="190" height="78" rx="12" fill="#dcf0ed" stroke="#0f6e6a" stroke-opacity="0.5"/>
+  </g>
+  <text x="1000" y="528" font-size="14" font-weight="600" fill="#0f6e6a">md-solr</text>
+  <text x="1000" y="548" class="m">adapter solr</text>
+  <text x="1000" y="565" class="mono">reads texts from disk</text>
+
+  <!-- consumer -> service arrows -->
+  <g stroke="#b27a3c" stroke-width="2" fill="none">
+    <path d="M1174,251 L1286,251" marker-end="url(#arrow-cookie)"/>
+    <path d="M1174,347 L1286,347" marker-end="url(#arrow-cookie)"/>
+    <path d="M1174,443 L1286,443" marker-end="url(#arrow-cookie)"/>
+  </g>
+  <rect x="1196" y="232" width="70" height="18" rx="4" class="lbl-bg"/>
+  <text x="1231" y="245" text-anchor="middle" class="lbl" fill="#b27a3c">/process</text>
+  <rect x="1196" y="328" width="70" height="18" rx="4" class="lbl-bg"/>
+  <text x="1231" y="341" text-anchor="middle" class="lbl" fill="#b27a3c">/process</text>
+  <rect x="1196" y="424" width="70" height="18" rx="4" class="lbl-bg"/>
+  <text x="1231" y="437" text-anchor="middle" class="lbl" fill="#b27a3c">/api/chat</text>
+
+  <!-- Nomad allocations note -->
+  <text x="1290" y="530" font-size="13" font-weight="600" fill="#1d4f6e">How Nomad fits</text>
+  <text x="1290" y="550" class="m">a consumer with NOMAD_HCL_PATH asks</text>
+  <text x="1290" y="566" class="m">the backend to start its service job,</text>
+  <text x="1290" y="582" class="m">then finds it by service discovery</text>
+  <text x="1290" y="598" class="m">(health check: GET /health)</text>
+
+  <!-- md-solr -> Solr (writes the index directly) -->
+  <path d="M984,560 C930,560 930,672 866,672" stroke="#1d5a8c" stroke-width="2" fill="none" marker-end="url(#arrow-blue)"/>
+  <rect x="884" y="610" width="66" height="18" rx="4" class="lbl-bg"/>
+  <text x="917" y="623" text-anchor="middle" class="lbl" fill="#1d5a8c">/update</text>
+
+  <!-- backend <-> consumers (queue + callbacks) -->
+  <g stroke="#0f6e6a" stroke-width="2.2" fill="none">
+    <path d="M904,300 C940,300 945,251 980,251" marker-end="url(#arrow-teal)" marker-start="url(#arrow-teal)"/>
+    <path d="M904,320 C940,320 945,347 980,347" marker-end="url(#arrow-teal)" marker-start="url(#arrow-teal)"/>
+    <path d="M904,340 C940,340 945,443 980,443" marker-end="url(#arrow-teal)" marker-start="url(#arrow-teal)"/>
+    <path d="M904,360 C945,360 940,530 980,530" marker-end="url(#arrow-teal)" marker-start="url(#arrow-teal)"/>
+  </g>
+  <rect x="904" y="232" width="52" height="34" rx="5" fill="#eaf2f1" opacity="0.92"/>
+  <text x="930" y="245" text-anchor="middle" font-size="11" fill="#0f6e6a">claim ·</text>
+  <text x="930" y="260" text-anchor="middle" font-size="11" fill="#0f6e6a">results</text>
+
+  <!-- backend -> Nomad API -->
+  <path d="M900,128 C930,128 940,145 980,145" stroke="#1d4f6e" stroke-width="2" stroke-dasharray="5 4" fill="none" marker-end="url(#arrow)"/>
+  <rect x="904" y="92" width="62" height="18" rx="4" class="lbl-bg"/>
+  <text x="935" y="105" text-anchor="middle" class="lbl" fill="#1d4f6e">:4646 API</text>
+
+  <!-- ===================== shared data directory ===================== -->
+  <g filter="url(#shadow)">
+    <path d="M380,842 h170 l18,-18 h992 v196 h-1180 z" fill="#ffffff" stroke="#5f8b86" stroke-width="1.5"/>
+  </g>
+  <path d="M380,842 h170 l18,-18 h992 v34 h-1180 z" fill="#dcf0ed"/>
+  <text x="400" y="868" class="title" font-size="21" fill="#0d3b3a">Shared data directory</text>
+  <text x="640" y="868" class="mono" font-size="13">data/&lt;db&gt;/</text>
+  <text x="1540" y="866" text-anchor="end" class="m">the backend's disk; mounted on Nomad nodes as MD_PATH</text>
+
+  <g font-size="13">
+    <g transform="translate(400,890)">
+      <rect width="250" height="110" rx="10" fill="#f3f8f7" stroke="#cfdfdc"/>
+      <text x="14" y="26" class="mono" font-size="13" fill="#143532">projects/</text>
+      <text x="14" y="48" class="m">files, sets, processes</text>
+      <text x="14" y="66" class="m">sharded by UUIDv7</text>
+      <text x="14" y="88" class="m">only the backend writes here</text>
+    </g>
+    <g transform="translate(670,890)">
+      <rect width="250" height="110" rx="10" fill="#fff3e0" stroke="#d9a25f"/>
+      <text x="14" y="26" class="mono" font-size="13" fill="#143532">tmp/</text>
+      <text x="14" y="48" class="m">outputs of services and consumers</text>
+      <text x="14" y="66" class="m">written as .part, then renamed</text>
+      <text x="14" y="88" class="m">backend moves them into projects/</text>
+    </g>
+    <g transform="translate(940,890)">
+      <rect width="250" height="110" rx="10" fill="#e2ecf6" stroke="#1d5a8c" stroke-opacity="0.4"/>
+      <text x="14" y="26" class="mono" font-size="13" fill="#143532">queue.sqlite</text>
+      <text x="14" y="48" class="m">jobs and batch state</text>
+      <text x="14" y="66" class="m">service-registry.json</text>
+      <text x="14" y="88" class="m">logs/</text>
+    </g>
+    <g transform="translate(1210,890)">
+      <rect width="330" height="110" rx="10" fill="#ffffff" stroke="#cfdfdc" stroke-dasharray="5 4"/>
+      <text x="14" y="26" font-weight="600" fill="#143532">Write policy</text>
+      <text x="14" y="48" class="m">consumers write to disk, never upload</text>
+      <text x="14" y="66" class="m">services: disk mode, or http mode when</text>
+      <text x="14" y="84" class="m">MD_PATH is missing (consumer saves the</text>
+      <text x="14" y="102" class="m">download to tmp/) — no double hop</text>
+    </g>
+  </g>
+
+  <!-- disk arrows: backend, consumers and services to the data directory -->
+  <path d="M640,570 C640,600 640,600 640,780 L640,820" stroke="#5f8b86" stroke-width="2" fill="none" stroke-dasharray="2 5" stroke-linecap="round"/>
+  <path d="M1080,578 L1080,820" stroke="#0f6e6a" stroke-width="2" fill="none" marker-end="url(#arrow-teal)"/>
+  <path d="M1500,290 C1585,320 1585,760 1500,820" stroke="#b27a3c" stroke-width="2" fill="none" stroke-dasharray="7 5" marker-end="url(#arrow-cookie)"/>
+  <rect x="1088" y="790" width="138" height="18" rx="4" class="lbl-bg"/>
+  <text x="1157" y="803" text-anchor="middle" class="lbl" fill="#0f6e6a">read inputs · write tmp/</text>
+  <rect x="1404" y="790" width="148" height="18" rx="4" class="lbl-bg"/>
+  <text x="1478" y="803" text-anchor="middle" class="lbl" fill="#b27a3c">disk mode: write tmp/</text>
+  <rect x="648" y="760" width="118" height="18" rx="4" class="lbl-bg"/>
+  <text x="707" y="773" text-anchor="middle" class="lbl">moves into projects/</text>
+
+  <!-- legend -->
+  <g transform="translate(40,880)">
+    <text x="0" y="0" class="title" font-size="20" fill="#0d3b3a">Legend</text>
+    <line x1="0" y1="24" x2="44" y2="24" stroke="#0f6e6a" stroke-width="2.2"/>
+    <text x="56" y="28" class="m">queue and callbacks (service token)</text>
+    <line x1="0" y1="50" x2="44" y2="50" stroke="#b27a3c" stroke-width="2"/>
+    <text x="56" y="54" class="m">consumer → service</text>
+    <line x1="0" y1="76" x2="44" y2="76" stroke="#1d5a8c" stroke-width="2"/>
+    <text x="56" y="80" class="m">database / index</text>
+    <line x1="0" y1="102" x2="44" y2="102" stroke="#1d4f6e" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="56" y="106" class="m">Nomad API (start / stop jobs)</text>
+    <use href="#cookie" x="22" y="128"/>
+    <text x="56" y="133" class="m">a service: the UI's cruncher cookie</text>
+  </g>
+</svg>

@@ -1,0 +1,57 @@
+{
+  "when": "2026-10-05T18:32:34.586Z",
+  "error_rate": 0.03,
+  "sizes": {
+    "full_mb": 1446,
+    "light_mb": 188,
+    "text_mb": 201,
+    "pages": 84000
+  },
+  "recall": [
+    {
+      "way": "full (today)",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 0.6,
+      "other_pages_per_query": 118,
+      "search_p50_ms": 24,
+      "search_p95_ms": 150
+    },
+    {
+      "way": "full, fuzzy ~1",
+      "words": 40,
+      "pages_with_word_found_pct": 99.9,
+      "pages_with_only_misread_word_found_pct": 85.6,
+      "other_pages_per_query": 1889,
+      "search_p50_ms": 173,
+      "search_p95_ms": 629
+    },
+    {
+      "way": "light, exact words",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 0,
+      "other_pages_per_query": 0,
+      "search_p50_ms": 19,
+      "search_p95_ms": 115
+    },
+    {
+      "way": "light, fuzzy ~1",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 88.8,
+      "other_pages_per_query": 284,
+      "search_p50_ms": 132,
+      "search_p95_ms": 624
+    },
+    {
+      "way": "light, fuzzy ~2",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 94.4,
+      "other_pages_per_query": 1203,
+      "search_p50_ms": 2990,
+      "search_p95_ms": 6472
+    }
+  ]
+}

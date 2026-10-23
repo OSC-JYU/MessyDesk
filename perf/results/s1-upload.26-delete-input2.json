@@ -1,0 +1,98 @@
+{
+  "scenario": "S1 upload",
+  "files": 10000,
+  "chunk": 20,
+  "parallel": 3,
+  "thumbnails": false,
+  "project": "#16:0",
+  "set": "#148:0",
+  "seconds": 55,
+  "files_per_second": 182.1,
+  "uploaded": 10000,
+  "failed_chunks": 0,
+  "members": 10000,
+  "stored_count": 10000,
+  "manifest_items": 10000,
+  "chunk_ms_by_set_size": [
+    {
+      "set_size_from": 0,
+      "n": 52,
+      "p50": 239,
+      "p95": 328,
+      "p99": 340,
+      "max": 340
+    },
+    {
+      "set_size_from": 1000,
+      "n": 50,
+      "p50": 226,
+      "p95": 244,
+      "p99": 246,
+      "max": 246
+    },
+    {
+      "set_size_from": 2000,
+      "n": 50,
+      "p50": 252,
+      "p95": 268,
+      "p99": 275,
+      "max": 275
+    },
+    {
+      "set_size_from": 3000,
+      "n": 50,
+      "p50": 273,
+      "p95": 306,
+      "p99": 314,
+      "max": 314
+    },
+    {
+      "set_size_from": 4000,
+      "n": 50,
+      "p50": 305,
+      "p95": 330,
+      "p99": 338,
+      "max": 338
+    },
+    {
+      "set_size_from": 5000,
+      "n": 50,
+      "p50": 336,
+      "p95": 353,
+      "p99": 377,
+      "max": 377
+    },
+    {
+      "set_size_from": 6000,
+      "n": 50,
+      "p50": 364,
+      "p95": 406,
+      "p99": 421,
+      "max": 421
+    },
+    {
+      "set_size_from": 7000,
+      "n": 50,
+      "p50": 388,
+      "p95": 419,
+      "p99": 426,
+      "max": 426
+    },
+    {
+      "set_size_from": 8000,
+      "n": 50,
+      "p50": 427,
+      "p95": 453,
+      "p99": 463,
+      "max": 463
+    },
+    {
+      "set_size_from": 9000,
+      "n": 48,
+      "p50": 459,
+      "p95": 482,
+      "p99": 490,
+      "max": 490
+    }
+  ]
+}

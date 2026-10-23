@@ -19,7 +19,7 @@ Use this for most services.
 Run from `MD-consumers`:
 
 ```bash
-TOPIC=md-sharp node src/index.mjs
+TOPIC=md-sharp node `src/main.ts`
 ```
 
 What it does:
@@ -88,7 +88,7 @@ Preflight behavior:
 Example:
 
 ```bash
-TOPIC=md-sharp DEV_URL=http://localhost:9000 node src/index.mjs
+TOPIC=md-sharp DEV_URL=http://localhost:9000 node `src/main.ts`
 ```
 
 ## Descriptor source options
@@ -133,11 +133,11 @@ Preferred descriptor locations for long-term use:
 Explicit descriptor examples:
 
 ```bash
-TOPIC=md-azure-ai SERVICE_JSON_PATH=./descriptors/md-azure-ai.json node src/index.mjs
+TOPIC=md-azure-ai SERVICE_JSON_PATH=./descriptors/md-azure-ai.json node `src/main.ts`
 ```
 
 ```bash
-TOPIC=md-azure-ai SERVICE_DESCRIPTOR_PATH=./descriptors/md-azure-ai.json node src/index.mjs
+TOPIC=md-azure-ai SERVICE_DESCRIPTOR_PATH=./descriptors/md-azure-ai.json node `src/main.ts`
 ```
 
 ## Help source options
@@ -211,7 +211,7 @@ podman run --rm -it \
   -e NOMAD=true \
   --network=host \
   osc.repo.kopla.jyu.fi/messydesk/md-consumer:26.01.12 \
-  "node src/index.mjs"
+  "node `src/main.ts`"
 ```
 
 ## Example: external API service
@@ -220,5 +220,5 @@ podman run --rm -it \
 TOPIC=md-azure-ai \
 SERVICE_JSON_PATH=./descriptors/md-azure-ai.json \
 HELP_URL=https://learn.microsoft.com/en-us/azure/ai-services/openai/reference \
-node src/index.mjs
+node `src/main.ts`
 ```

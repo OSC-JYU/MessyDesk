@@ -1,0 +1,38 @@
+{
+  "database": "perf_legacy",
+  "config": {
+    "users": 1,
+    "userOffset": 0,
+    "projects": 1,
+    "sets": 1,
+    "files": 50,
+    "depth": 2,
+    "entities": 20,
+    "links": 2,
+    "chunk": 100,
+    "parallel": 1
+  },
+  "counts": {
+    "users": 1,
+    "projects": 1,
+    "sets": 3,
+    "files": 50,
+    "outputs": 100,
+    "processes": 2,
+    "entities": 20,
+    "links": 100,
+    "edges": 155
+  },
+  "samples": {
+    "user": "#121:0",
+    "project": "#1:0",
+    "set": "#145:0",
+    "file": "#73:0",
+    "output_file": "#79:0",
+    "set_process": "#49:0",
+    "output_set": "#151:0",
+    "entity": "#184:0"
+  },
+  "seconds": 1,
+  "finished": "2026-10-05T14:34:10.038Z"
+}

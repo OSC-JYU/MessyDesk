@@ -1,0 +1,48 @@
+{
+  "when": "2026-10-05T19:39:38.013Z",
+  "error_rate": 0.03,
+  "sizes": {
+    "full_mb": 1400,
+    "light_mb": 190,
+    "text_mb": 201,
+    "pages": 84000
+  },
+  "recall": [
+    {
+      "way": "full, backend search",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 0.6,
+      "other_pages_per_query": 118,
+      "search_p50_ms": 50,
+      "search_p95_ms": 652
+    },
+    {
+      "way": "full, backend search + OCR misspellings",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 86.9,
+      "other_pages_per_query": 369,
+      "search_p50_ms": 157,
+      "search_p95_ms": 675
+    },
+    {
+      "way": "light, backend search",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 0,
+      "other_pages_per_query": 0,
+      "search_p50_ms": 23,
+      "search_p95_ms": 136
+    },
+    {
+      "way": "light, backend search + OCR misspellings",
+      "words": 40,
+      "pages_with_word_found_pct": 100,
+      "pages_with_only_misread_word_found_pct": 95.6,
+      "other_pages_per_query": 284,
+      "search_p50_ms": 131,
+      "search_p95_ms": 593
+    }
+  ]
+}

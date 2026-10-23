@@ -16,6 +16,8 @@ build:
 start:
 	docker run -d --name $(IMAGE) \
 		-p 8200:8200 \
+		-e LEGACY_ARCADEDB=true \
+		-e SERVICE_TOKEN=$(SERVICE_TOKEN) \
 		-e DATA_DIR=/data \
 		--net=host \
 		-e DB_NAME=messydesk \

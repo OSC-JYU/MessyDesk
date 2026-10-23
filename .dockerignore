@@ -1,6 +1,4 @@
-data
-uploads
 node_modules
-logs
-*.env
+dist
+data
 .git
