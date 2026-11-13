@@ -71,6 +71,8 @@ services:
       JAVA_OPTS: -Darcadedb.server.rootPassword=${DB_PASSWORD:?set DB_PASSWORD in .env}
     volumes:
       - arcadedb-data:/home/arcadedb/databases:Z
+    ports:
+      - "2480:2480"
 
   solr:
     image: docker.io/library/solr:9.7
@@ -199,7 +201,7 @@ services:
     image: docker.io/libretranslate/libretranslate:v1.9.6
     restart: unless-stopped
     environment:
-      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,fi,sv,de}
+      LT_LOAD_ONLY: ${LIBRETRANSLATE_LANGUAGES:-en,fi,sv,nb,da,uk,po}
       LT_UPDATE_MODELS: "true"
     volumes:
       - libretranslate-models:/home/libretranslate/.local:Z
