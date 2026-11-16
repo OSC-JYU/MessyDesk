@@ -10,12 +10,14 @@ export const SERVICE = {
     POPPLER: 'md-poppler',
     /** Former second Poppler topic (split-page thumbnails); still recognised in callbacks. */
     POPPLER_FS: 'md-poppler_fs',
-    /** PDF splitter used by the import pipeline. */
+    /** PDF splitter: the only cruncher for an original PDF. */
     PDF_SPLITTER: 'md-pypdf_fs',
     /** Older name of the splitter, still recognised in callbacks. */
     PDF_SPLITTER_LEGACY: 'md-pdf-splitter_fs',
     ZIP: 'md-zip_fs',
     SOLR: 'md-solr',
+    /** Basic text tasks; its "Add note" task makes the note files. */
+    TEXT_BASE: 'md-text-base_fs',
 } as const;
 
 export const ROLE = {
@@ -23,8 +25,17 @@ export const ROLE = {
     THUMBNAILS: 'thumbnails',
     INTERNAL_VERSIONING: 'internal_versioning',
     EXIF_ROTATE: 'exif_rotate',
-    IMPORT: 'import',
 } as const;
 
 export const THUMBNAIL_PARAMS = { width: 800, type: 'jpeg' };
 export const PDF_THUMBNAIL_PARAMS = { page: 1, previewResolution: 150, thumbnailResolution: 80 };
+
+/** File types of PDFs: an uploaded PDF is `original-pdf`; `pdf` is a one-page PDF made by the splitter. */
+export const FILE_TYPE = {
+    ORIGINAL_PDF: 'original-pdf',
+    PDF: 'pdf',
+} as const;
+
+export function isPdfType(type: unknown): boolean {
+    return type === FILE_TYPE.PDF || type === FILE_TYPE.ORIGINAL_PDF;
+}

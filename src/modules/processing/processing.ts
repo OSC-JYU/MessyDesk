@@ -25,7 +25,9 @@ import { resolveBehaviour, type ServiceRegistry } from '../services/registry.ts'
 import type { SolrClient } from '../../platform/solr/solr.ts';
 import type { TagFields } from '../tags/tags.ts';
 import type { TokenBudget } from '../usage/token-budget.ts';
+import type { SecretVault } from '../secrets/vault.ts';
 import { manyToOneGroups } from './grouping.ts';
+import { pageInRange, parsePageRange } from '../../shared/page-range.ts';
 
 export function isSearchOutputTask(service: any, task: any): boolean {
     const def = task?.id ? service?.tasks?.[task.id] : null;
@@ -73,6 +75,35 @@ export function promptParams(task: any): Record<string, unknown> {
     return { ...(task?.params || {}), ...(task?.system_params || {}) };
 }
 
+/** Params declared `format: "page_range"` (e.g. `pages`) are checked before anything is queued. */
+export function checkPageRanges(def: any, task: any): void {
+    for (const [name, help] of Object.entries<any>(def?.params_help || {})) {
+        if (help?.format !== 'page_range') continue;
+        try {
+            parsePageRange(task.params?.[name]);
+        } catch (error) {
+            throw Boom.badRequest((error as Error).message);
+        }
+    }
+}
+
+/**
+ * A page range declared `filter: "set_pages"` picks the pages of a set that take part, by their
+ * page number in the original PDF. The crunchers work on single pages, so the param is not passed on.
+ */
+export function filterSetPages(def: any, task: any, files: any[]): any[] {
+    let kept = files;
+    for (const [name, help] of Object.entries<any>(def?.params_help || {})) {
+        if (help?.filter !== 'set_pages') continue;
+        const range = parsePageRange(task.params?.[name]);
+        if (task.params) delete task.params[name];
+        if (!range) continue;
+        kept = kept.filter((f) => Number.isFinite(Number(f?.page_number)) && pageInRange(range, Number(f.page_number)));
+        if (!kept.length) throw Boom.badRequest('No page of the set is in the page range');
+    }
+    return kept;
+}
+
 export class ProcessingService {
     private readonly db: ArcadeClient;
     private readonly store: GraphStore;
@@ -86,6 +117,7 @@ export class ProcessingService {
     private readonly sse: SseHub;
     private readonly solr: SolrClient;
     private readonly budget: TokenBudget | null;
+    private readonly secrets: SecretVault | null;
     private readonly apiUrl: string;
     private readonly log: (message: string) => void;
     private readonly dispatching = new Set<Promise<void>>();
@@ -94,6 +126,7 @@ export class ProcessingService {
         db: ArcadeClient; store: GraphStore; layout: DataLayout; access: AccessService; nodes: NodesService; files: FilesService;
         registry: ServiceRegistry; publisher: Publisher; batches: BatchState; sse: SseHub; solr: SolrClient; apiUrl: string;
         tokenBudget?: TokenBudget;
+        secrets?: SecretVault;
         log?: (message: string) => void;
     }) {
         this.apiUrl = deps.apiUrl;
@@ -110,6 +143,7 @@ export class ProcessingService {
         this.sse = deps.sse;
         this.solr = deps.solr;
         this.budget = deps.tokenBudget || null;
+        this.secrets = deps.secrets || null;
     }
 
     /**
@@ -157,6 +191,7 @@ export class ProcessingService {
         const def = service.tasks?.[task.id];
         if (!def) throw Boom.badRequest('Task not found in service: ' + task.id);
         task.name = def.name;
+        checkPageRanges(def, task);
         if (singleFile && def.system_params) task.params = def.system_params;
         if (def.description && !task.description) task.description = def.description;
         if (def.info && !task.info) task.info = def.info;
@@ -164,6 +199,22 @@ export class ProcessingService {
         if (def.params_help?.autotag) task.autotag = Boolean(task.params?.autotag);
         else if (def.autotag) task.autotag = true;
         return task;
+    }
+
+    /** A service with `api_key_source: "user"` runs on the user's own key, which every run must bring. */
+    private requireKey(service: any, apiKey: string | null | undefined): void {
+        if (service?.api_key_source === 'user' && !apiKey) throw Boom.badRequest('This service needs your own API key');
+    }
+
+    /**
+     * Puts the user's key in the in-memory vault and returns the ref that goes in the task. The key
+     * itself is never part of a payload, a message, a node or a log line (modules/secrets/vault.ts).
+     */
+    private keepKey(service: any, topic: string, apiKey: string | null | undefined, userRid: string, scope: string): string | null {
+        if (service?.api_key_source !== 'user' || !apiKey || !this.secrets) return null;
+        const ref = this.secrets.put(apiKey, { userId: userRid, topic });
+        this.secrets.bind(ref, scope);
+        return ref;
     }
 
     private async sourceFileOf(fileRid: string, userRid: string): Promise<any | null> {
@@ -175,11 +226,11 @@ export class ProcessingService {
     // ---- single file ---------------------------------------------------------------------
 
     /** POST /api/queue/{topic}/files/{rid}/{roi?}. Returns the rid as given. */
-    async queueFile(topic: string, fileRid: string, payload: any, userRid: string): Promise<string> {
+    async queueFile(topic: string, fileRid: string, payload: any, userRid: string, apiKey: string | null = null): Promise<string> {
         const service = this.service(topic);
+        this.requireKey(service, apiKey);
         const file = await this.files.metadata(fileRid, userRid);
         if (!file) throw Boom.badRequest('Target file not found: ' + fileRid);
-        if (file._status === 'importing') throw Boom.conflict('File is being imported and cannot be processed');
 
         const task = this.prepareTask(service, payload, true);
         await this.budget?.apply(service, task, userRid);
@@ -211,6 +262,9 @@ export class ProcessingService {
             event.set_process = msg.process['@rid'];
         }
         this.sse.send(userRid, event);
+        // After message.json was written: the ref is for the queued job only.
+        const ref = this.keepKey(service, topic, apiKey, userRid, msg.process['@rid']);
+        if (ref) msg.task.secret_ref = ref;
         await this.publisher.publish(queueName(service, payload, topic), msg);
         return fileRid;
     }
@@ -257,8 +311,9 @@ export class ProcessingService {
     }
 
     /** POST /api/queue/{topic}/sets/{rid}. Returns the set rid. */
-    async queueSet(topic: string, setRid: string, payload: any, userRid: string): Promise<string> {
+    async queueSet(topic: string, setRid: string, payload: any, userRid: string, apiKey: string | null = null): Promise<string> {
         const service = this.service(topic);
+        this.requireKey(service, apiKey);
         const rid = toRid(setRid);
         const task = this.prepareTask(service, payload, false);
         const prompt = isPromptTask(service, task);
@@ -266,7 +321,7 @@ export class ProcessingService {
         const set = await this.files.metadata(rid, userRid);
         if (!set || set['@type'] !== 'Set') throw Boom.notFound('Set not found');
         const listing = await this.files.setFiles(rid, userRid, { limit: 10000 });
-        const files = listing.files;
+        const files = filterSetPages(service.tasks?.[task.id], task, listing.files);
         const behaviour = resolveBehaviour(service, task);
         const taskName = task?.name || task?.id || topic;
 
@@ -341,7 +396,16 @@ export class ProcessingService {
             total_files: files.length,
         });
         this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: nodes.process, output: nodes.set });
-        this.inBackground(nodes.process['@rid'], () => this.dispatchBatchFiles({ service, task, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length }));
+        // Starts the progress bar at once; later updates come with the results.
+        this.sse.send(userRid, {
+            command: 'process_update',
+            process: { '@rid': nodes.process['@rid'], status: 'running' },
+            batch: { status: 'running', state: 'running', processed_files: 0, failed_files: 0, total_files: files.length, avg_sec_per_file: 0, eta_sec: null },
+            total_files: files.length,
+        });
+        const ref = this.keepKey(service, topic, apiKey, userRid, nodes.process['@rid']);
+        const runTask = ref ? { ...task, secret_ref: ref } : task;
+        this.inBackground(nodes.process['@rid'], () => this.dispatchBatchFiles({ service, task: runTask, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length }));
         return rid;
     }
 
@@ -480,7 +544,7 @@ export class ProcessingService {
     // ---- resume / reindex / tag sync ----------------------------------------------------
 
     /** POST /api/batches/{rid}/resume: re-dispatches the files that have no output yet. */
-    async resume(processRid: string, userRid: string): Promise<any> {
+    async resume(processRid: string, userRid: string, apiKey: string | null = null): Promise<any> {
         const rid = toRid(processRid);
         const batch = await this.batches.get(rid);
         if (!batch) throw Boom.notFound('Batch not found');
@@ -489,10 +553,12 @@ export class ProcessingService {
         if (status !== 'paused') throw Boom.conflict(`Batch is not paused (status: ${status || 'unknown'})`);
         // Refuse here, before the batch changes state, when the token budget is still used up.
         await this.budget?.choose(this.service(batch.topic), userRid);
+        // A resumed run needs the key again: the old one was dropped with the pause.
+        this.requireKey(this.service(batch.topic), apiKey);
         return { batch, rid };
     }
 
-    async redispatch(rid: string, batch: any, userRid: string): Promise<{ pending: number }> {
+    async redispatch(rid: string, batch: any, userRid: string, apiKey: string | null = null): Promise<{ pending: number }> {
         const service = this.service(batch.topic);
         let task: any = { id: batch.task_id };
         if (batch.task_payload_json) {
@@ -511,9 +577,11 @@ export class ProcessingService {
         await this.budget?.apply(service, task, userRid);
         const listing = await this.files.setFiles(batch.input_set, userRid, { limit: 10000 });
         const done = new Set(await this.batches.processedInputs(rid));
-        const pending = listing.files.filter((f: any) => !done.has(f['@rid']));
+        const pending = filterSetPages(service.tasks?.[task.id], task, listing.files).filter((f: any) => !done.has(f['@rid']));
         const current = BatchState.status(await this.batches.get(rid));
         if (current !== 'resuming' && current !== 'running') throw Boom.conflict(`Batch changed state before dispatch (status: ${current || 'unknown'})`);
+        const ref = this.keepKey(service, batch.topic, apiKey, userRid, rid);
+        if (ref) task.secret_ref = ref;
         this.inBackground(rid, () => this.dispatchBatchFiles({
             service, task, files: pending, batchRid: rid, inputSet: batch.input_set, outputSet: batch.output_set, userRid,
             total: batch.total_files || listing.files.length, startIndex: Number(batch.processed_files || 0) + 1, searchOutput: batch.search_output === true,
@@ -598,6 +666,9 @@ export class ProcessingService {
                 warnings.push({ set_rid: source.input_set, reason: (error as Error).message || 'requeue failed' });
             }
         }
+        // Descriptions of files without text were dropped with the rest of the index.
+        const described = await this.db.rows("SELECT @rid AS rid, label, type, description FROM File WHERE project_rid IN :projects AND description IS NOT NULL AND description <> '' AND type <> 'text'", { projects: [project, project.replace(/^#/, '')] });
+        for (const f of described) await this.solr.syncDescription({ rid: f.rid, label: f.label, type: f.type, project, owner: userRid }, f.description);
         return { project_rid: project, deleted: true, source_sets_found: sources.length, requeued_sets: requeuedSets, requeued_files: requeuedFiles, warnings };
     }
 }

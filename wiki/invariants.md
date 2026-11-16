@@ -74,19 +74,23 @@ removed on their own. (The old backend removed the image's whole directory when 
 
 **[verified]** — MessyDesk is a multi-user server application. CPU-intensive work (image resizing, OCR, AI inference, thumbnail generation) must be dispatched to external consumer processes via the queue, never executed inline in a request handler. Inline processing blocks the single-threaded Node.js event loop and degrades performance for all connected users. See [queue-system.md](queue-system.md).
 
-### 10. PDF upload requires active splitter service
+### 10. An uploaded PDF is an `original-pdf`; only the splitter makes `pdf`
 
-**[verified]** — `FilesService.upload` checks `ServiceRegistry.hasActiveConsumer('md-pypdf_fs')` before accepting a PDF. The file fails with a 503-type error; a single-file upload reports it as HTTP 400 with the message (as before), a multi-file upload lists it in `failed`. PDF files are automatically split into single-page PDFs on upload.
+**[verified]** — `detectType()` in `src/modules/files/metadata.ts` returns `original-pdf` for every PDF, and `FilesService.upload` stores it without needing any service. `ResultsService.handleOutput` retypes PDF outputs to `original-pdf` unless they come from `md-pypdf_fs` task `split`; those are `pdf` (one page, with `page_number`). Service matching is by `supported_types`: `md-pypdf_fs` lists `original-pdf` and is the only cruncher for it, Poppler lists `pdf`, so Poppler cannot be applied to an original PDF. Use `isPdfType()` (`src/shared/service-ids.ts`) where both count as a PDF (thumbnails, download, viewer).
 
-**Consequence**: PDF upload is blocked when the splitter is down. ZIP-extracted PDFs are stored with `processable: false` when the splitter is unavailable.
+**Consequence**: splitting is a normal user-triggered task. There is no import flow, no `processable` flag and no `importing` lock.
 
-### 11. `processable: false` restricts service matching to split-only
+### 11. The split deletes the original only through the task param
 
-**[verified]** — `servicesForNode()` in `src/modules/services/matching.ts` returns only `md-pypdf_fs` split task for files with `processable === false`. Absence of the field means processable. ZIP service ignores this flag.
+**[verified]** — `ResultsService.finishSplit` runs after the last page of an input PDF arrived (`file_count >= file_total`). It removes the original from disk and sets `_file_removed: true` unless `task.params.delete_original` is `false`. This happens also for a split of a page range. The node stays as provenance. A failed split keeps the original.
 
-### 12. Files with `_status: 'importing'` reject manual processing
+### 12. Page ranges are validated before queueing and applied by the backend for sets
 
-**[verified]** — The `_status: 'importing'` field on a File node acts as a lock during auto-split. Manual processing requests are rejected until the import completes or fails.
+**[verified]** — A task param with `format: "page_range"` is checked in `ProcessingService.prepareTask` (400 on a bad range; grammar in `src/shared/page-range.ts`, mirrored in `MD-pypdf_fs/api.py`). A param with `filter: "set_pages"` is applied in `queueSet` and on resume: only files whose `page_number` is in the range are queued, and the param is removed from the task.
+
+### 13. Grouping by original PDF is a view only
+
+**[verified]** — `origin_rid` / `origin_label` on a File (set in `NodesService.createProcessFile` / `createReferenceFile` from the file it derives from) only drive `GET /api/sets/{rid}/files?group=origin` and the set browser. Processing, lineage, tags and search do not read them. The order of the grouped view (PDFs by label, pages by `page_number`, files without a PDF last) is the one order the file viewer steps in (`order=flat`), also when grouping is switched off, so a position in the set means the same in both. The user setting `group_pdf` (`on`/`off`, default `on`) and a toggle in the set view only choose how the set browser shows it. Files made before `origin_rid` existed have none and show flat.
 
 ## File System Invariants
 

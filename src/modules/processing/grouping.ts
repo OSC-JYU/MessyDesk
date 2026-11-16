@@ -4,6 +4,7 @@
 import path from 'node:path';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { tryRid } from '../../platform/ids.ts';
+import { FILE_TYPE, isPdfType } from '../../shared/service-ids.ts';
 
 export interface FileGroup {
     source_rid: string | null;
@@ -32,11 +33,20 @@ export function sortFiles(files: any[]): any[] {
     });
 }
 
+const TEXT_SOURCE_EXTENSIONS = new Set(['txt', 'md', 'html']);
+
+/** A source document for text: an uploaded PDF, or an uploaded text file (txt, md, html). */
+function isTextSource(file: any, hasParent: boolean): boolean {
+    const type = String(file?.type || '').toLowerCase();
+    if (type === FILE_TYPE.ORIGINAL_PDF) return true;
+    return type === 'text' && !hasParent && TEXT_SOURCE_EXTENSIONS.has(String(file?.extension || '').toLowerCase());
+}
+
 /**
  * Groups files by their root source: walking DERIVED_FROM up, the topmost PDF (the "boundary"),
  * else the topmost file that is not a ZIP.
  */
-export async function groupByRootSource(db: ArcadeClient, files: any[], boundary = 'pdf', excluded = ['zip']): Promise<FileGroup[]> {
+export async function groupByRootSource(db: ArcadeClient, files: any[], boundary: 'pdf' | 'text_source' = 'pdf', excluded = ['zip']): Promise<FileGroup[]> {
     const excludedTypes = new Set(excluded.map((t) => t.toLowerCase()));
     const byRid = new Map<string, any>();
     for (const file of files || []) {
@@ -45,7 +55,7 @@ export async function groupByRootSource(db: ArcadeClient, files: any[], boundary
     }
     const parent = new Map<string, string>();
     const meta = new Map<string, any>();
-    for (const [rid, file] of byRid) meta.set(rid, { '@rid': rid, label: file.label, type: file.type, path: file.path, original_filename: file.original_filename });
+    for (const [rid, file] of byRid) meta.set(rid, { '@rid': rid, label: file.label, type: file.type, path: file.path, original_filename: file.original_filename, extension: file.extension });
 
     let frontier = [...byRid.keys()];
     const visited = new Set<string>();
@@ -64,8 +74,8 @@ export async function groupByRootSource(db: ArcadeClient, files: any[], boundary
         }
         const missing = [...new Set(sources)].filter((r) => !meta.has(r));
         if (missing.length) {
-            for (const row of await db.rowsByRids('@rid AS rid, label, type, path, original_filename', missing, "@type = 'File'")) {
-                meta.set(row.rid, { '@rid': row.rid, label: row.label, type: row.type, path: row.path, original_filename: row.original_filename });
+            for (const row of await db.rowsByRids('@rid AS rid, label, type, path, original_filename, extension', missing, "@type = 'File'")) {
+                meta.set(row.rid, { '@rid': row.rid, label: row.label, type: row.type, path: row.path, original_filename: row.original_filename, extension: row.extension });
             }
         }
     }
@@ -75,15 +85,18 @@ export async function groupByRootSource(db: ArcadeClient, files: any[], boundary
         let cursor: string | undefined = fileRid;
         let boundaryRid: string | null = null;
         let highest = fileRid;
+        let textSourceRid: string | null = null;
         for (let guard = 0; cursor && guard < 40; guard += 1) {
             const type = String(meta.get(cursor)?.type || '').toLowerCase();
+            // Nearest source going up: split pages and derived texts are passed over.
+            if (boundary === 'text_source' && !textSourceRid && isTextSource(meta.get(cursor), parent.has(cursor))) textSourceRid = cursor;
             if (!excludedTypes.has(type)) {
                 highest = cursor;
-                if (boundary === 'pdf' && type === 'pdf') boundaryRid = cursor;
+                if (boundary === 'pdf' && isPdfType(type)) boundaryRid = cursor;
             }
             cursor = parent.get(cursor);
         }
-        const root = boundaryRid || highest || fileRid;
+        const root = textSourceRid || boundaryRid || highest || fileRid;
         if (!groups.has(root)) {
             const m = meta.get(root) || {};
             groups.set(root, { source_rid: root, label: m.label || m.original_filename || file.label, type: m.type || file.type, path: m.path || null, files: [] });
@@ -107,7 +120,9 @@ function groupingDecision(service: any, task: any, isSearchOutput: boolean): { e
 /** The dispatch groups of a many-to-one run: one group per root source found in the input set. */
 export async function manyToOneGroups(db: ArcadeClient, service: any, task: any, files: any[], isSearchOutput: boolean): Promise<FileGroup[]> {
     const ordered = sortFiles(files);
+    const textSource = (task?.grouping_mode || service?.tasks?.[task?.id]?.grouping_mode) === 'text_source';
     const all: FileGroup = { source_rid: null, label: null, type: null, path: null, files: ordered };
+    if (textSource) return textSourceGroups(db, ordered);
     const decision = groupingDecision(service, task, isSearchOutput);
     if (!decision.enabled) return [all];
     const inputRids = new Set(ordered.map((f) => tryRid(f?.['@rid'])).filter(Boolean));
@@ -115,11 +130,17 @@ export async function manyToOneGroups(db: ArcadeClient, service: any, task: any,
     // Group only when the grouping sources are themselves in the input set.
     const inSet = resolved.filter((g) => g.source_rid && inputRids.has(tryRid(g.source_rid)));
     if (!inSet.length) return [all];
-    if (!decision.explicit && !inSet.some((g) => String(g.type || '').toLowerCase() === 'pdf')) return [all];
+    if (!decision.explicit && !inSet.some((g) => isPdfType(String(g.type || '').toLowerCase()))) return [all];
     const grouped = new Set<string>();
     for (const g of inSet) for (const f of g.files) { const r = tryRid(f?.['@rid']); if (r) grouped.add(r); }
     const rest = ordered.filter((f) => !grouped.has(tryRid(f?.['@rid']) || ''));
     const groups = inSet.map((g) => ({ ...g, files: sortFiles(g.files) }));
     if (rest.length) groups.push({ source_rid: null, label: null, type: null, path: null, files: rest });
     return groups;
+}
+
+/** One group per source document (original PDF or uploaded text); the source need not be in the set. */
+async function textSourceGroups(db: ArcadeClient, ordered: any[]): Promise<FileGroup[]> {
+    const groups = await groupByRootSource(db, ordered, 'text_source');
+    return groups.map((g) => ({ ...g, files: sortFiles(g.files) }));
 }

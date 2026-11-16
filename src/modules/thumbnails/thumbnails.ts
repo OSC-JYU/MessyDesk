@@ -10,7 +10,7 @@ import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { exists } from '../../platform/storage/fsutil.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
-import { PDF_THUMBNAIL_PARAMS, ROLE, SERVICE, THUMBNAIL_PARAMS } from '../../shared/service-ids.ts';
+import { PDF_THUMBNAIL_PARAMS, ROLE, SERVICE, THUMBNAIL_PARAMS, FILE_TYPE } from '../../shared/service-ids.ts';
 import type { Publisher } from '../queue/publisher.ts';
 
 export class ThumbnailService {
@@ -72,7 +72,7 @@ export class ThumbnailService {
             });
             return true;
         }
-        if (file?.type === 'pdf') {
+        if (file?.type === FILE_TYPE.PDF) {
             await this.publisher.publish(SERVICE.POPPLER, {
                 file,
                 userId: userRid,
@@ -98,7 +98,7 @@ export class ThumbnailService {
                 service: { id: SERVICE.THUMBNAILER },
                 id: SERVICE.THUMBNAILER,
             });
-        } else if (file.type === 'pdf') {
+        } else if (file.type === FILE_TYPE.PDF) {
             await this.publisher.publish(SERVICE.POPPLER, {
                 file,
                 userId: userRid,

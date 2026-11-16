@@ -3,6 +3,7 @@ import type { ServerRoute } from '@hapi/hapi';
 import type { Deps } from '../../app/deps.ts';
 import { currentUser } from '../../platform/http/auth.ts';
 import { toRid, tryRid } from '../../platform/ids.ts';
+import { COVER_TYPES, MAX_COVER_BYTES } from './covers.ts';
 
 function rid(value: string): string {
     const r = tryRid(value);
@@ -10,7 +11,7 @@ function rid(value: string): string {
     return r;
 }
 
-export function projectRoutes({ projects, deskGraph, access, nodes, graph, processing, tags, ner, deletes }: Deps): ServerRoute[] {
+export function projectRoutes({ projects, covers, deskGraph, access, nodes, graph, processing, tags, ner, deletes }: Deps): ServerRoute[] {
     return [
         {
             method: 'POST',
@@ -20,7 +21,46 @@ export function projectRoutes({ projects, deskGraph, access, nodes, graph, proce
         {
             method: 'GET',
             path: '/api/projects',
-            handler: (request) => projects.list(currentUser(request).rid),
+            handler: async (request) => {
+                const list = await projects.list(currentUser(request).rid);
+                const found = await covers.describe(list);
+                return list.map((project, i) => ({ ...project, cover: found[i] }));
+            },
+        },
+        {
+            method: 'GET',
+            path: '/api/projects/{rid}/cover',
+            handler: async (request, h) => {
+                const cover = await covers.uploaded(rid(request.params.rid), currentUser(request).rid);
+                if (!cover) throw Boom.notFound('No uploaded cover');
+                return h.file(cover.file, { confine: false }).type(cover.type);
+            },
+        },
+        {
+            method: 'PUT',
+            path: '/api/projects/{rid}/cover',
+            options: { payload: { maxBytes: MAX_COVER_BYTES, output: 'data', parse: false, allow: Object.keys(COVER_TYPES) } },
+            handler: async (request) => {
+                const type = String(request.headers['content-type']).split(';')[0];
+                await covers.setUpload(rid(request.params.rid), request.payload as Buffer, type, currentUser(request).rid);
+                return { updated: true };
+            },
+        },
+        {
+            method: 'PUT',
+            path: '/api/projects/{rid}/cover-file',
+            handler: async (request) => {
+                await covers.setFile(rid(request.params.rid), (request.payload as any)?.file, currentUser(request).rid);
+                return { updated: true };
+            },
+        },
+        {
+            method: 'DELETE',
+            path: '/api/projects/{rid}/cover',
+            handler: async (request) => {
+                await covers.reset(rid(request.params.rid), currentUser(request).rid);
+                return { updated: true };
+            },
         },
         {
             method: 'POST',

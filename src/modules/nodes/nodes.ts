@@ -7,6 +7,7 @@ import { toRid, uuidv7, ridToPathPart } from '../../platform/ids.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
 import { ensureDir, writeJson } from '../../platform/storage/fsutil.ts';
 import { EDGE, type GraphStore } from '../../shared/graph-store.ts';
+import { FILE_TYPE } from '../../shared/service-ids.ts';
 
 export interface MessageLike {
     file: any;
@@ -300,9 +301,37 @@ export class NodesService {
         return fallback;
     }
 
+    /**
+     * The original PDF an output belongs to, and the page it is, copied from the file it derives
+     * from (the set browser groups files by it without walking the graph): a split page gets the
+     * original PDF, anything made from a page inherits the page's origin and page number.
+     */
+    private async originOf(sourceRid: string | undefined): Promise<Record<string, unknown>> {
+        if (!sourceRid) return {};
+        const parent = await this.db.first(
+            `SELECT @rid AS rid, type, label, origin_rid, origin_label, page_number FROM ${toRid(sourceRid)} WHERE @type = 'File'`,
+        ).catch(() => null);
+        if (!parent) return {};
+        const origin: Record<string, unknown> = {};
+        if (parent.type === FILE_TYPE.ORIGINAL_PDF) {
+            origin.origin_rid = parent.rid;
+            origin.origin_label = parent.label;
+        } else if (parent.origin_rid) {
+            origin.origin_rid = parent.origin_rid;
+            origin.origin_label = parent.origin_label;
+            if (Number.isFinite(Number(parent.page_number))) origin.page_number = Number(parent.page_number);
+        }
+        return origin;
+    }
+
     /** File node for a process output (createProcessFileNode). */
     async createProcessFile(processRid: string, msg: MessageLike, description: string, info: string): Promise<any> {
+        const isManyToOne = String(msg.behaviour || '').toLowerCase() === 'many-to-one';
+        const fallback = msg.root_source?.['@rid']
+            || (isManyToOne ? (ridOf(msg.input_set) || ridOf(msg.set_rid) || msg.file['@rid']) : msg.file['@rid']);
+        const source = this.lineageSource(msg, fallback);
         const params: Record<string, unknown> = {
+            ...(await this.originOf(source)),
             uuid: uuidv7(),
             project_rid: msg.file.project_rid || null,
             type: msg.file.type,
@@ -319,10 +348,6 @@ export class NodesService {
         const filePath = this.layout.filePath(projectRid, node.uuid || node['@rid'], msg.file.extension);
         await this.store.setAttribute(node['@rid'], 'path', filePath);
         node.path = filePath;
-        const isManyToOne = String(msg.behaviour || '').toLowerCase() === 'many-to-one';
-        const fallback = msg.root_source?.['@rid']
-            || (isManyToOne ? (ridOf(msg.input_set) || ridOf(msg.set_rid) || msg.file['@rid']) : msg.file['@rid']);
-        const source = this.lineageSource(msg, fallback);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (source) await this.store.connectDerivedFrom(node['@rid'], source, processRid);
         if (msg.output_set) this.scheduleSetManifest(msg.output_set);
@@ -334,7 +359,9 @@ export class NodesService {
         const ref = toRid(refRid);
         const source = await this.db.first(`SELECT @rid, path, metadata, info FROM ${ref}`);
         if (!source?.path) throw new Error(`Reference source not found or missing path: ${ref}`);
+        const lineage = this.lineageSource(msg, ref);
         const params: Record<string, unknown> = {
+            ...(await this.originOf(lineage)),
             uuid: uuidv7(),
             project_rid: msg.file.project_rid || null,
             type: msg.file.type,
@@ -351,7 +378,6 @@ export class NodesService {
         await this.store.setAttribute(node['@rid'], 'path', source.path);
         node.path = source.path;
         node.ref = ref;
-        const lineage = this.lineageSource(msg, ref);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (lineage) await this.store.connectDerivedFrom(node['@rid'], lineage, processRid);
         if (msg.output_set) this.scheduleSetManifest(msg.output_set);

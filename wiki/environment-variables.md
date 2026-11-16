@@ -123,7 +123,15 @@ See [queue-system.md](architecture/queue-system.md#configuration): `QUEUE_DB_PAT
 | `MD_PATH` | — | MessyDesk root directory (required for disk mode) |
 | `CONTAINER` | — | Running in container flag |
 
+### User API keys (backend)
+
+| Variable | Default | Notes |
+|----------|---------|-------|
+| `SECRET_IDLE_MINUTES` | `360` | How long a user's API key (service `api_key_source: "user"`, held in memory only) lives without a job using it. It is also dropped when its run ends, is paused or cancelled. A backend restart forgets all keys. |
+
 ### AI Credentials (adapter-specific)
+
+Used by consumers whose service has `api_key_source: "service"` (or none): local development or one shared key. With `"user"`, the user's own key is used and these are ignored.
 
 | Variable | Notes |
 |----------|-------|

@@ -31,6 +31,7 @@ export interface CallOptions {
     service?: boolean;
     body?: unknown;
     form?: FormData;
+    rawBody?: BodyInit;
     headers?: Record<string, string>;
     raw?: boolean;
 }
@@ -52,6 +53,8 @@ export async function call<T = any>(method: string, path: string, opts: CallOpti
     let body: BodyInit | undefined;
     if (opts.form) {
         body = opts.form;
+    } else if (opts.rawBody !== undefined) {
+        body = opts.rawBody;
     } else if (opts.body !== undefined) {
         headers['content-type'] = 'application/json';
         body = JSON.stringify(opts.body);

@@ -37,6 +37,7 @@ export interface Config {
     serviceAuthLegacyMail: boolean;
     serviceRegistryPath: string;
     consumerTtlSeconds: number;
+    secretIdleMinutes: number;
     queue: {
         dbPath: string;
         maxAttempts: number;
@@ -90,6 +91,8 @@ export function loadConfig(root = process.cwd()): Config {
         serviceAuthLegacyMail: bool('SERVICE_AUTH_LEGACY_MAIL', true),
         serviceRegistryPath: str('SERVICE_REGISTRY_PATH', path.join(dataDir, 'service-registry.json')),
         consumerTtlSeconds: num('CONSUMER_TTL_SECONDS', 90),
+        // How long a user's API key (kept in memory only) lives without being used by a job.
+        secretIdleMinutes: num('SECRET_IDLE_MINUTES', 360),
         queue: {
             dbPath: str('QUEUE_DB_PATH', path.join(dataDir, 'queue.sqlite')),
             maxAttempts: num('QUEUE_DB_MAX_ATTEMPTS', 3),

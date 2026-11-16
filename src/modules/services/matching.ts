@@ -82,19 +82,9 @@ function pickTasks(service: any, extensions: string[], types: string[], filter: 
 export function servicesForNode(services: Record<string, any>, node: any, filter: string | undefined, user: any, prompts: any[]): { for_type: any[]; for_format: any[] } {
     const matches = { for_type: [] as any[], for_format: [] as any[] };
     if (!node) return matches;
-    const unprocessable = node.processable === false;
     for (const [id, service] of Object.entries<any>(services)) {
         if (service.category === 'system' || id === SERVICE.THUMBNAILER) continue;
-        const live = (service.consumers || []).length > 0;
-        if (unprocessable) {
-            // Unprocessable PDFs are only offered the splitter.
-            if (id !== SERVICE.PDF_SPLITTER || !live) continue;
-            const splitOnly = structuredClone(service);
-            splitOnly.tasks = service.tasks?.split ? { split: service.tasks.split } : {};
-            if (Object.keys(splitOnly.tasks).length) matches.for_format.push(splitOnly);
-            continue;
-        }
-        if (!live) continue;
+        if (!(service.consumers || []).length) continue;
         let picked: any;
         if (node['@type'] === 'Set') {
             if (service.set_disabled) continue;

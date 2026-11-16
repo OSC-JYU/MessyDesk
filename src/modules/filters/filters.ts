@@ -5,6 +5,7 @@
 // for a file, where the user then draws regions.
 
 import Boom from '@hapi/boom';
+import { resolveReferences } from '../files/references.ts';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { toRid, tryRid } from '../../platform/ids.ts';
 import { ensureDir } from '../../platform/storage/fsutil.ts';
@@ -68,6 +69,10 @@ export class FiltersService {
         const project = node.project_rid || projectRid;
         const allFiles = await this.nodes.setFileRids(sourceSet);
         if (!allFiles.length) throw Boom.badRequest('Input set has no files');
+        // A set of references (made by an earlier filter) is filtered through the files it points to:
+        // tags and ROI labels are on those, and are not copied to the references.
+        const actual = await resolveReferences(this.db, allFiles);
+        const lookup = [...new Set(actual.values())];
 
         let labels: string[] = [];
         if (mode !== 'untagged') {
@@ -81,8 +86,8 @@ export class FiltersService {
         // The matches are found before anything is created, so a failure leaves no half-made set.
         let matched: string[] = [];
         if (mode === 'untagged') {
-            const tagged = new Set((await this.db.rows('SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: allFiles, owner: userRid })).map((r) => r.target_rid));
-            matched = allFiles.filter((r) => !tagged.has(r));
+            const tagged = new Set((await this.db.rows('SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: lookup, owner: userRid })).map((r) => r.target_rid));
+            matched = allFiles.filter((r) => !tagged.has(actual.get(r)!));
         } else {
             // File -> the selected criteria it has (a tag's rid, or "roi:" and the ROI key).
             const byFile = new Map<string, Set<string>>();
@@ -91,26 +96,28 @@ export class FiltersService {
                 byFile.get(file)!.add(criterion);
             };
             if (selected.length) {
-                const rows = await this.db.rows('SELECT target_rid AS file_rid, entity_rid FROM TagLink WHERE target_rid IN :files AND entity_rid IN :entities AND owner = :owner', { files: allFiles, entities: selected, owner: userRid });
+                const rows = await this.db.rows('SELECT target_rid AS file_rid, entity_rid FROM TagLink WHERE target_rid IN :files AND entity_rid IN :entities AND owner = :owner', { files: lookup, entities: selected, owner: userRid });
                 for (const row of rows) if (row.file_rid && row.entity_rid) add(row.file_rid, row.entity_rid);
                 // Tags sit on the original files (not on what a model made of them), so a set
                 // without any tag cannot be filtered by tags: tell, instead of making an empty set.
-                if (mode === 'include' && !roiLabels.length && !rows.length && !(await this.db.first('SELECT @rid FROM TagLink WHERE target_rid IN :files AND owner = :owner LIMIT 1', { files: allFiles, owner: userRid }))) {
-                    throw Boom.badRequest('The files in this set have no tags. Tags are on the original files: filter the set they came from.');
+                if (mode === 'include' && !roiLabels.length && !rows.length && !(await this.db.first('SELECT @rid FROM TagLink WHERE target_rid IN :files AND owner = :owner LIMIT 1', { files: lookup, owner: userRid }))) {
+                    throw Boom.badRequest('The files in this set have no tags.');
                 }
             }
             if (roiLabels.length) {
                 const keys = roiLabels.map((r) => roiKey(r.service_id, r.task, r.model, r.label));
                 let found: Map<string, Set<string>>;
                 try {
-                    found = await this.solr.roiSources(userRid, allFiles, keys);
+                    found = await this.solr.roiSources(userRid, lookup, keys);
                 } catch (error) {
                     throw Boom.badGateway(`The search index is not available, so ROI labels cannot be used: ${(error as Error).message}`);
                 }
                 for (const [file, fileKeys] of found) for (const key of fileKeys) add(toRid(file), `roi:${key}`);
             }
-            if (mode === 'exclude') matched = allFiles.filter((r) => !byFile.has(r));
-            else for (const [file, criteria] of byFile) if (match === 'and' ? criteria.size === criteriaCount : criteria.size > 0) matched.push(file);
+            for (const member of allFiles) {
+                const criteria = byFile.get(actual.get(member)!);
+                if (mode === 'exclude' ? !criteria : criteria && (match === 'and' ? criteria.size === criteriaCount : criteria.size > 0)) matched.push(member);
+            }
         }
 
         const info = mode === 'include' ? `Tag filter include (${match.toUpperCase()}): ${labels.join(', ')}`

@@ -40,6 +40,7 @@ const PROPERTIES = [
     'CREATE PROPERTY File.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY File.set IF NOT EXISTS STRING',
     'CREATE PROPERTY File.uuid IF NOT EXISTS STRING',
+    'CREATE PROPERTY File.origin_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY Set.project_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY Entity.owner IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.target_rid IF NOT EXISTS STRING',
@@ -70,6 +71,8 @@ const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     // Composite indexes list their properties comma-separated.
     ['File', 'project_rid', 'NOTUNIQUE'],
     ['File', 'set', 'NOTUNIQUE'],
+    // The set browser groups the files of a set by the original PDF they come from.
+    ['File', 'origin_rid', 'NOTUNIQUE'],
     // New: lets a thumbnail request find its file (ownership check, plan/decisions.md B3).
     ['File', 'uuid', 'NOTUNIQUE'],
     ['Set', 'project_rid', 'NOTUNIQUE'],

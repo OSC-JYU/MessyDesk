@@ -11,7 +11,15 @@ function rid(value: string): string {
     return r;
 }
 
-export function graphRoutes({ graph, access, queue, sse, deletes }: Deps): ServerRoute[] {
+export function graphRoutes({ graph, access, queue, sse, deletes, solr }: Deps): ServerRoute[] {
+    // A changed description of a file goes to the search index.
+    async function indexDescription(node: string, userRid: string, value: unknown): Promise<void> {
+        const owned = await access.findOwned(node, userRid);
+        if (!owned || owned.node?.['@type'] !== 'File') return;
+        const { label, type } = owned.node;
+        await solr.syncDescription({ rid: node, label, type, project: owned.projectRid, owner: userRid }, typeof value === 'string' ? value : null);
+    }
+
     return [
         {
             method: 'GET',
@@ -39,6 +47,7 @@ export function graphRoutes({ graph, access, queue, sse, deletes }: Deps): Serve
                 const node = rid(request.params.rid);
                 const payload = (request.payload || {}) as { key?: string; value?: unknown };
                 const result = await graph.setAttribute(node, payload, user.rid);
+                if (payload.key === 'description') await indexDescription(node, user.rid, payload.value);
                 if (payload.key === 'description') sse.send(user.rid, { command: 'update', target: node, description: payload.value });
                 return result;
             },

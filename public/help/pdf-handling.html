@@ -12,12 +12,29 @@
     <article class="content">
       <h1>PDF Handling</h1>
 <p>MessyDesk treats PDF as a container of pages.</p>
-<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> When PDF is imported to MessyDesk, it is automatically splitted to one-page PDF files and original file is REMOVED.</p>
+<p>When you upload a PDF it is stored as it is: an <strong>original PDF</strong>. Nothing happens to it until you choose to split it. The only cruncher offered for an original PDF is <strong>PyPDF → Split PDF to pages</strong>, which makes <strong>one-page PDF files</strong> in a new set. Other PDF crunchers, such as <strong>Poppler</strong>, work on those pages.</p>
+<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> By default the original PDF is REMOVED from disk after splitting, to save space. The node stays on the desk, marked as removed. You can turn the removal off before you run the split.</p>
 </blockquote>
-<p>There are couple of reasons for this. First reason is technical. PDF files can be very large, especially when it includes digitised content. Processing large files requires lot of memory and may lead corrupted results in some cases. Splitting file to smaller units resolves this problem.</p>
+<p>There are couple of reasons for working with pages. First reason is technical. PDF files can be very large, especially when it includes digitised content. Processing large files requires lot of memory and may lead corrupted results in some cases. Splitting file to smaller units resolves this problem.</p>
 <p>Second reason is semantic. In many fields that work with digitized information, a PDF file is often used as a package that bundles multiple documents together. The reason them being in same file might be that they located in paper folder. Because of this, it makes more sense to treat individual pages as the basic processing unit rather than the entire file, while still preserving the connection to the original document.</p>
-<p>MessyDesk does exactly this. When working with PDF files that contain hundreds of pages, splitting the file into separate single-page PDFs allows processing and classification to happen at the page level.</p>
-<div class="md-note"><p class="md-note-title">NOTE</p><p>Individual pages are still connected to original file name.</p></div><h1>What is inside a PDF file?</h1>
+<p>When working with PDF files that contain hundreds of pages, splitting the file into separate single-page PDFs allows processing and classification to happen at the page level.</p>
+<div class="md-note"><p class="md-note-title">NOTE</p><p>Individual pages are still connected to the original file in the graph, and each page keeps its page number in its name (<code>page_008.pdf</code>).</p></div><h2>Splitting a PDF</h2>
+<ol>
+<li>Select the PDF and open the crunchers. Choose <strong>PyPDF → Split PDF to pages</strong>.</li>
+<li>Choose the options:<ul>
+<li><strong>Pages:</strong> which pages to split. Leave it empty to split all pages. Otherwise give a range, for example <code>1-5,8,10-</code> (pages 1 to 5, page 8, and page 10 to the end). <code>-5</code> means the first five pages.</li>
+<li><strong>Delete the original PDF after splitting:</strong> on by default. Turn it off to keep the PDF file.</li>
+</ul>
+</li>
+<li>Run it. The pages appear in a new set called &quot;PDF pages&quot;. You can also select a set of PDFs to split all of them at once.</li>
+</ol>
+<blockquote class="md-warning"><p><span class="md-warning-icon" aria-hidden="true">⚠</span> <strong>WARNING:</strong> If you split only a range of pages and delete the original, the other pages are lost for good. Turn the removal off if you may need them later. MessyDesk shows a warning when you do this.</p>
+</blockquote>
+<p>A PDF that was extracted from a ZIP file is an original PDF too, and it is split in the same way.</p>
+<h2>Working with the pages</h2>
+<p><strong>Poppler</strong> (text, page images, embedded images and PDF info) can only be applied to the pages, not to an original PDF. Select a page, or the set of pages.</p>
+<p>When you run Poppler on a set of pages you can give <strong>Pages</strong>, a range like above. Only those pages are processed. The numbers are the page numbers of the original PDF, so <code>5-8</code> means the pages <code>page_005</code> to <code>page_008</code>, wherever they are in the set. If the set holds pages of several PDFs, the range is applied to each of them. Leave it empty to process the whole set.</p>
+<h1>What is inside a PDF file?</h1>
 <p>A PDF file can contain many different kinds of content, ranging from images and forms to interactive elements and even games.</p>
 <p>A PDF may contain:</p>
 <ul>

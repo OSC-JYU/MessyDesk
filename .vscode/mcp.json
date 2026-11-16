@@ -1,0 +1,5 @@
+{
+  "servers": {
+    "csc-docs": { "type": "http", "url": "https://mcp.docs.csc.fi" }
+  }
+}

@@ -15,7 +15,7 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | GET | `/api` | user | `MessyDesk API` (session check) |
 | GET | `/api/sso` | open | `{mail, name}` from proxy headers |
 | GET | `/api/me` | user | `{rid, group, access, id, mode, settings}` |
-| PUT | `/api/me/settings` | user | partial `{theme, cookie, motion}`; 400 on unknown keys/values |
+| PUT | `/api/me/settings` | user | partial `{theme, cookie, motion, group_pdf, lineage_compare, hide_demos, desk_view}`; 400 on unknown keys/values. `hide_demos` (`on` hides the Learn MessyDesk card) and `desk_view` (`grid`, `list`) are for the front page |
 | GET / POST | `/api/users` | admin | list / create `{id, label}` (400 invalid, 409 exists) |
 | PUT | `/api/users/{rid}/service-groups` | admin | `{service_groups: []}` |
 | POST | `/api/permissions/request` | open | identity from headers; 409 when already requested or a user |
@@ -27,17 +27,24 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | Method | Path | Auth | Notes |
 |---|---|---|---|
 | POST | `/api/projects` | user | `{label, description, position}`; 400 no label, 409 duplicate label |
-| GET | `/api/projects` | user | own projects with `node_count`, `file_count`, sorted by label |
+| GET | `/api/projects` | user | own projects with `node_count`, `file_count`, sorted by label, and `cover`: `{kind: upload\|file\|first-image, url, file?}` or `null` when the desk has no image |
 | PUT | `/api/projects/{rid}` | user | `{key: label, description or position, value}` |
 | DELETE | `/api/projects/{rid}` | user | cascade delete; returns the rid |
 | GET | `/api/projects/{rid}` | user | desk graph `{nodes, edges}` (Vue Flow) |
 | POST | `/api/projects/update-size` | user | recompute sizes from disk |
 | GET | `/api/projects/storage-summary` | user | `{used_mb, quota_gb, quota_mb, used_percent}` |
+| PUT | `/api/projects/{rid}/cover` | user | image body (PNG, JPEG, WebP, at most 2 MB): the uploaded cover, kept as `cover.<ext>` in the desk directory |
+| PUT | `/api/projects/{rid}/cover-file` | user | `{file}`: an image file of the desk whose thumbnail is the cover; 404 for other desks' files, 400 for non-images |
+| DELETE | `/api/projects/{rid}/cover` | user | back to the default, the first image of the desk |
+| GET | `/api/projects/{rid}/cover` | user | the uploaded cover; 404 when there is none |
 | POST | `/api/projects/{rid}/sets` | user | create a set |
 | POST | `/api/projects/{rid}/sources` | user | create a Source; queues `init` to `md-<type>` |
 | POST | `/api/projects/{rid}/reindex-search` | user | drop the desk's search docs and re-queue indexing |
 | POST | `/api/projects/{rid}/upload/{set?}` | user | multipart `file` (several only into a set). One file returns the node (errors as 400), several return `{uploaded, failed, total}`. 409 when the set was already processed |
-| GET | `/api/sets/{rid}/files` | user | `{file_count, limit, skip, files}` with `thumb`, `entities` |
+| GET | `/api/sets/{rid}/files` | user | `{file_count, limit, skip, files}` with `thumb`, `entities`, ordered by label. `?group=origin` groups by the original PDF (see below) |
+| GET | `/api/sets/{rid}/files?group=origin` | user | top level: `{grouped: true, file_count, entries_total, groups_total, files_offset, entries}`: `entries` are PDF cards `{kind: 'group', origin_rid, origin_label, count, cover}` (the cover is the first page, a normal file with `thumb`), then the files that come from no PDF. A set that is not worth grouping (nothing from a PDF, or everything from one PDF) answers like `order=flat` with `grouped: false` |
+| GET | `/api/sets/{rid}/files?group=origin&origin={rid}` | user | the files of one PDF by `page_number`: `{grouped: true, file_count, set_total, offset, origin: {rid, label}, files}` (`offset`: position of its first file in the whole set; `origin: null` when the PDF is not in the set) |
+| GET | `/api/sets/{rid}/files?group=origin&order=flat` | user | the whole set in the grouped order (PDFs by label, pages by `page_number`, files without a PDF last). The file viewer steps through this |
 | POST | `/api/sets/{rid}/thumbnails` | user | re-queue thumbnails, 202 |
 | POST | `/api/sets/{rid}/files/zip/jobs` | user/service | ZIP export job, 202 `{job_id, status, status_url, download_url}` |
 | GET | `/api/sets/{rid}/files/zip` | user/service | same, with a `message` |
@@ -140,6 +147,24 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | GET / POST / PUT / DELETE | `/api/service-groups[/{id}]` | admin | |
 | POST | `/api/service-groups/{id}/logo` | admin | resized by md-sharp |
 | GET | `/api/service-groups/{id}/logo` | user | PNG |
+
+## Demos
+
+Demo desks (see `proposals/demo-project.md`, `proposals/demo-project-format.md`). Stored under `<DATA_DIR>/demos/<id>/`.
+
+| Method | Path | Auth | Notes |
+|---|---|---|---|
+| GET | `/api/demos` | user | demos the user may see (shared with everyone, with one of the user's service groups, or with the user): id, version, title, description (language to text), `has_cover` |
+| GET | `/api/demos/{id}/cover` | user | the cover image |
+| POST | `/api/demos/{id}/import` | user | copies the demo into a new desk of the user; returns `{project, nodes, files}`. No service runs |
+| GET | `/api/admin/demos` | admin | all demos with `service_groups` and `users` |
+| POST | `/api/admin/demos` | admin | `{project, title, description, service_groups, users}`: a new demo from a desk the admin owns |
+| POST | `/api/admin/demos/upload` | admin | body is a bundle zip; `?meta=<json>` with the same fields (title defaults to the bundle's) |
+| PUT | `/api/admin/demos/{id}` | admin | change title, description, `service_groups`, `users` |
+| POST | `/api/admin/demos/{id}/export` | admin | `{project}`: replaces the bundle and raises `version`; imported desks are not changed |
+| PUT | `/api/admin/demos/{id}/cover` | admin | image body (PNG, JPEG, WebP, at most 2 MB) |
+| GET | `/api/admin/demos/{id}/bundle` | admin | downloads the zip |
+| DELETE | `/api/admin/demos/{id}` | admin | |
 
 ## Events
 

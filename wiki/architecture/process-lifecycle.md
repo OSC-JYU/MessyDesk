@@ -5,7 +5,7 @@ This document describes how a file processing job flows from user action to resu
 ## Overview
 
 ```
-User triggers pipeline (or auto-import triggers for PDFs)
+User triggers pipeline
     ↓
 Backend creates Process node in graph
     ↓
@@ -24,14 +24,9 @@ Backend materializes output files in graph + filesystem
 Backend sends SSE update to UI
 ```
 
-### Auto-Import (PDF)
+### PDF split
 
-PDF files bypass the manual trigger step. On upload, `afterFileCreated()` in `src/modules/import/import.ts` automatically:
-1. Creates a Process node with `role: 'import'`
-2. Creates an output Set for pages
-3. Publishes a split job to `md-pypdf_fs`
-
-The file shows "Importing…" in the UI. On completion, the original file is deleted from disk (if `delete_original` is true) and `_file_removed: true` is set on the node.
+An uploaded PDF (type `original-pdf`) is not processed automatically. The user runs **PyPDF → Split PDF to pages** like any other cruncher (`one-to-many`, on a file or on a set of PDFs). Params: `pages` (page range, empty = all pages) and `delete_original` (default on). The output set "PDF pages" holds `pdf` files (one page each, with `page_number`). When the last page of an input PDF has arrived, `finishSplit()` in `src/modules/results/results.ts` removes the original from disk and sets `_file_removed: true` (unless `delete_original` is false). Poppler tasks run on those pages and take a `pages` range that filters the set by `page_number` (see [invariants](../invariants.md) 10-12).
 
 ## Step 1: Trigger
 

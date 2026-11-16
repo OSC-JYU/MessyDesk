@@ -4,6 +4,8 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { imageSize } from 'image-size';
+import { FILE_TYPE, isPdfType } from '../../shared/service-ids.ts';
+import type { ArcadeClient } from '../../platform/arcade/client.ts';
 
 export const TEXT_LIKE_TYPES = ['text', 'html', 'json', 'csv'];
 
@@ -14,7 +16,7 @@ export function detectType(filename: string, mimeType: string | undefined): stri
     const major = mime.split('/')[0];
     if (mime === 'application/zip' || extension === '.zip') return 'zip';
     if (major === 'image') return 'image';
-    if (mime === 'application/pdf' || extension === '.pdf') return 'pdf';
+    if (mime === 'application/pdf' || extension === '.pdf') return FILE_TYPE.ORIGINAL_PDF;
     if (mime === 'application/octet-stream' || extension === '.csv') return extension === '.csv' ? 'csv' : undefined;
     if (mime === 'application/json' || extension === '.json') return 'json';
     if (mime === 'application/html' || extension === '.html') return 'html';
@@ -84,8 +86,17 @@ export async function textDescription(filePath: string, fileType: string): Promi
     }
 }
 
+/** The first two text snippets of a set, as shown on its node. */
+export async function setTextSamples(db: ArcadeClient, setRid: string): Promise<Array<{ label: string; text: string }>> {
+    const rows = await db.rows("SELECT label, info FROM File WHERE set = :set AND type = 'text' AND info IS NOT NULL AND info <> '' ORDER BY label LIMIT 2", { set: setRid });
+    return rows.map((r) => {
+        const raw = String(r.info).trim();
+        return { label: r.label || '', text: raw.length > 280 ? `${raw.slice(0, 280)}...` : raw };
+    });
+}
+
 export function contentTypeFor(file: { type?: string; extension?: string; label?: string }): { type?: string; disposition?: string } {
-    if (file.type === 'pdf') return { type: 'application/pdf', disposition: `inline; filename=${file.label}` };
+    if (isPdfType(file.type)) return { type: 'application/pdf', disposition: `inline; filename=${file.label}` };
     // Images are always labelled image/png (old behaviour, plan/decisions.md C3).
     if (file.type === 'image') return { type: 'image/png' };
     if (file.extension === 'csv') return { type: 'text/csv; charset=utf-8' };

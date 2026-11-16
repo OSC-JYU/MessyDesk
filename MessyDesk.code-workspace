@@ -1,0 +1,29 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../MessyDesk-UI"
+		},
+		{
+			"path": "../MD-consumers"
+		},
+		{
+			"path": "../../roihu"
+		},
+		{
+			"path": "../MD-roihu-slurm"
+		},
+		{
+			"path": "../MD-Gliner2"
+		},
+		{
+			"path": "../MD-MiniSBD"
+		},
+		{
+			"path": "../MD-text-base_fs"
+		}
+	],
+	"settings": {}
+}

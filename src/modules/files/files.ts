@@ -11,16 +11,16 @@ import { toRid } from '../../platform/ids.ts';
 import type { SseHub } from '../../platform/sse/hub.ts';
 import { exists, fileSizeMb, moveFile, writeStream } from '../../platform/storage/fsutil.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
-import type { GraphStore } from '../../shared/graph-store.ts';
-import { SERVICE } from '../../shared/service-ids.ts';
+import { sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
+import { FILE_TYPE, SERVICE, isPdfType } from '../../shared/service-ids.ts';
+import { entryWindow, flatSegments, isGrouped, sortGroups, type GroupRow } from './set-groups.ts';
 import type { AccessService } from '../access/access.ts';
-import type { ImportPipeline } from '../import/import.ts';
 import type { NodesService } from '../nodes/nodes.ts';
 import type { DeskGraph } from '../projects/desk-graph.ts';
 import type { ServiceRegistry } from '../services/registry.ts';
 import type { TagsService } from '../tags/tags.ts';
 import type { ThumbnailService } from '../thumbnails/thumbnails.ts';
-import { TEXT_LIKE_TYPES, detectType, imageMetadata, textDescription } from './metadata.ts';
+import { TEXT_LIKE_TYPES, detectType, imageMetadata, setTextSamples, textDescription } from './metadata.ts';
 
 export interface UploadPart extends Readable {
     hapi: { filename: string; headers: Record<string, string> };
@@ -28,7 +28,6 @@ export interface UploadPart extends Readable {
 
 export interface UploadOptions {
     noThumbnails: boolean;
-    deleteOriginal: boolean;
 }
 
 export class FilesService {
@@ -40,7 +39,6 @@ export class FilesService {
     private readonly tags: TagsService;
     private readonly thumbnails: ThumbnailService;
     private readonly registry: ServiceRegistry;
-    private readonly importPipeline: ImportPipeline;
     private readonly deskGraph: DeskGraph;
     private readonly sse: SseHub;
     private readonly apiUrl: string;
@@ -48,7 +46,7 @@ export class FilesService {
 
     constructor(deps: {
         db: ArcadeClient; store: GraphStore; layout: DataLayout; access: AccessService; nodes: NodesService; tags: TagsService;
-        thumbnails: ThumbnailService; registry: ServiceRegistry; importPipeline: ImportPipeline; deskGraph: DeskGraph; sse: SseHub;
+        thumbnails: ThumbnailService; registry: ServiceRegistry; deskGraph: DeskGraph; sse: SseHub;
         apiUrl: string; maxVersionTextBytes: number;
     }) {
         this.db = deps.db;
@@ -59,7 +57,6 @@ export class FilesService {
         this.tags = deps.tags;
         this.thumbnails = deps.thumbnails;
         this.registry = deps.registry;
-        this.importPipeline = deps.importPipeline;
         this.deskGraph = deps.deskGraph;
         this.sse = deps.sse;
         this.apiUrl = deps.apiUrl;
@@ -111,9 +108,6 @@ export class FilesService {
                 const type = detectType(filename, part.hapi?.headers?.['content-type']);
                 if (!type) throw Boom.badRequest(`Could not determine file type for ${filename}`);
                 if (requiredType && type.toLowerCase() !== requiredType) throw Boom.badRequest(`Set accepts only ${requiredType} files`);
-                if (type === 'pdf' && !this.registry.hasActiveConsumer(SERVICE.PDF_SPLITTER)) {
-                    throw Boom.serverUnavailable('PDF import requires the md-pypdf_fs splitter service to be running');
-                }
                 uploaded.push(await this.uploadOne(project, setParam, part, type, userRid, opts));
                 if (!requiredType) requiredType = type.toLowerCase();
             } catch (error) {
@@ -147,7 +141,10 @@ export class FilesService {
         }
         node._type = type;
         this.sse.send(userRid, { command: 'add', type, node, image: 'api/thumbnails', set: setParam });
-        if (type === 'pdf') await this.importPipeline.afterFileCreated(node, { userId: userRid, delete_original: opts.deleteOriginal });
+        if (setParam && type === 'text') {
+            const set = toRid(setParam);
+            this.sse.send(userRid, { command: 'update', target: set, node: { text_samples: await setTextSamples(this.db, set) } });
+        }
         return node;
     }
 
@@ -201,6 +198,8 @@ export class FilesService {
         if (!file || file['@type'] !== 'File') throw Boom.notFound('File not found');
         const managed = this.managedPath(file.path);
         if (!(await exists(managed))) throw Boom.notFound('File path not found');
+        // A note is written in place: no original to revert to, and it is not an "edited" file.
+        if (file.note === true && typeof payload?.content === 'string') return this.saveNote(file, managed, payload.content, userRid);
         const backup = `${managed}.original`;
         const upload = payload?.file;
         const hasUpload = upload && typeof upload.pipe === 'function';
@@ -225,12 +224,40 @@ export class FilesService {
         }
         const edited = { task: hasUpload ? (payload.operation || 'upload-edit') : 'text-edit', time: new Date().toISOString(), user: userRid };
         await this.store.setAttribute(file['@rid'], 'edited', edited);
+        await this.tags.setSystemTag(file['@rid'], 'edited', userRid, true).catch(() => null);
         await this.refreshMetadata(file);
         await this.thumbnails.refresh(file, userRid);
         this.sse.send(userRid, { command: 'update', target: file['@rid'], node: { edited, thumbnail_version: Date.now() } });
         const updated = await this.metadata(file['@rid'], userRid);
         updated.edited = edited;
         return updated;
+    }
+
+    private async saveNote(note: any, managed: string, content: string, userRid: string): Promise<any> {
+        if (Buffer.byteLength(content, 'utf8') > this.maxVersionTextBytes) throw Boom.badRequest('Text payload exceeds size limit');
+        const staging = `${managed}.editing.${randomUUID()}`;
+        try {
+            await fsp.writeFile(staging, content, 'utf8');
+            await fsp.rename(staging, managed);
+        } catch (error) {
+            await fsp.rm(staging, { force: true });
+            throw error;
+        }
+        await this.refreshMetadata(note);
+        await this.syncNoteTag(note, managed, userRid);
+        return this.metadata(note['@rid'], userRid);
+    }
+
+    /** The file a note is about has the system tag "Has note" while the note has text. */
+    private async syncNoteTag(note: any, notePath: string, userRid: string): Promise<void> {
+        try {
+            const parent = await sourceFileOf<any>(this.db, note['@rid'], '@rid AS rid');
+            if (!parent?.rid) return;
+            const hasText = (await fsp.readFile(notePath, 'utf8')).trim().length > 0;
+            await this.tags.setSystemTag(parent.rid, 'Has note', userRid, hasText);
+        } catch {
+            // The tag is a convenience: a failure must not fail saving the note.
+        }
     }
 
     async revert(fileRid: string, userRid: string): Promise<any> {
@@ -242,6 +269,7 @@ export class FilesService {
         await fsp.rm(managed, { force: true });
         await moveFile(backup, managed);
         await this.store.removeAttribute(file['@rid'], 'edited');
+        await this.tags.setSystemTag(file['@rid'], 'edited', userRid, false).catch(() => null);
         await this.refreshMetadata(file);
         await this.thumbnails.refresh(file, userRid);
         this.sse.send(userRid, { command: 'update', target: file['@rid'], node: { edited: null, thumbnail_version: Date.now() } });
@@ -251,23 +279,88 @@ export class FilesService {
     // ---- sets --------------------------------------------------------------------------
 
     /** GET /api/sets/{rid}/files: a page of members ordered by label, with thumbnails and entities. */
-    async setFiles(setRid: string, userRid: string, params: { skip?: unknown; limit?: unknown; thumbnails?: boolean }): Promise<any> {
+    async setFiles(setRid: string, userRid: string, params: { skip?: unknown; limit?: unknown; thumbnails?: boolean; group?: unknown; origin?: unknown; order?: unknown }): Promise<any> {
+        if (params.group === 'origin') return this.groupedSetFiles(setRid, userRid, params);
         const skip = /^-?\d+$/.test(String(params.skip ?? '')) ? Number(params.skip) : 0;
         const limit = /^-?\d+$/.test(String(params.limit ?? '')) ? Number(params.limit) : 10;
         const rid = toRid(setRid);
         if (!(await this.access.canRead(rid, userRid))) throw Boom.notFound('Set not found');
         const count = await this.db.first('SELECT count(*) AS file_count FROM File WHERE set = :set', { set: rid });
         const files = await this.db.rows('SELECT FROM File WHERE set = :set ORDER BY label SKIP :skip LIMIT :limit', { set: rid, skip, limit });
-        if (params.thumbnails) {
-            const entities = await this.tags.entitiesForFiles(files.map((f) => f['@rid']));
-            for (const file of files) {
-                if (file.path && (file.type !== 'pdf' || await this.deskGraph.usePdfThumbnail(file))) {
-                    file.thumb = this.apiUrl + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
-                }
-                file.entities = entities.get(file['@rid']) || [];
-            }
-        }
+        if (params.thumbnails) await this.decorate(files);
         return { file_count: Number(count?.file_count || 0), limit, skip, files };
+    }
+
+    /** Adds the thumbnail url and the tags to the files of a listing. */
+    private async decorate(files: any[]): Promise<void> {
+        const entities = await this.tags.entitiesForFiles(files.map((f) => f['@rid']));
+        for (const file of files) {
+            if (file.path && (!isPdfType(file.type) || await this.deskGraph.usePdfThumbnail(file))) {
+                file.thumb = this.apiUrl + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
+            }
+            file.entities = entities.get(file['@rid']) || [];
+        }
+    }
+
+    /**
+     * The set browser's grouped listing (`group=origin`): one card per original PDF with its
+     * first page as the cover, then the files that come from no PDF. `origin` lists the files of
+     * one PDF; `order=flat` lists the whole set in the grouped order (what the file viewer steps
+     * through). A set that is not worth grouping answers like the flat listing, with `grouped: false`.
+     */
+    private async groupedSetFiles(setRid: string, userRid: string, params: { skip?: unknown; limit?: unknown; origin?: unknown; order?: unknown }): Promise<any> {
+        const skip = /^\d+$/.test(String(params.skip ?? '')) ? Number(params.skip) : 0;
+        const limit = /^\d+$/.test(String(params.limit ?? '')) ? Number(params.limit) : 10;
+        const rid = toRid(setRid);
+        if (!(await this.access.canRead(rid, userRid))) throw Boom.notFound('Set not found');
+        const groupRows = await this.db.rows(
+            'SELECT origin_rid, origin_label, count(*) AS n FROM File WHERE set = :set AND origin_rid IS NOT NULL GROUP BY origin_rid, origin_label',
+            { set: rid },
+        );
+        const groups = sortGroups(groupRows.map((r) => ({ ...r, count: r.n })));
+        const ungrouped = Number((await this.db.first('SELECT count(*) AS n FROM File WHERE set = :set AND origin_rid IS NULL', { set: rid }))?.n || 0);
+        const total = groups.reduce((sum, g) => sum + g.count, 0) + ungrouped;
+        const pages = 'ORDER BY page_number, label SKIP :skip LIMIT :limit';
+
+        if (params.origin) {
+            const origin = toRid(String(params.origin));
+            const group = groups.find((g) => g.origin_rid === origin);
+            const files = group && limit > 0 ? await this.db.rows(`SELECT FROM File WHERE set = :set AND origin_rid = :origin ${pages}`, { set: rid, origin, skip, limit }) : [];
+            await this.decorate(files);
+            // `offset`: where the group starts in the whole set (the position of its first file in the flat order)
+            const offset = groups.slice(0, groups.indexOf(group as GroupRow)).reduce((sum, g) => sum + g.count, 0);
+            return { grouped: true, file_count: group?.count || 0, set_total: total, limit, skip, files, offset, origin: group ? { rid: group.origin_rid, label: group.origin_label } : null };
+        }
+
+        // The whole set in the grouped order: what the file viewer steps through, and the listing
+        // of a set that is not grouped (so its order is the same).
+        if (params.order === 'flat' || !isGrouped(groups, ungrouped)) {
+            const files: any[] = [];
+            for (const segment of flatSegments(groups, ungrouped, skip, limit)) {
+                files.push(...await this.db.rows(
+                    segment.origin
+                        ? `SELECT FROM File WHERE set = :set AND origin_rid = :origin ${pages}`
+                        : 'SELECT FROM File WHERE set = :set AND origin_rid IS NULL ORDER BY label SKIP :skip LIMIT :limit',
+                    { set: rid, origin: segment.origin, skip: segment.skip, limit: segment.limit },
+                ));
+            }
+            await this.decorate(files);
+            return { grouped: isGrouped(groups, ungrouped), file_count: total, limit, skip, files };
+        }
+        const window = entryWindow(groups, ungrouped, skip, limit);
+        const entries: any[] = [];
+        for (const group of window.groups) {
+            const cover = await this.db.first('SELECT FROM File WHERE set = :set AND origin_rid = :origin ORDER BY page_number, label LIMIT 1', { set: rid, origin: group.origin_rid });
+            if (cover) await this.decorate([cover]);
+            entries.push({ kind: 'group', origin_rid: group.origin_rid, origin_label: group.origin_label, count: group.count, cover });
+        }
+        if (window.fileLimit > 0) {
+            const files = await this.db.rows('SELECT FROM File WHERE set = :set AND origin_rid IS NULL ORDER BY label SKIP :skip LIMIT :limit', { set: rid, skip: window.fileSkip, limit: window.fileLimit });
+            await this.decorate(files);
+            entries.push(...files);
+        }
+        // `files_offset`: the position of the first file without an origin in the whole set
+        return { grouped: true, file_count: total, entries_total: groups.length + ungrouped, groups_total: groups.length, files_offset: total - ungrouped, limit, skip, entries };
     }
 
     /** Re-queues thumbnails for every image and PDF of a set. */
@@ -289,7 +382,7 @@ export class FilesService {
                 if (await this.thumbnails.refresh(file, userRid)) {
                     queued += 1;
                     if (file.type === 'image') byType.image += 1;
-                    if (file.type === 'pdf') byType.pdf += 1;
+                    if (file.type === FILE_TYPE.PDF) byType.pdf += 1;
                 } else skipped += 1;
             }
             skip += page.files.length;

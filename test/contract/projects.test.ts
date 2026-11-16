@@ -181,11 +181,11 @@ test('multi-file upload onto the desk is rejected', async () => {
     assert.equal(res.status, 400);
 });
 
-test('PDF upload needs the splitter (single upload reports it as 400)', async () => {
+test('a PDF upload is stored as an original PDF, without a splitter', async () => {
     const project = await createProject();
     const res = await upload(project['@rid'], [{ name: 'x.pdf', type: 'application/pdf', content: '%PDF-1.4' }]);
-    assert.equal(res.status, 400);
-    assert.match(res.body.message, /md-pypdf_fs/);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.type, 'original-pdf');
 });
 
 test('upload to an unknown or foreign project is 404', async () => {
@@ -367,4 +367,49 @@ test('old: PUT /api/files/{rid} is a no-op returning the node', { skip: onlyOld 
     const res = await put(`/api/files/${stripHash(file['@rid'])}`, { label: 'y' });
     assert.equal(res.status, 200);
     assert.equal(res.body.label, 'x.txt');
+});
+
+test('desk cover: first image by default, a chosen file, an upload, back to default', { skip: onlyNew }, async () => {
+    const desk = await createProject(uniq('Cover'));
+    const rid = stripHash(desk['@rid']);
+    const coverOf = async () => (await get('/api/projects')).body.find((p: any) => p['@rid'] === desk['@rid']).cover;
+    assert.equal(await coverOf(), null, 'a desk without images has no cover');
+
+    const first = (await upload(desk['@rid'], [{ name: 'a.png', type: 'image/png', content: PNG_1x1 }])).body;
+    const second = (await upload(desk['@rid'], [{ name: 'b.png', type: 'image/png', content: PNG_1x1 }])).body;
+    const auto = await coverOf();
+    assert.equal(auto.kind, 'first-image');
+    assert.equal(auto.file, first['@rid']);
+    assert.match(auto.url, /api\/thumbnails\//);
+
+    const chosen = await put(`/api/projects/${rid}/cover-file`, { file: second['@rid'] });
+    assert.equal(chosen.status, 200, chosen.text);
+    const picked = await coverOf();
+    assert.equal(picked.kind, 'file');
+    assert.equal(picked.file, second['@rid']);
+
+    // Only images of your own desk can be the cover.
+    const text = (await upload(desk['@rid'], [{ name: 'n.txt', type: 'text/plain', content: 'x' }])).body;
+    assert.equal((await put(`/api/projects/${rid}/cover-file`, { file: text['@rid'] })).status, 400);
+    const foreign = await createProject();
+    const alien = (await upload(foreign['@rid'], [{ name: 'c.png', type: 'image/png', content: PNG_1x1 }])).body;
+    assert.equal((await put(`/api/projects/${rid}/cover-file`, { file: alien['@rid'] })).status, 404);
+
+    const uploaded = await call('PUT', `/api/projects/${rid}/cover`, { headers: { 'content-type': 'image/png' }, rawBody: PNG_1x1 });
+    assert.equal(uploaded.status, 200, uploaded.text);
+    const own = await coverOf();
+    assert.equal(own.kind, 'upload');
+    const image = await call('GET', `/api/projects/${rid}/cover`, { raw: true });
+    assert.equal(image.status, 200);
+    assert.match(image.headers.get('content-type') || '', /image\/png/);
+    const bad = await call('PUT', `/api/projects/${rid}/cover`, { headers: { 'content-type': 'image/gif' }, rawBody: PNG_1x1 });
+    assert.ok(bad.status >= 400);
+
+    assert.equal((await del(`/api/projects/${rid}/cover`)).status, 200);
+    assert.equal((await coverOf()).kind, 'first-image');
+    assert.equal((await call('GET', `/api/projects/${rid}/cover`, { raw: true })).status, 404);
+
+    // The description is saved with the desk.
+    assert.equal((await put(`/api/projects/${rid}`, { key: 'description', value: 'About this desk' })).status, 200);
+    assert.equal((await get('/api/projects')).body.find((p: any) => p['@rid'] === desk['@rid']).description, 'About this desk');
 });

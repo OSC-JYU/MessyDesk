@@ -8,6 +8,13 @@ export interface SolrOptions {
     log?: (message: string) => void;
 }
 
+/** `process` value of a document that holds only a file's description. */
+export const DESCRIPTION_DOC = 'description';
+
+export function descriptionDocId(fileRid: string): string {
+    return `${String(fileRid).replace('#', '')}:${DESCRIPTION_DOC}`;
+}
+
 export function escapeSolrValue(value: unknown): string {
     return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -140,7 +147,8 @@ export class SolrClient {
         const rows = Number.isFinite(parsedRows) && parsedRows > 0 ? Math.min(1000, Math.floor(parsedRows)) : 250;
         const requested = Array.isArray(data?.project_rids) ? data.project_rids : (data?.project_rid ? [data.project_rid] : []);
         const projects = Array.from(new Set(requested.flatMap(projectRidVariants).filter(Boolean)));
-        const fq = [`owner:"${escapeSolrValue(userRid)}"`, 'type:"text"'];
+        // Text documents, and the description-only documents of other files.
+        const fq = [`owner:"${escapeSolrValue(userRid)}"`, `(type:"text" OR process:"${DESCRIPTION_DOC}")`];
         if (projects.length === 1) fq.push(`project:"${escapeSolrValue(projects[0])}"`);
         else if (projects.length > 1) fq.push(`(${projects.map((rid) => `project:"${escapeSolrValue(rid)}"`).join(' OR ')})`);
         if (!query) return [];
@@ -363,6 +371,41 @@ export class SolrClient {
         } catch (error) {
             this.log(`Solr tag update error: ${(error as Error).message}`);
             return null;
+        }
+    }
+
+    /**
+     * Keeps a file's user description searchable. Documents of the file's text index get the new
+     * description; a file without text (an image, for example) gets a description-only document,
+     * so it can be found by it too.
+     */
+    async syncDescription(file: { rid: string; label?: string; type?: string; project?: string; owner: string }, description: string | null): Promise<void> {
+        const text = description && description.trim() ? description : null;
+        try {
+            const found = await this.getJson('/select', new URLSearchParams({ q: `node:"${escapeSolrValue(file.rid)}"`, fl: 'id', rows: '1000', wt: 'json' }));
+            const updates: Array<Record<string, unknown>> = [];
+            for (const { id } of found?.response?.docs || []) {
+                if (id === descriptionDocId(file.rid)) continue;
+                const doc = (await this.getJson('/get', new URLSearchParams({ id, wt: 'json' })))?.doc;
+                if (!doc) continue;
+                const merged: Record<string, unknown> = {};
+                for (const key of Object.keys(doc)) if (!key.startsWith('_')) merged[key] = doc[key];
+                if (text) merged.description = text;
+                else delete merged.description;
+                updates.push(merged);
+            }
+            if (updates.length) await this.postJson('/update?commit=true', updates);
+            if (String(file.type).toLowerCase() === 'text') return;
+            if (!text) {
+                await this.deleteByQuery(`id:"${escapeSolrValue(descriptionDocId(file.rid))}"`);
+                return;
+            }
+            await this.postJson('/update?commit=true', [{
+                id: descriptionDocId(file.rid), label: file.label || '', owner: file.owner, node: file.rid,
+                process: DESCRIPTION_DOC, project: file.project || '', type: file.type || 'file', description: text,
+            }]);
+        } catch (error) {
+            this.log(`Solr description sync error: ${(error as Error).message}`);
         }
     }
 }

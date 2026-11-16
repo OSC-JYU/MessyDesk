@@ -12,17 +12,19 @@ import type { AccessService } from '../modules/access/access.ts';
 import type { BatchState } from '../modules/batches/batch-state.ts';
 import type { FilesService } from '../modules/files/files.ts';
 import type { FiltersService } from '../modules/filters/filters.ts';
+import type { DemosService } from '../modules/demos/demos.ts';
 import type { BackgroundDeletes } from '../modules/graph/deletes.ts';
 import type { GraphService } from '../modules/graph/graph.ts';
-import type { ImportPipeline } from '../modules/import/import.ts';
 import type { NodesService } from '../modules/nodes/nodes.ts';
 import type { ProcessingService } from '../modules/processing/processing.ts';
 import type { DeskGraph } from '../modules/projects/desk-graph.ts';
+import type { ProjectCovers } from '../modules/projects/covers.ts';
 import type { ProjectsService } from '../modules/projects/projects.ts';
 import type { PromptsService } from '../modules/prompts/prompts.ts';
 import type { Publisher } from '../modules/queue/publisher.ts';
 import type { JobQueue } from '../modules/queue/queue.ts';
 import type { ResultsService } from '../modules/results/results.ts';
+import type { SecretVault } from '../modules/secrets/vault.ts';
 import type { RoisService } from '../modules/rois/rois.ts';
 import type { ServiceGroupsService } from '../modules/service-groups/service-groups.ts';
 import type { TokenBudget } from '../modules/usage/token-budget.ts';
@@ -50,6 +52,7 @@ export interface Deps {
     access: AccessService;
     users: UsersService;
     projects: ProjectsService;
+    covers: ProjectCovers;
     deskGraph: DeskGraph;
     nodes: NodesService;
     graph: GraphService;
@@ -57,7 +60,6 @@ export interface Deps {
     files: FilesService;
     thumbnails: ThumbnailService;
     zipJobs: ZipJobs;
-    importPipeline: ImportPipeline;
     registry: ServiceRegistry;
     serviceHelp: ServiceHelp;
     processing: ProcessingService;
@@ -70,4 +72,6 @@ export interface Deps {
     prompts: PromptsService;
     serviceGroups: ServiceGroupsService;
     tokenBudget: TokenBudget;
+    secrets: SecretVault;
+    demos: DemosService;
 }

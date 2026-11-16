@@ -2,7 +2,9 @@
 
 **Status**: Draft  
 **Date**: 2026-08-17  
-**Depends on**: [pdf-auto-import](pdf-auto-import.md)
+**Depends on**: [pdf-split-as-cruncher](pdf-split-as-cruncher.md) (replaces `pdf-auto-import` (removed))
+
+> **Note (2026-11-05)**: PDFs are no longer split on upload, so adding a PDF to a Set needs no special handling; it is an `original-pdf` file like any other. The open questions below apply only if automatic splitting is brought back.
 
 ## Problem
 
@@ -25,7 +27,7 @@ When a user adds files to an existing Set (or extracts a ZIP containing mixed ty
 
 ## Constraints
 
-- Must not break the core auto-import flow defined in [pdf-auto-import](pdf-auto-import.md).
+- Must not break the core auto-import flow defined in `pdf-auto-import` (removed).
 - Must handle the case where splitter becomes unavailable mid-batch.
 - The `afterFileCreated` function is already the single entry point — the decision is about Set membership of outputs.
 

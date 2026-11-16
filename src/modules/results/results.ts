@@ -18,11 +18,10 @@ import { exists, moveFile, writeJson } from '../../platform/storage/fsutil.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
-import { ROLE, SERVICE } from '../../shared/service-ids.ts';
+import { FILE_TYPE, ROLE, SERVICE, isPdfType } from '../../shared/service-ids.ts';
 import { BatchState } from '../batches/batch-state.ts';
-import { imageMetadata, textDescription } from '../files/metadata.ts';
+import { imageMetadata, setTextSamples, textDescription } from '../files/metadata.ts';
 import { usageTime } from '../usage/token-budget.ts';
-import type { ImportPipeline } from '../import/import.ts';
 import type { NodesService } from '../nodes/nodes.ts';
 import type { ServiceRegistry } from '../services/registry.ts';
 import type { NerService } from '../tags/ner.ts';
@@ -48,12 +47,11 @@ function isThumbnail(message: any): boolean {
 }
 
 const SET_PREVIEW_COUNT = 4;
-const SET_THUMBNAIL_UPDATE_EVERY = 10;
 
 /** Whether the thumbnail of the nth file in a batch should refresh the set in the UI. */
-export function shouldNotifySetThumbnail(current: number): boolean {
+export function shouldNotifySetThumbnail(current: number, visible = SET_PREVIEW_COUNT): boolean {
     if (!Number.isFinite(current) || current < 1) return false;
-    return current <= SET_PREVIEW_COUNT || current % SET_THUMBNAIL_UPDATE_EVERY === 0;
+    return current <= visible;
 }
 
 function thumbnailFilename(message: any): string {
@@ -65,8 +63,9 @@ function thumbnailFilename(message: any): string {
     return 'preview.jpg';
 }
 
-function isSplitPdfOutput(message: any, node: any): boolean {
-    if (node?.type !== 'pdf') return false;
+/** An output of the PDF splitter; consumers report every PDF as type `pdf`. */
+function isSplitPdfOutput(message: any): boolean {
+    if (message?.file?.type !== FILE_TYPE.PDF) return false;
     const service = message?.service?.id || message?.process?.service_id || '';
     const task = message?.task?.id || message?.process?.task || '';
     return SPLITTERS.has(service) && task === 'split';
@@ -95,7 +94,6 @@ export interface ResultDeps {
     ner: NerService;
     thumbnails: ThumbnailService;
     registry: ServiceRegistry;
-    importPipeline: ImportPipeline;
     sse: SseHub;
     logger: Logger;
     apiUrl: string;
@@ -169,8 +167,8 @@ export class ResultsService {
         const rows = await this.d.db.rows('SELECT @rid AS rid, path, type, metadata FROM File WHERE set = :set ORDER BY label LIMIT 20', { set: setRid });
         const thumbs: string[] = [];
         for (const item of rows) {
-            if (item.type !== 'image' && item.type !== 'pdf') continue;
-            if (item.type === 'pdf' && !(await this.pdfHasThumbnail(item))) {
+            if (item.type !== 'image' && !isPdfType(item.type)) continue;
+            if (isPdfType(item.type) && !(await this.pdfHasThumbnail(item))) {
                 if (thumbs.length < 4) thumbs.push('__pdf_icon__');
                 continue;
             }
@@ -182,6 +180,7 @@ export class ResultsService {
     }
 
     private async pdfHasThumbnail(file: any): Promise<boolean> {
+        if (file?.type === FILE_TYPE.ORIGINAL_PDF) return false;
         const pages = Number(file?.metadata?.page_count);
         if (Number.isFinite(pages) && pages > 1) return false;
         const rid = tryRid(file.rid || file['@rid']);
@@ -195,18 +194,15 @@ export class ResultsService {
         const version = Date.now();
         const internal = isInternalVersioning(message);
         await moveFile(contentPath, path.join(base, name));
-        try {
-            await this.mirrorSplitCover(message, path.join(base, name), name, version);
-        } catch (error) {
-            this.d.logger.warn('Failed to mirror split cover thumbnail to source PDF', { error: (error as Error).message });
-        }
         const isMain = name.toLowerCase() === 'thumbnail.jpg';
         const isBatch = Boolean(message?.output_set);
         const isLast = isBatch && Number(message?.current_file) === Number(message?.total_files);
-        // Single files notify on the final thumbnail. Batches notify for the first few files (the
-        // set card shows four), then on every Nth file and at the end, so a set being browsed
-        // fills in without one SSE message per thumbnail.
-        const notifyBatch = isBatch && (isLast || (isMain && shouldNotifySetThumbnail(Number(message?.current_file))));
+        // Single files notify on the final thumbnail. A set card shows four thumbnails (a split PDF
+        // set only the first), so a batch notifies for those and at the end. A set the user has
+        // open gets every thumbnail as it arrives.
+        const visible = message?.file?.type === FILE_TYPE.PDF ? 1 : SET_PREVIEW_COUNT;
+        const watched = isBatch && this.d.sse.isWatching(message.userId, tryRid(message.output_set) || '');
+        const notifyBatch = isBatch && (isLast || (isMain && (watched || shouldNotifySetThumbnail(Number(message?.current_file), visible))));
         if (!(internal || (!isBatch && isMain) || notifyBatch)) return;
         if (message.output_set && notifyBatch) {
             this.d.sse.send(message.userId, { command: 'update', target: message.output_set, node: { paths: await this.setPreviewPaths(message.output_set, version), count: message.current_file, thumbnail_version: version } });
@@ -219,27 +215,6 @@ export class ResultsService {
             const node = await this.d.store.getNode(message.file['@rid']);
             const setRid = tryRid(node?.set);
             if (setRid) this.d.sse.send(message.userId, { command: 'update', target: setRid, node: { paths: await this.setPreviewPaths(setRid, version), thumbnail_version: version } });
-        }
-    }
-
-    /** The cover (first page) thumbnail of a split PDF also becomes the original PDF's thumbnail. */
-    private async mirrorSplitCover(message: any, saved: string, name: string, version: number): Promise<void> {
-        if (name.toLowerCase() !== 'preview.jpg' && name.toLowerCase() !== 'thumbnail.jpg') return;
-        if (![SERVICE.POPPLER, SERVICE.POPPLER_FS].includes(lower(message?.service?.id) as any) || lower(message?.task?.id) !== 'thumbnail') return;
-        const current = Number(message?.current_file || 0);
-        const page = Number(message?.file?.page_number || 0);
-        if (!((current === 0 || current === 1) && (page === 0 || page === 1))) return;
-        let sourceRid = tryRid(message?.process?.file_rid);
-        if (!sourceRid && message?.process?.['@rid']) sourceRid = tryRid((await this.d.store.getNode(message.process['@rid']))?.file_rid);
-        if (!sourceRid) return;
-        const source = await this.d.store.getNode(sourceRid);
-        if (typeof source?.path !== 'string' || !source.path) return;
-        const sourceBase = path.dirname(source.path);
-        const target = path.resolve(path.join(sourceBase, name.toLowerCase()));
-        if (path.resolve(saved) === target) return;
-        await fsp.copyFile(path.resolve(saved), target);
-        if (message?.userId) {
-            this.d.sse.send(message.userId, { command: 'update', target: sourceRid, node: { image: this.thumbUrl(sourceBase), thumb: this.thumbUrl(sourceBase), thumbnail_version: version } });
         }
     }
 
@@ -261,6 +236,9 @@ export class ResultsService {
         if (message.output_set && rootSource && Number(message?.current_file || 0) >= Number(message?.total_files || 0)) {
             if (await batches.outputFor(message.process['@rid'], rootSource, message.output_set)) return; // a retry of a finished group
         }
+        // Only the splitter makes `pdf` (one page); any other PDF output is an original.
+        const splitOutput = isSplitPdfOutput(message);
+        if (message.file.type === FILE_TYPE.PDF && !splitOutput) message.file.type = FILE_TYPE.ORIGINAL_PDF;
         const refRid = referenceRid(message);
         const refNode = refRid ? await store.getNode(refRid) : null;
         if (refRid && !refNode) throw Boom.badData(`Reference source file not found: ${refRid}`);
@@ -283,6 +261,8 @@ export class ResultsService {
             if (fileNode.type === 'image') fileNode.metadata = { ...fileNode.metadata, ...imageMetadata(fileNode.path) };
         }
         if (fileNode.metadata) await store.setAttribute(fileNode['@rid'], 'metadata', fileNode.metadata);
+        // The notes of the "Add note" task: editing one tags the file it is about (see FilesService).
+        if (!refRid && message.service?.id === SERVICE.TEXT_BASE && message.task?.id === 'create_note') await store.setAttribute(fileNode['@rid'], 'note', true);
         if (!refRid && fileNode.type === 'ner.json') {
             // Needed to browse NER label groups whether or not the task autotags.
             await store.setAttributes(fileNode['@rid'], { service_id: message.service?.id || null, task: message.task?.id || null, model: message.task?.model?.id || null });
@@ -319,17 +299,15 @@ export class ResultsService {
             if (message.response.url) await store.setAttribute(processRid, 'url', message.response.url);
         }
         if (!refRid && message.file.type === 'image' && this.d.registry.hasActiveConsumer(SERVICE.THUMBNAILER)) {
-            await this.d.thumbnails.forOutputImage(fileNode, message);
+            // Images extracted from a ZIP get the same EXIF fix as uploads (rotation, then thumbnail).
+            const exifRotate = message.service?.id === SERVICE.ZIP ? fileNode.metadata?.rotate : undefined;
+            if (exifRotate) await this.d.thumbnails.forUpload(fileNode, message.userId, exifRotate);
+            else await this.d.thumbnails.forOutputImage(fileNode, message);
         }
-        if (!refRid && isSplitPdfOutput(message, fileNode)) await this.reportFailedPages(message, processRid);
-        if (!refRid && isSplitPdfOutput(message, fileNode) && this.d.registry.hasActiveConsumer(SERVICE.POPPLER)) {
-            await this.d.thumbnails.forSplitPage(fileNode, message);
-        }
-        if (!refRid && fileNode?.type === 'pdf' && !isSplitPdfOutput(message, fileNode)) {
-            const service = message?.service?.id || message?.process?.service_id || '';
-            // PDFs produced by other services must go through the splitter first.
-            if (service && !SPLITTERS.has(service) && service !== SERVICE.ZIP) await store.setAttribute(fileNode['@rid'], 'processable', false);
-            if (service === SERVICE.ZIP) await this.d.importPipeline.afterFileCreated(fileNode, { userId: message.userId, delete_original: true });
+        if (!refRid && splitOutput) {
+            await this.reportFailedPages(message, processRid);
+            if (this.d.registry.hasActiveConsumer(SERVICE.POPPLER)) await this.d.thumbnails.forSplitPage(fileNode, message);
+            if (Number(message?.file_count || 0) >= Number(message?.file_total || 0)) await this.finishSplit(message);
         }
         if (message.userId) await this.notifyOutput(message, fileNode, processRid);
     }
@@ -378,9 +356,9 @@ export class ResultsService {
         const batchRid = message.set_process || message.process['@rid'];
         const outputTotal = Number(message.file_total || 0);
         const outputIndex = Number(message.file_count || 0);
-        const isImport = message.role === ROLE.IMPORT || message.process?.role === ROLE.IMPORT;
-        // A job with several outputs advances the batch once, on its last output.
-        const advance = isImport || !(outputTotal > 1) || outputIndex >= outputTotal;
+        // In a batch, a job with several outputs advances it once, on its last output. A single-file
+        // run counts its outputs (total_files is their number), so every output advances it.
+        const advance = !message.set_process || !(outputTotal > 1) || outputIndex >= outputTotal;
         let batch = await batches.get(batchRid);
         if (STOPPED.includes(BatchState.status(batch) || 'running')) return;
         if (advance) batch = await batches.incrementProcessed(batchRid, message?.response?.time, total);
@@ -390,15 +368,15 @@ export class ResultsService {
         const grouped = message.behaviour === 'many-to-one' || Number(message.batch_total_files || 0) > Number(message.total_files || 0);
         if (finished) {
             await nodes.flushSetManifest(message.output_set);
-            if (isImport) await this.d.importPipeline.complete(message);
+            const textSamples = await setTextSamples(this.d.db, message.output_set);
             sse.send(message.userId, {
                 command: 'process_finished',
                 process: { '@rid': batchRid, status: 'done' },
-                set: { '@rid': message.output_set, status: 'finished', count },
+                set: { '@rid': message.output_set, status: 'finished', count, text_samples: textSamples },
                 batch: this.batchSummary(batch, processed, batchTotal, grouped, true),
                 current_file: processed,
             });
-        } else if (advance && processed % 10 === 0) {
+        } else if (advance && (processed % 10 === 0 || processed === 1 || Number(batchTotal) <= 50)) {
             sse.send(message.userId, {
                 command: 'process_update',
                 process: { '@rid': batchRid, status: 'running' },
@@ -452,7 +430,6 @@ export class ResultsService {
             return;
         }
         logger.error('Error processing files', { error, message });
-        if (role === ROLE.IMPORT || lower(message?.process?.role) === ROLE.IMPORT) await this.failImport(error, message);
         let target = tryRid(message?.process?.['@rid']) || tryRid(message?.target);
         if (message.output_set) {
             const setProcess = await batches.processOfSet(message.output_set);
@@ -483,14 +460,19 @@ export class ResultsService {
         }
     }
 
-    /** A failed split: the PDF is no longer "importing", and the import process says why. */
-    private async failImport(error: any, message: any): Promise<void> {
+    /**
+     * The split of one original PDF is complete: unless the user kept it (task param
+     * `delete_original`, on by default), the file is removed from disk. The node stays as
+     * provenance, marked `_file_removed`.
+     */
+    private async finishSplit(message: any): Promise<void> {
+        const keep = [false, 'false'].includes(message?.task?.params?.delete_original);
         const sourceRid = tryRid(message?.file?.['@rid']);
-        const processRid = tryRid(message?.process?.['@rid']);
-        const reason = String(error?.details || error?.message || error || 'unknown error').slice(0, 500);
-        if (sourceRid) await this.d.store.setAttribute(sourceRid, '_status', 'import_failed');
-        if (processRid) await this.d.store.setAttributes(processRid, { status: 'failed', info: `The PDF could not be split into pages: ${reason}` });
-        if (message.userId && sourceRid) this.d.sse.send(message.userId, { command: 'update', target: sourceRid, node: { _status: 'import_failed' } });
+        if (keep || !sourceRid) return;
+        const original = await this.d.store.getNode(sourceRid);
+        if (original?.path) await fsp.rm(original.path, { force: true }).catch(() => {});
+        await this.d.store.setAttribute(sourceRid, '_file_removed', true);
+        if (message.userId) this.d.sse.send(message.userId, { command: 'update', target: sourceRid, node: { _file_removed: true } });
     }
 
     /**

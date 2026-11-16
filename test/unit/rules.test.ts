@@ -79,7 +79,8 @@ test('services offered for a node', () => {
         sys: { id: 'sys', consumers: ['a'], category: 'system', supported_types: ['image'], tasks: { x: {} } },
         'md-thumbnailer': { id: 'md-thumbnailer', consumers: ['a'], supported_types: ['image'], tasks: { thumbnail: {} } },
         grouped: { id: 'grouped', consumers: ['a'], service_groups: ['VIP'], supported_types: ['image'], tasks: { x: {} } },
-        'md-pypdf_fs': { id: 'md-pypdf_fs', consumers: ['a'], supported_types: ['pdf'], tasks: { split: {}, other: {} } },
+        'md-pypdf_fs': { id: 'md-pypdf_fs', consumers: ['a'], supported_types: ['original-pdf'], tasks: { split: {} } },
+        'md-poppler': { id: 'md-poppler', consumers: ['a'], supported_types: ['pdf'], tasks: { pdf2text: {} } },
     };
     const user = { service_groups: ['OSC'] };
     const file = { '@type': 'File', type: 'image', extension: 'jpg' };
@@ -90,8 +91,10 @@ test('services offered for a node', () => {
     assert.deepEqual(Object.keys(roi.for_format[0].tasks), ['roi']);
     const set = servicesForNode(services, { '@type': 'Set', types: ['image'], extensions: ['jpg'] }, undefined, user, []);
     assert.deepEqual(Object.keys(set.for_format[0].tasks), ['rot', 'comb']);
-    const pdf = servicesForNode(services, { '@type': 'File', type: 'pdf', extension: 'pdf', processable: false }, undefined, user, []);
-    assert.deepEqual(pdf.for_format.map((s: any) => Object.keys(s.tasks)), [['split']]);
+    const original = servicesForNode(services, { '@type': 'File', type: 'original-pdf', extension: 'pdf' }, undefined, user, []);
+    assert.deepEqual(original.for_format.map((s: any) => [s.id, Object.keys(s.tasks)]), [['md-pypdf_fs', ['split']]]);
+    const page = servicesForNode(services, { '@type': 'File', type: 'pdf', extension: 'pdf' }, undefined, user, []);
+    assert.deepEqual(page.for_format.map((s: any) => [s.id, Object.keys(s.tasks)]), [['md-poppler', ['pdf2text']]]);
     const vip = servicesForNode(services, file, undefined, { service_groups: ['VIP'] }, []);
     assert.ok(vip.for_format.find((s: any) => s.id === 'grouped'));
 });
@@ -120,7 +123,7 @@ test('search output tasks and batch queue names', () => {
 test('file types and download content types', () => {
     assert.equal(detectType('a.zip', 'application/octet-stream'), 'zip');
     assert.equal(detectType('a.jpg', 'image/jpeg'), 'image');
-    assert.equal(detectType('a.pdf', 'application/octet-stream'), 'pdf');
+    assert.equal(detectType('a.pdf', 'application/octet-stream'), 'original-pdf');
     assert.equal(detectType('a.csv', 'application/octet-stream'), 'csv');
     assert.equal(detectType('a.bin', 'application/octet-stream'), undefined);
     assert.equal(detectType('a.md', 'text/markdown'), 'text');
@@ -139,8 +142,13 @@ test('prompt json schema normalisation', () => {
 });
 
 test('user settings', () => {
-    assert.deepEqual(withDefaults({ theme: 'navy', cookie: 'nope' }), { theme: 'navy', cookie: 'classic', motion: 'on' });
+    assert.deepEqual(withDefaults({ theme: 'navy', cookie: 'nope' }), { theme: 'navy', cookie: 'classic', motion: 'on', group_pdf: 'on', lineage_compare: 'on', hide_demos: 'off', desk_view: 'grid' });
     assert.deepEqual(validatePatch({ motion: 'off' }), { motion: 'off' });
+    assert.deepEqual(validatePatch({ group_pdf: 'off' }), { group_pdf: 'off' });
+    assert.throws(() => validatePatch({ group_pdf: 'maybe' }));
+    assert.deepEqual(validatePatch({ lineage_compare: 'off' }), { lineage_compare: 'off' });
+    assert.deepEqual(validatePatch({ hide_demos: 'on', desk_view: 'list' }), { hide_demos: 'on', desk_view: 'list' });
+    assert.throws(() => validatePatch({ desk_view: 'cards' }));
     assert.throws(() => validatePatch({ font: 'x' }));
     assert.throws(() => validatePatch([]));
 });
