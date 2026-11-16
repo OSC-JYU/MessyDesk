@@ -51,6 +51,8 @@ import { ServiceRegistry } from './modules/services/registry.ts';
 import { serviceRoutes } from './modules/services/routes.ts';
 import { ZipJobs } from './modules/sets/zip-jobs.ts';
 import { NerService } from './modules/tags/ner.ts';
+import { SetMerge } from './modules/sets/merge.ts';
+import { setRoutes } from './modules/sets/routes.ts';
 import { tagRoutes } from './modules/tags/routes.ts';
 import { TagsService } from './modules/tags/tags.ts';
 import { ThumbnailService } from './modules/thumbnails/thumbnails.ts';
@@ -145,6 +147,7 @@ async function main(): Promise<void> {
         config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users, projects, covers, demos,
         deskGraph, nodes, graph, deletes, files, thumbnails,
         semantic: new SemanticSearch({ db, access, registry, publisher, sse, layout, logger }),
+        setMerge: new SetMerge(db, store, layout, access, nodes),
         zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs, registry),
         registry,
         serviceHelp: new ServiceHelp({ dir: path.join(config.helpDir, 'services'), bundleMaxFiles: config.help.bundleMaxFiles, archiveMaxBytes: config.help.archiveMaxBytes, archiveMaxEntries: config.help.archiveMaxEntries }),
@@ -177,6 +180,7 @@ async function main(): Promise<void> {
         ...projectRoutes(deps),
         ...demoRoutes(deps),
         ...fileRoutes(deps),
+        ...setRoutes(deps),
         ...graphRoutes(deps),
         ...processingRoutes(deps),
         ...resultRoutes(deps),

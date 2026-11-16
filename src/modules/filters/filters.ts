@@ -69,10 +69,12 @@ export class FiltersService {
         const project = node.project_rid || projectRid;
         const allFiles = await this.nodes.setFileRids(sourceSet);
         if (!allFiles.length) throw Boom.badRequest('Input set has no files');
-        // A set of references (made by an earlier filter) is filtered through the files it points to:
-        // tags and ROI labels are on those, and are not copied to the references.
+        // A set of references (made by a filter or a merge) is filtered by the tags on its members and
+        // on the files they point to: the tags of the originals are not copied to the references,
+        // and a reference can be tagged itself.
         const actual = await resolveReferences(this.db, allFiles);
-        const lookup = [...new Set(actual.values())];
+        const lookup = [...new Set([...allFiles, ...actual.values()])];
+        const targetsOf = (member: string) => [...new Set([member, actual.get(member)!])];
 
         let labels: string[] = [];
         if (mode !== 'untagged') {
@@ -87,7 +89,7 @@ export class FiltersService {
         let matched: string[] = [];
         if (mode === 'untagged') {
             const tagged = new Set((await this.db.rows('SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: lookup, owner: userRid })).map((r) => r.target_rid));
-            matched = allFiles.filter((r) => !tagged.has(actual.get(r)!));
+            matched = allFiles.filter((r) => !targetsOf(r).some((t) => tagged.has(t)));
         } else {
             // File -> the selected criteria it has (a tag's rid, or "roi:" and the ROI key).
             const byFile = new Map<string, Set<string>>();
@@ -115,7 +117,8 @@ export class FiltersService {
                 for (const [file, fileKeys] of found) for (const key of fileKeys) add(toRid(file), `roi:${key}`);
             }
             for (const member of allFiles) {
-                const criteria = byFile.get(actual.get(member)!);
+                const found = targetsOf(member).flatMap((t) => [...(byFile.get(t) || [])]);
+                const criteria = found.length ? new Set(found) : undefined;
                 if (mode === 'exclude' ? !criteria : criteria && (match === 'and' ? criteria.size === criteriaCount : criteria.size > 0)) matched.push(member);
             }
         }

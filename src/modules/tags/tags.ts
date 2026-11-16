@@ -388,18 +388,25 @@ export class TagsService {
         const files = await this.db.rows('SELECT @rid AS rid FROM File WHERE set = :set', { set: toRid(setRid) });
         const members = files.map((r) => r.rid).filter(Boolean);
         if (!members.length) return [];
-        // Members that are references (a tag filter's output) count through the files they point to.
+        // A member counts for the tags on itself and on the file it points to (a reference).
         const actual = await resolveReferences(this.db, members);
-        const fileRids = [...new Set(actual.values())];
+        const fileRids = [...new Set([...members, ...actual.values()])];
         // A file can have several links to one tag (by hand and by different models): count files.
         const pairs = await this.db.rows(
             'SELECT DISTINCT entity_rid, target_rid FROM TagLink WHERE target_rid IN :files AND region_id IS NULL AND owner = :owner',
             { files: fileRids, owner: userRid },
         );
+        const byTarget = new Map<string, Set<string>>();
+        for (const p of pairs) {
+            if (!p.entity_rid) continue;
+            if (!byTarget.has(p.target_rid)) byTarget.set(p.target_rid, new Set());
+            byTarget.get(p.target_rid)!.add(p.entity_rid);
+        }
         const counts = new Map<string, number>();
-        const memberCount = new Map<string, number>();
-        for (const target of actual.values()) memberCount.set(target, (memberCount.get(target) || 0) + 1);
-        for (const p of pairs) if (p.entity_rid) counts.set(p.entity_rid, (counts.get(p.entity_rid) || 0) + (memberCount.get(p.target_rid) || 1));
+        for (const member of members) {
+            const entities = new Set([...(byTarget.get(member) || []), ...(byTarget.get(actual.get(member)!) || [])]);
+            for (const entity of entities) counts.set(entity, (counts.get(entity) || 0) + 1);
+        }
         const links = [...counts.entries()].map(([entity_rid, count]) => ({ entity_rid, count }));
         if (!links.length) return [];
         const entities = await this.db.rowsByRids('@rid AS rid, label, type, icon, color', links.map((l) => l.entity_rid), "@type = 'Entity' AND owner = :owner", { owner: userRid });
