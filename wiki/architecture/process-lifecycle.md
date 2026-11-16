@@ -153,6 +153,10 @@ Adapters send results back to the backend via HTTP:
 
 **[verified]** from `src/modules/results/results.ts`:
 
+## Parameters shown on the cruncher card
+
+When a `Process` or `SetProcess` node is created, `modules/nodes/params-summary.ts` saves a readable copy of the task's parameters as the `params_summary` attribute (JSON: `{ params: [{ name, label, value }], prompt? }`). Labels and value titles come from the descriptor's `params_help`; a prompt run keeps the prompt text as used. API keys, `secret_ref` and credential-like param names are never included. The desk graph passes it to the UI, which shows a few rows on the card; the full payload stays in `params.json` and the details view.
+
 ### Normal files
 1. Create `File` vertex in graph
 2. Write file bytes to disk

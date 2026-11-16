@@ -8,6 +8,7 @@ import type { DataLayout } from '../../platform/storage/layout.ts';
 import { ensureDir, writeJson } from '../../platform/storage/fsutil.ts';
 import { EDGE, type GraphStore } from '../../shared/graph-store.ts';
 import { FILE_TYPE } from '../../shared/service-ids.ts';
+import { paramsSummaryJson } from './params-summary.ts';
 
 export interface MessageLike {
     file: any;
@@ -193,6 +194,8 @@ export class NodesService {
         if (msg.task.model) attrs.model = msg.task.model.id;
         if (msg.task.model?.version) attrs.model_version = msg.task.model.version;
         if (msg.task.model?.family) attrs.model_family = msg.task.model.family;
+        const paramsSummary = paramsSummaryJson(msg.service, msg.task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         if (msg.output_set) attrs.set = msg.output_set;
         if (msg.set_process_rid) attrs.set_process = msg.set_process_rid;
         if (msg.set_process && !attrs.set_process) attrs.set_process = msg.set_process;
@@ -216,6 +219,8 @@ export class NodesService {
         if (task.model?.version) attrs.model_version = task.model.version;
         if (task.model?.family) attrs.model_family = task.model.family;
         if (service?.id) attrs.service_id = service.id;
+        const paramsSummary = paramsSummaryJson(service, task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         const processNode = await this.store.createVertex('SetProcess', attrs);
         const projectRid = input.project_rid || await this.store.projectRidOf(input['@rid']);
         if (projectRid) await this.store.connect(processNode['@rid'], EDGE.BELONGS_TO, projectRid);
@@ -244,6 +249,8 @@ export class NodesService {
         if (task.model?.version) attrs.model_version = task.model.version;
         if (task.model?.family) attrs.model_family = task.model.family;
         if (service?.id) attrs.service_id = service.id;
+        const paramsSummary = paramsSummaryJson(service, task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         const node = await this.store.createVertex('SetProcess', attrs);
         const processPath = this.layout.processFilesDir(input.project_rid, node.uuid || node['@rid']);
         await ensureDir(processPath);

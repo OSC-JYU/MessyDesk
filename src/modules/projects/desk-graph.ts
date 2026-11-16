@@ -53,7 +53,7 @@ export class DeskGraph {
         let record = null;
         try {
             record = await this.db.firstByRid(
-                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description',
+                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description, params_summary',
                 toRid(rid), "@type IN ['Process', 'SetProcess']",
             );
         } catch {
@@ -89,6 +89,7 @@ export class DeskGraph {
             if (vp.metadata) data.metadata = vp.metadata;
             if (vp.service) data.service = vp.service;
             if (vp.model) data.model = vp.model;
+            if (vp.params_summary) data.params_summary = vp.params_summary;
             if (vp._file_removed) data._file_removed = true;
             if (v.t !== 'Process' && vp.path) data.image = path.join('/api/thumbnails', path.dirname(vp.path));
             nodes.push({ data });
@@ -118,6 +119,7 @@ export class DeskGraph {
                             service: meta?.service_id || meta?.service || ep.cruncher,
                             task: meta?.task || ep.task,
                             info: meta?.info || meta?.description,
+                            params_summary: meta?.params_summary,
                         },
                     });
                     nodeIds.add(processRid);

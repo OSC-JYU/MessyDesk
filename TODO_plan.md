@@ -77,7 +77,7 @@ Ticket numbers follow the original list (there are two #18s: 18a = bug, 18b = fe
   2. UI: select text in the text viewer to create a ROI, and show highlights with tags.
   3. API: CRUD for text ROIs and ROI tag links, and system tag "has ROI" (#26).
   4. Machine generation: let services (NER, e.g. MD-Gliner2) output ROI + tag links in a defined JSON format, and import it into the data model.
-  Needs a design note first, since it is the largest ticket.
+  Design note: [wiki/proposals/text-roi-coding.md](wiki/proposals/text-roi-coding.md) (proposal, open questions answered with recommendations). Several coders per desk need multi-user desks (roles, per-ROI-set grants), which need their own ticket and plan.
 
 ### Graph / UI
 
