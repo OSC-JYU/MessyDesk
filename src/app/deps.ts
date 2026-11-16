@@ -33,6 +33,7 @@ import type { SemanticSearch } from '../modules/semantic/semantic.ts';
 import type { ServiceRegistry } from '../modules/services/registry.ts';
 import type { ZipJobs } from '../modules/sets/zip-jobs.ts';
 import type { NerService } from '../modules/tags/ner.ts';
+import type { SetMerge } from '../modules/sets/merge.ts';
 import type { TagsService } from '../modules/tags/tags.ts';
 import type { ThumbnailService } from '../modules/thumbnails/thumbnails.ts';
 import type { UsersService } from '../modules/users/users.ts';
@@ -60,6 +61,7 @@ export interface Deps {
     files: FilesService;
     thumbnails: ThumbnailService;
     zipJobs: ZipJobs;
+    setMerge: SetMerge;
     registry: ServiceRegistry;
     serviceHelp: ServiceHelp;
     processing: ProcessingService;

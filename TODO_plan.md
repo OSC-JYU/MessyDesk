@@ -96,6 +96,10 @@ Ticket numbers follow the original list (there are two #18s: 18a = bug, 18b = fe
 **#25 Side-by-side file view along lineage**
 - Plan: build a full-screen view with 2+ panes selected from the file's lineage (e.g. image and OCR text). Minimal controls, with pane selection, synchronised navigation for multi-page files, and note editing (needs #23). Start with a two-pane layout.
 
+### Sets
+
+**#31 Merge sets** Done on branch `set-merge` (needs live check): shift/Ctrl-click sets (or "Merge with other sets…" in a set's panel), name the new set, Merge. The backend (`POST /api/sets/merge`, sets/merge.ts) makes a set of references, skipping duplicates; only sets with the same kind of files. Deleting a merged-from set also deletes the merged set (lineage cascade, as for tag filter sets). Running crunchers on a multi-selection is a later step.
+
 ### Sources / imports
 
 **#27 DSpace import (DSpace 7 source node)**
