@@ -201,6 +201,11 @@ export class GraphService {
             if (!toDelete.has(source.rid)) await this.tags.reindexFileTags(source.rid, userRid);
         }
         await this.tags.removeLinksOf([...toDelete]);
+        // A deleted ROI set takes the coders' grants with it.
+        const everything = [...toDelete];
+        for (let i = 0; i < everything.length; i += 1000) {
+            await this.db.sql('DELETE FROM CodingGrant WHERE roi_set IN :sets', { sets: everything.slice(i, i + 1000).map((r) => toRid(r)) }).catch(() => {});
+        }
         await this.tags.removeDeskTags([...deletedProjects]);
         await this.solr.dropFilesIndex([...files]);
         // In chunks: one statement per node made a 20 000-node delete take minutes.

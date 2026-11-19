@@ -42,6 +42,8 @@ import { resultRoutes } from './modules/results/routes.ts';
 import { SemanticSearch } from './modules/semantic/semantic.ts';
 import { semanticRoutes } from './modules/semantic/routes.ts';
 import { RoisService } from './modules/rois/rois.ts';
+import { CodingService } from './modules/coding/coding.ts';
+import { codingRoutes } from './modules/coding/routes.ts';
 import { ServiceGroupsService } from './modules/service-groups/service-groups.ts';
 import { TokenBudget } from './modules/usage/token-budget.ts';
 import { SecretVault } from './modules/secrets/vault.ts';
@@ -143,6 +145,7 @@ async function main(): Promise<void> {
     });
     const demos = new DemosService({ dataDir: config.dataDir, access, covers, exporter: new DemoExporter(db, layout, config.apiUrl), importer: demoImporter });
 
+    const rois = new RoisService(db, store, access, graph, tags);
     const deps: Deps = {
         config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users, projects, covers, demos,
         deskGraph, nodes, graph, deletes, files, thumbnails,
@@ -156,7 +159,8 @@ async function main(): Promise<void> {
         tags,
         ner,
         filters,
-        rois: new RoisService(db, store, access, graph, tags),
+        rois,
+        coding: new CodingService(db, access, rois, tags, users, filters),
         prompts: new PromptsService(db),
         serviceGroups: new ServiceGroupsService(db, store, registry, config.dataDir),
         tokenBudget,
@@ -187,6 +191,7 @@ async function main(): Promise<void> {
         ...semanticRoutes(deps),
         ...serviceRoutes(deps),
         ...tagRoutes(deps),
+        ...codingRoutes(deps),
     ]);
     await server.start();
     logger.info(`MessyDesk running at: ${server.info.uri}`);

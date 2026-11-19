@@ -8,7 +8,7 @@ export const VERTEX_TYPES = [
     'Request', 'Prompt', 'ErrorNode', 'ServiceGroup', 'Person',
 ] as const;
 
-export const DOCUMENT_TYPES = ['Usage', 'TagLink', 'DeskTag'] as const;
+export const DOCUMENT_TYPES = ['Usage', 'TagLink', 'DeskTag', 'CodingGrant'] as const;
 
 // PROCESSED_BY, PRODUCED, HAS_ITEM, HAS_ENTITY, HAS_SET and HAS_SOURCE are no longer used by any
 // query (plan/decisions.md A3) but are still created so that a database stays usable by the old
@@ -46,8 +46,11 @@ const PROPERTIES = [
     'CREATE PROPERTY TagLink.target_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.entity_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.region_id IF NOT EXISTS STRING',
+    'CREATE PROPERTY TagLink.roi_set IF NOT EXISTS STRING',
     'CREATE PROPERTY TagLink.owner IF NOT EXISTS STRING',
     'CREATE PROPERTY ServiceGroup.id IF NOT EXISTS STRING',
+    'CREATE PROPERTY CodingGrant.roi_set IF NOT EXISTS STRING',
+    'CREATE PROPERTY CodingGrant.user_rid IF NOT EXISTS STRING',
     // New (perf/results/step1-query-profile.md): looked up by value, so they get indexes below.
     'CREATE PROPERTY DERIVED_FROM.process_rid IF NOT EXISTS STRING',
     'CREATE PROPERTY Process.set_process IF NOT EXISTS STRING',
@@ -70,6 +73,8 @@ const PROPERTIES = [
 const INDEXES: Array<[string, string, 'UNIQUE' | 'NOTUNIQUE']> = [
     // Composite indexes list their properties comma-separated.
     ['File', 'project_rid', 'NOTUNIQUE'],
+    ['CodingGrant', 'roi_set', 'NOTUNIQUE'],
+    ['CodingGrant', 'user_rid', 'NOTUNIQUE'],
     ['File', 'set', 'NOTUNIQUE'],
     // The set browser groups the files of a set by the original PDF they come from.
     ['File', 'origin_rid', 'NOTUNIQUE'],

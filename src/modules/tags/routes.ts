@@ -46,6 +46,7 @@ export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, to
             },
         },
         { method: 'PATCH', path: '/api/entities/{rid}', handler: (r) => tags.rename(r.params.rid, (r.payload as any) || {}, currentUser(r).rid) },
+        { method: 'POST', path: '/api/entities/{rid}/merge', handler: (r) => tags.merge(r.params.rid, (r.payload as any) || {}, currentUser(r).rid) },
         { method: 'DELETE', path: '/api/entities/{rid}', handler: (r) => tags.deleteEverywhere(r.params.rid, currentUser(r).rid) },
         { method: 'GET', path: '/api/entities/{rid}/usage', handler: (r) => tags.usage(r.params.rid, currentUser(r).rid) },
         { method: 'GET', path: '/api/entities/types', handler: (r) => tags.entityTypes(currentUser(r).rid, ['1', 'true'].includes(String((r.query as any).counts))) },
@@ -113,6 +114,17 @@ export function tagRoutes({ tags, ner, filters, prompts, rois, serviceGroups, to
         { method: 'POST', path: '/api/images/{rid}/sets/{set_rid}/rois', handler: (r) => rois.save(r.params.rid, r.params.set_rid, r.payload, currentUser(r).rid) },
         { method: 'PUT', path: '/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}', handler: (r) => rois.update(r.params.roi_rid, r.payload, currentUser(r).rid) },
         { method: 'DELETE', path: '/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}', handler: (r) => rois.remove(r.params.rid, r.params.set_rid, r.params.roi_rid, currentUser(r).rid) },
+
+        { method: 'GET', path: '/api/texts/{rid}/sets/{set_rid}/rois', handler: (r) => rois.readText(r.params.rid, r.params.set_rid, currentUser(r).rid) },
+        { method: 'POST', path: '/api/texts/{rid}/sets/{set_rid}/rois', handler: (r) => rois.saveText(r.params.rid, r.params.set_rid, r.payload, currentUser(r).rid) },
+        { method: 'PUT', path: '/api/texts/{rid}/sets/{set_rid}/rois/{roi_rid}', handler: (r) => rois.updateText(r.params.roi_rid, r.payload, currentUser(r).rid) },
+        { method: 'DELETE', path: '/api/texts/{rid}/sets/{set_rid}/rois/{roi_rid}', handler: (r) => rois.remove(r.params.rid, r.params.set_rid, r.params.roi_rid, currentUser(r).rid) },
+
+        { method: 'GET', path: '/api/tags/passages', handler: (r) => rois.passages((r.query as any).entities, currentUser(r).rid, scope(r.query)) },
+        { method: 'POST', path: '/api/texts/{rid}/sets/{set_rid}/import-spans', handler: (r) => rois.importSpans(r.params.rid, r.params.set_rid, (r.payload as any) || {}, currentUser(r).rid) },
+        { method: 'GET', path: '/api/sets/{rid}/coding', handler: (r) => rois.coverage(r.params.rid, currentUser(r).rid) },
+        { method: 'POST', path: '/api/texts/{rid}/sets/{set_rid}/regions/{region}/tags/{tag_rid}', handler: (r) => rois.tagRegion(r.params.rid, r.params.set_rid, r.params.region, r.params.tag_rid, currentUser(r).rid) },
+        { method: 'DELETE', path: '/api/texts/{rid}/sets/{set_rid}/regions/{region}/tags/{tag_rid}', handler: (r) => rois.untagRegion(r.params.rid, r.params.set_rid, r.params.region, r.params.tag_rid, currentUser(r).rid) },
 
         // ---- service groups (admin) -------------------------------------------------------
         { method: 'GET', path: '/api/service-groups', handler: (r) => { requireAdmin(r); return serviceGroups.list(); } },

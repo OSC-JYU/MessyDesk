@@ -48,12 +48,13 @@ export class FiltersService {
         if (!this.filters[filterId] || !owned) throw Boom.badRequest(`Filter or file not found: ${filterId} ${nodeRid}`);
         if (filterId === SET_FILTER) return this.tagFilterSet(owned.node, owned.projectRid, userRid, params);
         const project = owned.projectRid;
-        const process = await this.store.createVertex('Process', { filter_id: filterId, label: 'Draw regions' });
+        const process = await this.store.createVertex('Process', { filter_id: filterId, label: this.filters[filterId].process_label || 'Draw regions' });
         process.path = this.layout.processFilesDir(project, process.uuid);
         await this.store.connect(project, EDGE.BELONGS_TO, process['@rid']);
-        const set = await this.store.createVertex('Set', { label: 'My regions', type: 'roi-set' });
+        const set = await this.store.createVertex('Set', { label: (typeof params?.set_label === 'string' && params.set_label.trim()) || this.filters[filterId].set_label || 'My regions', type: 'roi-set' });
         await this.store.connectDerivedFrom(set['@rid'], owned.node['@rid'], process['@rid']);
-        return process;
+        // The ROI set made next to the process, for callers that need it (assigning coders).
+        return Object.assign(process, { roi_set: set['@rid'] });
     }
 
     private async tagFilterSet(node: any, projectRid: string, userRid: string, params: any): Promise<any> {
@@ -66,6 +67,9 @@ export class FiltersService {
         const roiLabels = this.roiCriteria(params?.selected_roi_labels);
         if ((mode === 'include' || mode === 'exclude') && !selected.length && !roiLabels.length) throw Boom.badRequest('No tags selected');
         const match = String(params?.match || 'or').toLowerCase() === 'and' ? 'and' : 'or';
+        // Which tag links count: whole-file tags (the default), tags of coded passages, or both.
+        const level = String(params?.tag_level || 'file').toLowerCase();
+        const levelSql = level === 'passage' ? ' AND region_id IS NOT NULL' : level === 'any' ? '' : ' AND region_id IS NULL';
         const project = node.project_rid || projectRid;
         const allFiles = await this.nodes.setFileRids(sourceSet);
         if (!allFiles.length) throw Boom.badRequest('Input set has no files');
@@ -88,7 +92,7 @@ export class FiltersService {
         // The matches are found before anything is created, so a failure leaves no half-made set.
         let matched: string[] = [];
         if (mode === 'untagged') {
-            const tagged = new Set((await this.db.rows('SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner', { files: lookup, owner: userRid })).map((r) => r.target_rid));
+            const tagged = new Set((await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE target_rid IN :files AND owner = :owner${levelSql}`, { files: lookup, owner: userRid })).map((r) => r.target_rid));
             matched = allFiles.filter((r) => !targetsOf(r).some((t) => tagged.has(t)));
         } else {
             // File -> the selected criteria it has (a tag's rid, or "roi:" and the ROI key).
@@ -98,11 +102,11 @@ export class FiltersService {
                 byFile.get(file)!.add(criterion);
             };
             if (selected.length) {
-                const rows = await this.db.rows('SELECT target_rid AS file_rid, entity_rid FROM TagLink WHERE target_rid IN :files AND entity_rid IN :entities AND owner = :owner', { files: lookup, entities: selected, owner: userRid });
+                const rows = await this.db.rows(`SELECT target_rid AS file_rid, entity_rid FROM TagLink WHERE target_rid IN :files AND entity_rid IN :entities AND owner = :owner${levelSql}`, { files: lookup, entities: selected, owner: userRid });
                 for (const row of rows) if (row.file_rid && row.entity_rid) add(row.file_rid, row.entity_rid);
                 // Tags sit on the original files (not on what a model made of them), so a set
                 // without any tag cannot be filtered by tags: tell, instead of making an empty set.
-                if (mode === 'include' && !roiLabels.length && !rows.length && !(await this.db.first('SELECT @rid FROM TagLink WHERE target_rid IN :files AND owner = :owner LIMIT 1', { files: lookup, owner: userRid }))) {
+                if (mode === 'include' && !roiLabels.length && !rows.length && !(await this.db.first(`SELECT @rid FROM TagLink WHERE target_rid IN :files AND owner = :owner${levelSql} LIMIT 1`, { files: lookup, owner: userRid }))) {
                     throw Boom.badRequest('The files in this set have no tags.');
                 }
             }
@@ -123,15 +127,16 @@ export class FiltersService {
             }
         }
 
-        const info = mode === 'include' ? `Tag filter include (${match.toUpperCase()}): ${labels.join(', ')}`
-            : mode === 'exclude' ? `Tag filter exclude: ${labels.join(', ')}` : 'Tag filter untagged files';
+        const levelNote = level === 'passage' ? ' (coded passages)' : level === 'any' ? ' (files and passages)' : '';
+        const info = (mode === 'include' ? `Tag filter include (${match.toUpperCase()}): ${labels.join(', ')}`
+            : mode === 'exclude' ? `Tag filter exclude: ${labels.join(', ')}` : 'Tag filter untagged files') + levelNote;
         const filterNode = await this.store.createVertex('SetProcess', {
             filter_id: SET_FILTER,
             label: 'Tag filter',
             project_rid: project || null,
             input_set: sourceSet,
             info,
-            params: JSON.stringify({ selection_mode: mode, selected_entity_rids: selected, selected_roi_labels: roiLabels, match }),
+            params: JSON.stringify({ selection_mode: mode, selected_entity_rids: selected, selected_roi_labels: roiLabels, match, tag_level: level }),
         });
         const processRid = filterNode['@rid'];
         const processPath = this.layout.processFilesDir(project, filterNode.uuid || processRid);

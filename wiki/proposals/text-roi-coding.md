@@ -86,7 +86,7 @@ Needed changes:
 
 Tags need a colour so that highlights are easy to tell apart.
 
-- Add a `color` attribute to the tag entity (today only entity types have one).
+- Tag entities already have a `color` (it defaults to the colour of the tag type, so all `Tag`s are the same blue). A new human tag of type `Tag` now gets a palette colour instead (`tags/tag-colors.ts`), and `PATCH /api/entities/{rid}` accepts `color`.
 - A new tag gets the next colour from a fixed palette of distinct, accessible colours, chosen so that
   neighbouring tags in the palette are easy to separate. The user can change it in the tag admin and in the
   picker.
@@ -99,7 +99,8 @@ Tags need a colour so that highlights are easy to tell apart.
 ### ROI set and cruncher
 
 - A **text ROI** cruncher (like the image ROI one) can be added to a text or to a set of texts. It creates an
-  ROI set node. The set is the unit of coding: one coding pass, one coder, one codebook round.
+  ROI set node. (Implemented as the filter `filters/mdf-text-roi`, applied like `mdf-image-roi`; a filter may
+  set `process_label` and `set_label`.) The set is the unit of coding: one coding pass, one coder, one codebook round.
 - Opening the ROI set opens the first text in coding mode, and the user steps through the set (next/previous,
   and "next text without regions", or "next text with untagged regions").
 - Several ROI sets on the same texts are allowed. This is what makes comparing coders or rounds possible
@@ -315,6 +316,16 @@ special UI in the first version.
 
 Decision needed: which of these 1-6 are the first ones. Suggested first: 1, 3 and 4 (cheap and immediately
 useful), then 5.
+
+## Implementation status (2026-11-16)
+
+Phases 1-6 are built, phase 7 for coders and phase 8 for export and analysis:
+
+- Text regions, `mdf-text-roi`, tags on regions with `roi_set`, colours, the coding mode, set navigation, extent changes, "Coded passages" in the tag view, card counts, tag filter `tag_level`, Solr fields `passage_tag_label`/`passage_tag_rid` and the search filter on them, tag merge, import of `ner.json` spans.
+- Coders: a `CodingGrant` per ROI set and coder; the owner assigns from a list of users, creates one set per coder in one step, sees progress, locks, copies a set as a final set. Coders have their own routes (`/api/coding`) and pages (`/coding`); they cannot create tags or import spans.
+- Export: `GET /api/projects/{rid}/coding/export` (JSON or CSV, with `text_length`). Analysis: the repository `MD-coding-analysis` (code frequencies, code-by-text matrix, co-occurrence, inter-coder agreement), which takes the exported JSON as an uploaded file.
+
+Not built: roles beyond coder and sharing whole desks with other users (a separate multi-user plan), an audit record and undo for tag merge, the passage scroll in the Markdown view, REFI-QDA export, LLM-assisted code suggestions, and a way to create the export file on the desk without downloading and uploading it. Text ROI regions have the file type `text-roi.json`, not `roi.json`, so services made for image regions are not offered for them.
 
 ## Phases
 

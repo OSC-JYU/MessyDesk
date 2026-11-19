@@ -25,6 +25,7 @@ import type { Publisher } from '../modules/queue/publisher.ts';
 import type { JobQueue } from '../modules/queue/queue.ts';
 import type { ResultsService } from '../modules/results/results.ts';
 import type { SecretVault } from '../modules/secrets/vault.ts';
+import type { CodingService } from '../modules/coding/coding.ts';
 import type { RoisService } from '../modules/rois/rois.ts';
 import type { ServiceGroupsService } from '../modules/service-groups/service-groups.ts';
 import type { TokenBudget } from '../modules/usage/token-budget.ts';
@@ -71,6 +72,7 @@ export interface Deps {
     ner: NerService;
     filters: FiltersService;
     rois: RoisService;
+    coding: CodingService;
     prompts: PromptsService;
     serviceGroups: ServiceGroupsService;
     tokenBudget: TokenBudget;

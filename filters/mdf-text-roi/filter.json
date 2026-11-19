@@ -1,0 +1,12 @@
+{
+    "id": "mdf-text-roi",
+    "type": "filter",
+    "name": "Text ROI",
+    "category": "preparation",
+    "process_label": "Mark passages",
+    "set_label": "My passages",
+
+    "supported_types": ["text"],
+
+    "description": "Mark passages of a text, and optionally tag them. Works on a text or on a set of texts."
+}

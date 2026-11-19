@@ -294,7 +294,9 @@ export class FilesService {
     /** Adds the thumbnail url and the tags to the files of a listing. */
     private async decorate(files: any[]): Promise<void> {
         const entities = await this.tags.entitiesForFiles(files.map((f) => f['@rid']));
+        const passages = await this.tags.passageCounts(files.map((f) => f['@rid']));
         for (const file of files) {
+            if (passages.get(file['@rid'])) file.passages = passages.get(file['@rid']);
             if (file.path && (!isPdfType(file.type) || await this.deskGraph.usePdfThumbnail(file))) {
                 file.thumb = this.apiUrl + 'api/thumbnails/' + file.path.split('/').slice(0, -1).join('/');
             }

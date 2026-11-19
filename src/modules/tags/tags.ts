@@ -8,6 +8,7 @@
 // no human tags, and importing a tag into another desk adds a DeskTag for the same entity. Machine
 // tags belong to a desk only through the TagLink.project_rid of their links.
 
+import { isHexColor, nextTagColor } from './tag-colors.ts';
 import { resolveReferences } from '../files/references.ts';
 import Boom from '@hapi/boom';
 import type { ArcadeClient, ArcadeEnvelope } from '../../platform/arcade/client.ts';
@@ -41,6 +42,9 @@ export interface TagFields {
     tag_rid: string[];
     tag_created_by: string[];
     tag_confidence: Array<number | string>;
+    /** Tags of coded passages (region links), each tag once per file: search can combine text and codes. */
+    passage_tag_label?: string[];
+    passage_tag_rid?: string[];
 }
 
 /** Sends tag fields to the search index (queued through md-solr, or directly). */
@@ -56,6 +60,8 @@ export interface EntityListOptions {
 
 export interface LinkMeta {
     region_id?: string | null;
+    /** The ROI set a region link was made in; two coders' links on one text stay apart. */
+    roi_set?: string | null;
     /** The caller re-syncs the file's search tags itself, once for many links. */
     defer_reindex?: boolean;
     /** The desk of the target, stored on the link so desk filters can use an index. */
@@ -69,7 +75,7 @@ export interface LinkMeta {
     confidence?: number | null;
 }
 
-function ridList(values: unknown): string[] {
+export function ridList(values: unknown): string[] {
     const list = Array.isArray(values) ? values : String(values || '').split(',');
     return [...new Set(list.map((v) => tryRid(String(v).trim())).filter((v): v is NonNullable<typeof v> => Boolean(v)))];
 }
@@ -286,7 +292,12 @@ export class TagsService {
         }
         const schema = await this.db.first('SELECT color, icon FROM EntityType WHERE type = :type AND owner = :owner', { type: data.type, owner: userRid });
         const icon = data.icon || schema?.icon || 'mdi-tag';
-        const color = data.color || schema?.color || '#ff8844';
+        let color = data.color || schema?.color || '#ff8844';
+        // A new human tag of the default type gets the palette colour the user's tags use least.
+        if (!data.color && human && data.type === PROTECTED_TYPE) {
+            const used = await this.db.rows('SELECT color FROM Entity WHERE type = :type AND owner = :owner AND created_by = "user"', { type: data.type, owner: userRid });
+            color = nextTagColor(used.map((r) => r.color));
+        }
         const content: Record<string, unknown> = {
             uuid: uuidv7(),
             type: data.type,
@@ -425,15 +436,15 @@ export class TagsService {
      * links and checks the others against those targets only, so a popular tag does not make it slow.
      */
     private async filesWithAll(entityRids: string[], desk: string, params: Record<string, unknown>): Promise<string[]> {
-        const counts = await this.db.rows(`SELECT entity_rid, count(*) AS count FROM TagLink WHERE entity_rid IN :entities AND owner = :owner${desk} GROUP BY entity_rid`, { ...params, entities: entityRids });
+        const counts = await this.db.rows(`SELECT entity_rid, count(*) AS count FROM TagLink WHERE entity_rid IN :entities AND region_id IS NULL AND owner = :owner${desk} GROUP BY entity_rid`, { ...params, entities: entityRids });
         const byEntity = new Map(counts.map((c) => [c.entity_rid, Number(c.count)]));
         if (entityRids.some((e) => !byEntity.get(e))) return [];
         const [rarest, ...others] = [...entityRids].sort((a, b) => byEntity.get(a)! - byEntity.get(b)!);
-        let targets = (await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid = :e AND owner = :owner${desk}`, { ...params, e: rarest })).map((r) => r.target_rid).filter(Boolean);
+        let targets = (await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid = :e AND region_id IS NULL AND owner = :owner${desk}`, { ...params, e: rarest })).map((r) => r.target_rid).filter(Boolean);
         for (const entity of others) {
             const keep = new Set<string>();
             for (let i = 0; i < targets.length; i += 500) {
-                const rows = await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid = :e AND owner = :owner${desk} AND target_rid IN :chunk`, { ...params, e: entity, chunk: targets.slice(i, i + 500) });
+                const rows = await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid = :e AND region_id IS NULL AND owner = :owner${desk} AND target_rid IN :chunk`, { ...params, e: entity, chunk: targets.slice(i, i + 500) });
                 for (const row of rows) keep.add(row.target_rid);
             }
             targets = targets.filter((t: string) => keep.has(t));
@@ -455,7 +466,7 @@ export class TagsService {
         const params = projects.length ? { owner: userRid, projects } : { owner: userRid };
         const targets = all
             ? await this.filesWithAll(entityRids, desk, params)
-            : (await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid IN :entities AND owner = :owner${desk}`, { ...params, entities: entityRids })).map((l) => l.target_rid);
+            : (await this.db.rows(`SELECT DISTINCT target_rid FROM TagLink WHERE entity_rid IN :entities AND region_id IS NULL AND owner = :owner${desk}`, { ...params, entities: entityRids })).map((l) => l.target_rid);
         return [...new Set<string>(targets.filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     }
 
@@ -516,6 +527,15 @@ export class TagsService {
         return result;
     }
 
+    /** How many coded passages (regions with a tag, in any ROI set) each of the files has. */
+    async passageCounts(fileRids: string[]): Promise<Map<string, number>> {
+        const result = new Map<string, number>();
+        if (!fileRids.length) return result;
+        const rows = await this.db.rows('SELECT DISTINCT target_rid, roi_set, region_id FROM TagLink WHERE target_rid IN :files AND region_id IS NOT NULL', { files: fileRids });
+        for (const row of rows) result.set(row.target_rid, (result.get(row.target_rid) || 0) + 1);
+        return result;
+    }
+
     // ---- links ---------------------------------------------------------------------------
 
     /**
@@ -527,6 +547,7 @@ export class TagsService {
         const createdBy = meta.created_by || 'user';
         const fields: Record<string, string | null> = {
             region_id: region,
+            roi_set: region && meta.roi_set ? String(meta.roi_set) : null,
             created_by: createdBy,
             service_id: createdBy === 'machine' ? meta.service_id ?? null : null,
             task: createdBy === 'machine' ? meta.task ?? null : null,
@@ -547,7 +568,7 @@ export class TagsService {
         const existing = await this.db.first(`SELECT @rid AS rid FROM TagLink WHERE ${where.join(' AND ')}`, params);
         if (existing) return existing;
         return this.db.sql(
-            `INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :region_id, owner = :owner, tagged_by = :tagged_by, created_by = :created_by, service_id = :service_id, task = :task, model = :model, confidence = :conf, project_rid = :project, created = ${this.db.legacy ? "sysdate('YYYY-MM-DD HH:MM:SS')" : "sysdate().format('YYYY-MM-DD HH:MM:SS')"}`,
+            `INSERT INTO TagLink SET entity_rid = :e, target_rid = :t, region_id = :region_id, roi_set = :roi_set, owner = :owner, tagged_by = :tagged_by, created_by = :created_by, service_id = :service_id, task = :task, model = :model, confidence = :conf, project_rid = :project, created = ${this.db.legacy ? "sysdate('YYYY-MM-DD HH:MM:SS')" : "sysdate().format('YYYY-MM-DD HH:MM:SS')"}`,
             {
                 ...fields,
                 tagged_by: taggedBy,
@@ -599,6 +620,47 @@ export class TagsService {
         await this.reindexFileTags(t, userRid);
         await this.pruneOrphanMachineTag(e);
         return deleted;
+    }
+
+    // ---- region links (tags on passages of a text) ---------------------------------------
+
+    /** Removes one tag from a region of a text in a ROI set. */
+    async unlinkRegion(entityRid: string, targetRid: string, roiSet: string, regionId: string, userRid: string): Promise<void> {
+        const e = tryRid(entityRid);
+        const t = tryRid(targetRid);
+        const set = tryRid(roiSet);
+        if (!e || !t || !set) return;
+        await this.db.sql('DELETE FROM TagLink WHERE entity_rid = :e AND target_rid = :t AND roi_set = :s AND region_id = :r AND owner = :owner', { e, t, s: set, r: regionId, owner: userRid });
+    }
+
+    /** Removes the links of regions that no longer exist (all regions of the set when `regionIds` is omitted). */
+    async removeRegionLinks(targetRid: string, roiSet: string, regionIds?: string[]): Promise<void> {
+        const t = tryRid(targetRid);
+        const set = tryRid(roiSet);
+        if (!t || !set) return;
+        if (!regionIds) {
+            await this.db.sql('DELETE FROM TagLink WHERE target_rid = :t AND roi_set = :s AND region_id IS NOT NULL', { t, s: set });
+        } else if (regionIds.length) {
+            await this.db.sql('DELETE FROM TagLink WHERE target_rid = :t AND roi_set = :s AND region_id IN :regions', { t, s: set, regions: regionIds });
+        }
+    }
+
+    /** The tags of the regions of a text in a ROI set: region id -> [{ rid, label, color, icon }]. */
+    async regionTags(targetRid: string, roiSet: string, userRid: string): Promise<Record<string, any[]>> {
+        const t = tryRid(targetRid);
+        const set = tryRid(roiSet);
+        if (!t || !set) return {};
+        const links = await this.db.rows('SELECT region_id, entity_rid FROM TagLink WHERE target_rid = :t AND roi_set = :s AND region_id IS NOT NULL AND owner = :owner', { t, s: set, owner: userRid });
+        const entityRids = [...new Set(links.map((l) => l.entity_rid).filter(Boolean))];
+        const entities = entityRids.length ? await this.db.rowsByRids('@rid AS rid, label, color, icon', entityRids, "@type = 'Entity'") : [];
+        const byRid = new Map(entities.map((e) => [e.rid, e]));
+        const out: Record<string, any[]> = {};
+        for (const link of links) {
+            const entity = byRid.get(link.entity_rid);
+            if (!entity) continue;
+            (out[link.region_id] ||= []).push({ rid: entity.rid, label: entity.label, color: entity.color, icon: entity.icon });
+        }
+        return out;
     }
 
     /** Deletes a machine-made entity that has no links left. */
@@ -661,6 +723,11 @@ export class TagsService {
                     fields.tag_confidence.push(tag.confidence);
                 }
             }
+            const passages = await this.db.rows('SELECT DISTINCT entity_rid FROM TagLink WHERE target_rid = :t AND region_id IS NOT NULL AND owner = :owner', { t: toRid(fileRid), owner: userRid });
+            const passageRids = passages.map((l) => l.entity_rid).filter(Boolean).slice(0, 500);
+            const passageLabels = passageRids.length ? new Map((await this.db.rowsByRids('@rid AS rid, label', passageRids, "@type = 'Entity'")).map((e) => [e.rid, e.label])) : new Map();
+            fields.passage_tag_rid = passageRids.filter((r) => passageLabels.get(r));
+            fields.passage_tag_label = fields.passage_tag_rid.map((r) => passageLabels.get(r));
             return this.tagSync ? await this.tagSync(toRid(fileRid), userRid, fields) : null;
         } catch {
             return null;
@@ -819,7 +886,7 @@ export class TagsService {
     }
 
     /** PATCH /api/entities/{rid}: renames a human tag in every desk that has it. */
-    async rename(entityRid: string, data: { label?: unknown; description?: unknown }, userRid: string): Promise<any> {
+    async rename(entityRid: string, data: { label?: unknown; description?: unknown; color?: unknown }, userRid: string): Promise<any> {
         const entity = await this.humanEntity(entityRid, userRid);
         const label = String(data?.label ?? entity.label).trim();
         if (!label) throw Boom.badRequest('Label is required');
@@ -836,6 +903,11 @@ export class TagsService {
         if (data?.description !== undefined) {
             sets.push('description = :description');
             params.description = String(data.description ?? '');
+        }
+        if (data?.color !== undefined) {
+            if (!isHexColor(data.color)) throw Boom.badRequest('A colour is written as #rrggbb');
+            sets.push('color = :color');
+            params.color = String(data.color).toLowerCase();
         }
         await this.db.sql(`UPDATE ${entity.rid} SET ${sets.join(', ')} WHERE @type = 'Entity'`, params);
         const reindexed = label !== entity.label ? await this.reindexFiles(await this.linkedFiles(entity.rid), userRid) : { files: 0, background: false };
@@ -891,6 +963,62 @@ export class TagsService {
             await this.db.sql(`DELETE FROM ${entity.rid} WHERE @type = 'Entity'`);
         }
         return { rid: entity.rid, deleted, reindexed: await this.reindexFiles(targets, userRid) };
+    }
+
+    /**
+     * POST /api/entities/{rid}/merge: moves the links of the source tags (file-level and passages)
+     * to this tag and deletes the sources. A link the tag already has is not doubled. The target
+     * joins every desk a source was in, so no link ends up on a desk without its tag. With
+     * `dry_run` nothing changes and the effect is returned, for the warning.
+     */
+    async merge(targetRid: string, data: { source_rids?: unknown; dry_run?: unknown }, userRid: string): Promise<any> {
+        const target = await this.humanEntity(targetRid, userRid);
+        const sourceRids = ridList(data?.source_rids).filter((r) => r !== target.rid);
+        if (!sourceRids.length) throw Boom.badRequest('Choose at least one other tag to merge');
+        const sources: any[] = [];
+        for (const rid of sourceRids) {
+            const source = await this.humanEntity(rid, userRid);
+            if (source.type !== target.type) throw Boom.badRequest(`"${source.label}" is a ${source.type} and "${target.label}" a ${target.type}: only tags of one type can be merged`);
+            sources.push(source);
+        }
+        const desksBySource = await this.desksOf(sourceRids);
+        const desks = new Map<string, { rid: string; label: string }>();
+        for (const list of desksBySource.values()) for (const d of list) desks.set(d.rid, d);
+        const keyOf = (l: any) => [l.target_rid, l.region_id, l.roi_set, l.tagged_by, l.created_by, l.service_id, l.task, l.model].map((v) => v ?? '').join('\u0000');
+        const fields = '@rid AS rid, target_rid, region_id, roi_set, tagged_by, created_by, service_id, task, model';
+        const have = new Set((await this.db.rows(`SELECT ${fields} FROM TagLink WHERE entity_rid = :e`, { e: target.rid })).map(keyOf));
+
+        const plan = new Map<string, { links: any[]; duplicates: string[] }>();
+        for (const source of sources) {
+            const links = await this.db.rows(`SELECT ${fields} FROM TagLink WHERE entity_rid = :e`, { e: source.rid });
+            const duplicates: string[] = [];
+            for (const link of links) {
+                const key = keyOf(link);
+                if (have.has(key)) duplicates.push(link.rid);
+                else have.add(key);
+            }
+            plan.set(source.rid, { links, duplicates });
+        }
+        const summary = {
+            target: { rid: target.rid, label: target.label },
+            sources: sources.map((s) => ({ rid: s.rid, label: s.label })),
+            desks: [...desks.values()],
+            links: [...plan.values()].reduce((n, p) => n + p.links.length - p.duplicates.length, 0),
+            duplicates: [...plan.values()].reduce((n, p) => n + p.duplicates.length, 0),
+        };
+        if (data?.dry_run === true || data?.dry_run === 'true') return { ...summary, dry_run: true };
+
+        for (const desk of desks.values()) await this.attachToDesk(target.rid, desk.rid, userRid);
+        const files = new Set<string>();
+        for (const source of sources) {
+            const { links, duplicates } = plan.get(source.rid)!;
+            for (const link of links) if (link.target_rid) files.add(link.target_rid);
+            for (const rid of duplicates) await this.db.sql(`DELETE FROM ${rid}`);
+            await this.db.sql('UPDATE TagLink SET entity_rid = :t WHERE entity_rid = :s', { t: target.rid, s: source.rid });
+            await this.db.sql('DELETE FROM DeskTag WHERE entity_rid = :e', { e: source.rid });
+            await this.db.sql(`DELETE FROM ${source.rid} WHERE @type = 'Entity'`);
+        }
+        return { ...summary, dry_run: false, reindexed: await this.reindexFiles([...files], userRid) };
     }
 
     /** DELETE /api/entities/{rid}: deletes a human tag, its links and its place in every desk. */

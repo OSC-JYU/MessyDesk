@@ -151,6 +151,12 @@ export class SolrClient {
         const fq = [`owner:"${escapeSolrValue(userRid)}"`, `(type:"text" OR process:"${DESCRIPTION_DOC}")`];
         if (projects.length === 1) fq.push(`project:"${escapeSolrValue(projects[0])}"`);
         else if (projects.length > 1) fq.push(`(${projects.map((rid) => `project:"${escapeSolrValue(rid)}"`).join(' OR ')})`);
+        // Only texts with a coded passage that has these tags (any, or all with passage_match "and").
+        const passageTags = (Array.isArray(data?.passage_tag_rids) ? data.passage_tag_rids : []).map((r: unknown) => normalizeProjectRid(r)).filter((r: string) => /^#\d+:\d+$/.test(r));
+        if (passageTags.length) {
+            const op = String(data?.passage_match || 'or').toLowerCase() === 'and' ? ' AND ' : ' OR ';
+            fq.push(`(${passageTags.map((r: string) => `passage_tag_rid:"${escapeSolrValue(r)}"`).join(op)})`);
+        }
         if (!query) return [];
         // `fuzzy`: also find OCR misreadings (plan/decisions.md G6). Fuzzy terms go only to the
         // whole-word field: on the n-gram field they would match almost anything.
@@ -359,7 +365,7 @@ export class SolrClient {
                 if (!doc) continue;
                 const merged: Record<string, unknown> = {};
                 for (const key of Object.keys(doc)) if (!key.startsWith('_')) merged[key] = doc[key];
-                for (const key of ['tag_label', 'tag_rid', 'tag_created_by', 'tag_confidence']) merged[key] = fields[key] || [];
+                for (const key of ['tag_label', 'tag_rid', 'tag_created_by', 'tag_confidence', 'passage_tag_label', 'passage_tag_rid']) merged[key] = fields[key] || [];
                 updates.push(merged);
             } catch (error) {
                 this.log(`Solr tag realtime-get error: ${(error as Error).message}`);

@@ -66,6 +66,22 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | GET | `/api/thumbnails/{path*}` | user | `preview.jpg` / `thumbnail.jpg` next to a file; 404 when not ready or not yours |
 | GET / POST | `/api/images/{rid}/sets/{set_rid}/rois` | user | read / upsert the roi.json |
 | PUT / DELETE | `/api/images/{rid}/sets/{set_rid}/rois/{roi_rid}` | user | update / delete |
+| GET / POST | `/api/texts/{rid}/sets/{set_rid}/rois` | user | text regions (`start`/`end` in Unicode code points, `text_hash`); POST validates offsets against the text (400), GET adds `stale` (see [text-roi-coding](proposals/text-roi-coding.md)) |
+| PUT / DELETE | `/api/texts/{rid}/sets/{set_rid}/rois/{roi_rid}` | user | update (validated) / delete |
+| POST | `/api/texts/{rid}/sets/{set_rid}/import-spans` | user | import the spans of a `ner.json` run on the text (`ner_rid`, optional `labels`) as regions of the ROI set; labels become desk tags, linked as machine tags with the span's confidence. Existing regions stay, repeated span ids and spans outside the text are skipped (`{ regions, tags, skipped }`) |
+| GET / POST | `/api/sets/{roi_set}/coders` | user (owner) | list (with progress: texts, texts with passages, passages, untagged) / assign a coder to a text ROI set (`user_rid`); a coder codes only in that set |
+| PUT / DELETE | `/api/sets/{roi_set}/coders/{user}` | user (owner) | lock (`{locked}`: read-only for the coder) / remove a coder |
+| POST | `/api/coding/sets` | user (owner) | one ROI set per coder on a text or set of texts, each assigned (`source_rid`, `coder_rids`, optional `label`) |
+| POST | `/api/sets/{roi_set}/copy` | user (owner) | copy a ROI set's passages and tags into a new set (`label`, default "Final") |
+| GET | `/api/projects/{rid}/coding/export` | user (owner) | coded passages of a desk (or `roi_set`), `format=json` (default) or `csv`; one object per passage: file, document, page, roi_set, start/end (code points), text_length, text, tags, coders |
+| GET | `/api/users/names` | user | `[{ rid, name }]` of active users (no e-mails), to choose a coder |
+| GET | `/api/coding/sets` | user | the ROI sets the user may code in |
+| GET | `/api/coding/sets/{set}/texts`, `.../texts/{text}/content`, `.../tags`, `.../coverage` | coder | the texts of the set, one text, the desk's tags, progress. 404 without a grant or for a text outside the set |
+| GET / POST | `/api/coding/sets/{set}/texts/{text}/rois` | coder | read / save regions (403 when locked) |
+| POST / DELETE | `/api/coding/sets/{set}/texts/{text}/regions/{region}/tags/{tag}` | coder | tag / untag; recorded as tagged by the coder, with the desk owner as owner of the link |
+| GET | `/api/sets/{roi_set}/coding` | user | texts with passages in a text ROI set: `{ files: { <text rid>: { regions, tagged, untagged } } }` (texts without passages are missing) |
+| GET | `/api/tags/passages` | user | coded passages of tags (`entities`, `project_rid(s)`, `skip`, `limit`): `{ total, items: [{ file_rid, file_label, roi_set, region_id, start, end, text, before, after, tags }] }`, each passage once |
+| POST / DELETE | `/api/texts/{rid}/sets/{set_rid}/regions/{region}/tags/{tag_rid}` | user | tag / untag a region (any number of tags, or none; 404 for an unknown region, or a tag that is not the user's or not in the desk). GET of the regions returns `region_tags`; links of regions removed by a save go with them |
 
 ## Graph
 
@@ -129,7 +145,8 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | DELETE | `/api/entities/types/{type}` | user | only when no tag has the type (409 with the count); `Tag` is protected (400) |
 | GET | `/api/entities/items`, `/api/entities/sets/{rid}` | user | `items`: files with any of `entities` (default) or all of them (`match=and`), paged with `skip` / `limit` (default 24, at most 200): `{ total, skip, limit, items }` |
 | POST / DELETE | `/api/entities/{eid}/vertex/{rid}` | user | link / unlink (204 when not yours, or when the file's desk does not have the human tag) |
-| PATCH / DELETE | `/api/entities/{eid}` | user | rename a human tag in every desk that has it (409 when a desk already has that label) / delete it everywhere; 400 for machine tags |
+| POST | `/api/entities/{rid}/merge` | user | merge tags into this one: `source_rids`, optional `dry_run` (returns the effect only). Whole-file and passage links move, a link the tag already has is not doubled, the target joins the desks of the sources, the sources are deleted. 400 for machine tags, other types, or nothing to merge |
+| PATCH / DELETE | `/api/entities/{eid}` | user | rename a human tag in every desk that has it (409 when a desk already has that label); `color` (`#rrggbb`) changes its colour / delete it everywhere; 400 for machine tags |
 | GET | `/api/entities/{eid}/usage` | user | desks and file counts of a human tag, for the rename/delete warnings |
 | POST | `/api/entities/link/{rid}` | user/service | create and link a list |
 | GET / POST | `/api/tags` | user | raw `{result: [...]}` envelope; `GET ?project_rid=` lists the desk's human tags; `POST` needs `project_rid` |
@@ -140,7 +157,7 @@ Auth: **user** = `mail` header (or dev mode), **admin** = user with `access: adm
 | GET | `/api/tags/machine` | user | Autotag tags grouped by service/task/model, with `service_name`; `project_rid(s)` limits to desks |
 | GET | `/api/tags/ner/labels`, `/api/tags/ner/labels/mentions` | user | Faceted ROI-data browsing (read from the `ner.json` files); `tag_rids` (+ `tag_match`) narrows them to the files with those tags |
 | GET | `/api/tags/roi/labels` | user | ROI labels from the Solr `roi_run` documents, `{items: [{service_id, task, model, label, count}], hasMore}`; `project_rid(s)`, `search`, `offset`, `limit` |
-| POST | `/api/filters/{id}/files/{rid}` | user | `mdf-set-filter` (`selected_entity_rids` and/or `selected_roi_labels`; 502 when ROI labels are asked and Solr is down) or a region set |
+| POST | `/api/filters/{id}/files/{rid}` | user | `mdf-set-filter` (`selected_entity_rids` and/or `selected_roi_labels`, `tag_level`: `file` (default) / `passage` / `any`; 502 when ROI labels are asked and Solr is down) or a region set |
 | GET / POST | `/api/prompts` | user | list / create or update own prompt |
 | POST | `/api/search` | user | Solr response; `[]` for an empty query |
 | GET | `/api/search/info` | user | doc counts per project |

@@ -116,6 +116,8 @@ schema_upsert "add-field" '{ "name": "roi_source",      "type": "string",       
 schema_upsert "add-field" '{ "name": "roi_service",     "type": "string",        "stored": true, "indexed": true }'
 schema_upsert "add-field" '{ "name": "roi_task",        "type": "string",        "stored": true, "indexed": true }'
 schema_upsert "add-field" '{ "name": "roi_model",       "type": "string",        "stored": true, "indexed": true }'
+schema_upsert "add-field" '{ "name": "passage_tag_label", "type": "string",      "stored": true, "indexed": true, "multiValued": true }'
+schema_upsert "add-field" '{ "name": "passage_tag_rid",   "type": "string",      "stored": true, "indexed": true, "multiValued": true }'
 schema_upsert "add-field" '{ "name": "roi_key",         "type": "string",        "stored": true, "indexed": true, "multiValued": true }'
 
 # ---------------------------------------------------------------

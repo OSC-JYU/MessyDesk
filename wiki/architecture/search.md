@@ -29,7 +29,7 @@ The Solr core is pre-created by `docker-compose.yml` via `solr-precreate messyde
 
 Docs also carry `tag_label`/`tag_rid`/`tag_created_by`/`tag_confidence` (multivalued, kept in sync from
 `TagLink` \u2014 see Index Management below), though these aren't currently part of the default query/highlight
-fields above. `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System). Faceted ROI-data (`ner.json`) has no
+fields above. Tags of coded passages (text ROI regions) are kept in `passage_tag_label`/`passage_tag_rid` (multivalued, each tag once per file, at most 500), so a search can combine text and codes; `tag_*` stay whole-file tags. The fields are in `tools/solr-init-v2.sh` (run it to add them to an existing index; files are updated on their next tag change or a desk reindex). `TagLink` is Autotag only (see graph-data-model.md Entity/Tag System). Faceted ROI-data (`ner.json`) has no
 tag fields; instead each run is indexed as its own `roi_run` document (below), and its mentions are browsed
 directly from the files via `/api/tags/ner/labels*`.
 
