@@ -369,6 +369,13 @@ export class JobQueue {
         return Number(result.changes) > 0;
     }
 
+    /** The payload of a job (for the routes that must know which run it belongs to). */
+    payloadOf(jobId: number): any | null {
+        const row = this.open().prepare('SELECT payload_json FROM queue_jobs WHERE id = ?').get(jobId) as { payload_json: string } | undefined;
+        if (!row) return null;
+        try { return JSON.parse(row.payload_json); } catch { return null; }
+    }
+
     getJob(jobId: number): any | null {
         const row = this.open().prepare(`SELECT id, queue, payload_json, process_rid, set_process_rid, status, attempts, created_at, updated_at, completed_at FROM queue_jobs WHERE id = ?`).get(jobId) as any;
         if (!row) return null;

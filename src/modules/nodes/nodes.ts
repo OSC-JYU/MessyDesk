@@ -7,6 +7,8 @@ import { toRid, uuidv7, ridToPathPart } from '../../platform/ids.ts';
 import type { DataLayout } from '../../platform/storage/layout.ts';
 import { ensureDir, writeJson } from '../../platform/storage/fsutil.ts';
 import { EDGE, type GraphStore } from '../../shared/graph-store.ts';
+import { FILE_TYPE } from '../../shared/service-ids.ts';
+import { paramsSummaryJson } from './params-summary.ts';
 
 export interface MessageLike {
     file: any;
@@ -25,6 +27,21 @@ function ridOf(value: unknown): string | undefined {
     if (typeof value === 'string') return value;
     return (value as any)['@rid'];
 }
+
+function originFrom(parent: any): Record<string, unknown> {
+    const origin: Record<string, unknown> = {};
+    if (parent.type === FILE_TYPE.ORIGINAL_PDF) {
+        origin.origin_rid = parent.rid;
+        origin.origin_label = parent.label;
+    } else if (parent.origin_rid) {
+        origin.origin_rid = parent.origin_rid;
+        origin.origin_label = parent.origin_label;
+        if (Number.isFinite(Number(parent.page_number))) origin.page_number = Number(parent.page_number);
+    }
+    return origin;
+}
+
+export interface ReferenceSpec { rid: string; project_rid?: string | null; type?: string; extension?: string; label?: string }
 
 export class NodesService {
     private readonly db: ArcadeClient;
@@ -192,6 +209,8 @@ export class NodesService {
         if (msg.task.model) attrs.model = msg.task.model.id;
         if (msg.task.model?.version) attrs.model_version = msg.task.model.version;
         if (msg.task.model?.family) attrs.model_family = msg.task.model.family;
+        const paramsSummary = paramsSummaryJson(msg.service, msg.task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         if (msg.output_set) attrs.set = msg.output_set;
         if (msg.set_process_rid) attrs.set_process = msg.set_process_rid;
         if (msg.set_process && !attrs.set_process) attrs.set_process = msg.set_process;
@@ -215,6 +234,8 @@ export class NodesService {
         if (task.model?.version) attrs.model_version = task.model.version;
         if (task.model?.family) attrs.model_family = task.model.family;
         if (service?.id) attrs.service_id = service.id;
+        const paramsSummary = paramsSummaryJson(service, task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         const processNode = await this.store.createVertex('SetProcess', attrs);
         const projectRid = input.project_rid || await this.store.projectRidOf(input['@rid']);
         if (projectRid) await this.store.connect(processNode['@rid'], EDGE.BELONGS_TO, projectRid);
@@ -243,6 +264,8 @@ export class NodesService {
         if (task.model?.version) attrs.model_version = task.model.version;
         if (task.model?.family) attrs.model_family = task.model.family;
         if (service?.id) attrs.service_id = service.id;
+        const paramsSummary = paramsSummaryJson(service, task);
+        if (paramsSummary) attrs.params_summary = paramsSummary;
         const node = await this.store.createVertex('SetProcess', attrs);
         const processPath = this.layout.processFilesDir(input.project_rid, node.uuid || node['@rid']);
         await ensureDir(processPath);
@@ -300,9 +323,27 @@ export class NodesService {
         return fallback;
     }
 
+    /**
+     * The original PDF an output belongs to, and the page it is, copied from the file it derives
+     * from (the set browser groups files by it without walking the graph): a split page gets the
+     * original PDF, anything made from a page inherits the page's origin and page number.
+     */
+    private async originOf(sourceRid: string | undefined): Promise<Record<string, unknown>> {
+        if (!sourceRid) return {};
+        const parent = await this.db.first(
+            `SELECT @rid AS rid, type, label, origin_rid, origin_label, page_number FROM ${toRid(sourceRid)} WHERE @type = 'File'`,
+        ).catch(() => null);
+        return parent ? originFrom(parent) : {};
+    }
+
     /** File node for a process output (createProcessFileNode). */
     async createProcessFile(processRid: string, msg: MessageLike, description: string, info: string): Promise<any> {
+        const isManyToOne = String(msg.behaviour || '').toLowerCase() === 'many-to-one';
+        const fallback = msg.root_source?.['@rid']
+            || (isManyToOne ? (ridOf(msg.input_set) || ridOf(msg.set_rid) || msg.file['@rid']) : msg.file['@rid']);
+        const source = this.lineageSource(msg, fallback);
         const params: Record<string, unknown> = {
+            ...(await this.originOf(source)),
             uuid: uuidv7(),
             project_rid: msg.file.project_rid || null,
             type: msg.file.type,
@@ -319,10 +360,6 @@ export class NodesService {
         const filePath = this.layout.filePath(projectRid, node.uuid || node['@rid'], msg.file.extension);
         await this.store.setAttribute(node['@rid'], 'path', filePath);
         node.path = filePath;
-        const isManyToOne = String(msg.behaviour || '').toLowerCase() === 'many-to-one';
-        const fallback = msg.root_source?.['@rid']
-            || (isManyToOne ? (ridOf(msg.input_set) || ridOf(msg.set_rid) || msg.file['@rid']) : msg.file['@rid']);
-        const source = this.lineageSource(msg, fallback);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (source) await this.store.connectDerivedFrom(node['@rid'], source, processRid);
         if (msg.output_set) this.scheduleSetManifest(msg.output_set);
@@ -334,7 +371,9 @@ export class NodesService {
         const ref = toRid(refRid);
         const source = await this.db.first(`SELECT @rid, path, metadata, info FROM ${ref}`);
         if (!source?.path) throw new Error(`Reference source not found or missing path: ${ref}`);
+        const lineage = this.lineageSource(msg, ref);
         const params: Record<string, unknown> = {
+            ...(await this.originOf(lineage)),
             uuid: uuidv7(),
             project_rid: msg.file.project_rid || null,
             type: msg.file.type,
@@ -351,11 +390,58 @@ export class NodesService {
         await this.store.setAttribute(node['@rid'], 'path', source.path);
         node.path = source.path;
         node.ref = ref;
-        const lineage = this.lineageSource(msg, ref);
         if (msg.output_set) await this.store.setAttribute(node['@rid'], 'set', msg.output_set);
         if (lineage) await this.store.connectDerivedFrom(node['@rid'], lineage, processRid);
         if (msg.output_set) this.scheduleSetManifest(msg.output_set);
         return node;
+    }
+
+    /**
+     * Many references in an output set at once, the same nodes and lineage edges as
+     * createReferenceFile makes one by one: one query for the files, one for the process and one
+     * script (one transaction) for all nodes and edges. Returns how many were made.
+     */
+    async createReferenceFiles(processRid: string, outputSet: string, files: ReferenceSpec[]): Promise<number> {
+        if (!files.length) return 0;
+        const p = toRid(processRid);
+        const sources = new Map((await this.db.rowsByRids(
+            '@rid AS rid, path, type, label, origin_rid, origin_label, page_number', files.map((f) => f.rid), "@type = 'File'",
+        )).map((row: any) => [String(row.rid), row]));
+        const proc = await this.db.first(`SELECT uuid, service_id, service, label, task FROM ${p}`).catch(() => null);
+        const params: Record<string, unknown> = {
+            processRid: p,
+            processId: proc?.uuid || p,
+            cruncher: String(proc?.service_id || proc?.service || proc?.label || ''),
+            task: String(proc?.task || ''),
+        };
+        const lines: string[] = [];
+        let made = 0;
+        for (const file of files) {
+            const ref = toRid(file.rid);
+            const source = sources.get(ref);
+            if (!source?.path) throw new Error(`Reference source not found or missing path: ${ref}`);
+            params[`c${made}`] = {
+                ...originFrom(source),
+                uuid: uuidv7(),
+                project_rid: file.project_rid || null,
+                type: file.type,
+                extension: file.extension,
+                label: file.label,
+                description: '',
+                info: '',
+                expand: false,
+                _active: true,
+                ref,
+                path: source.path,
+                set: toRid(outputSet),
+            };
+            lines.push(`LET $v${made} = CREATE VERTEX File CONTENT :c${made};`);
+            lines.push(`CREATE EDGE ${EDGE.DERIVED_FROM} FROM $v${made} TO ${ref} SET process_rid = :processRid, process_id = :processId, cruncher = :cruncher, task = :task;`);
+            made += 1;
+        }
+        await this.db.script(['BEGIN;', ...lines, 'COMMIT;'].join('\n'), params);
+        this.scheduleSetManifest(outputSet);
+        return made;
     }
 
     /** error.json node for a failed job. */

@@ -36,7 +36,7 @@ directly from the files via `/api/tags/ner/labels*`.
 ### Filters
 
 - Owner filter: always applied (user RID from auth context)
-- Type filter: `type=text` by default
+- Type filter: `type=text` by default, plus description-only documents (`process=description`) of files without text (images, PDFs). `SolrClient.syncDescription` writes them when a file's description is edited, and updates `description` on the file's text documents; a desk reindex restores them.
 - Project filter: optional, supports single project or OR'd multiple projects
 
 ### RID handling

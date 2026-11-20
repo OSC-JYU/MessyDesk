@@ -31,7 +31,6 @@ src/
     files/          upload, download, documents, versions, set listings, file metadata
     thumbnails/     thumbnail jobs (every variant) and serving thumbnails
     sets/           ZIP export jobs
-    import/         PDF auto-import (split on upload)
     services/       registry (persisted), consumer liveness, matching services to nodes
     service-help/   help bundle ingest and serving
     processing/     dispatch of single files, sets (all behaviours) and sources; resume; reindex

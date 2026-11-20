@@ -17,12 +17,16 @@ import { GraphStore } from './shared/graph-store.ts';
 import { AccessService } from './modules/access/access.ts';
 import { BatchState } from './modules/batches/batch-state.ts';
 import { FilesService } from './modules/files/files.ts';
+import { DemosService } from './modules/demos/demos.ts';
+import { DemoExporter } from './modules/demos/exporter.ts';
+import { DemoImporter } from './modules/demos/importer.ts';
+import { demoRoutes } from './modules/demos/routes.ts';
+import { ProjectCovers } from './modules/projects/covers.ts';
 import { fileRoutes } from './modules/files/routes.ts';
 import { FiltersService } from './modules/filters/filters.ts';
 import { GraphService } from './modules/graph/graph.ts';
 import { graphRoutes } from './modules/graph/routes.ts';
 import { BackgroundDeletes } from './modules/graph/deletes.ts';
-import { ImportPipeline } from './modules/import/import.ts';
 import { miscRoutes } from './modules/misc/routes.ts';
 import { NodesService } from './modules/nodes/nodes.ts';
 import { ProcessingService } from './modules/processing/processing.ts';
@@ -40,12 +44,15 @@ import { semanticRoutes } from './modules/semantic/routes.ts';
 import { RoisService } from './modules/rois/rois.ts';
 import { ServiceGroupsService } from './modules/service-groups/service-groups.ts';
 import { TokenBudget } from './modules/usage/token-budget.ts';
+import { SecretVault } from './modules/secrets/vault.ts';
 import { ServiceHelp } from './modules/service-help/bundle.ts';
 import { loadFilters } from './modules/services/matching.ts';
 import { ServiceRegistry } from './modules/services/registry.ts';
 import { serviceRoutes } from './modules/services/routes.ts';
 import { ZipJobs } from './modules/sets/zip-jobs.ts';
 import { NerService } from './modules/tags/ner.ts';
+import { SetMerge } from './modules/sets/merge.ts';
+import { setRoutes } from './modules/sets/routes.ts';
 import { tagRoutes } from './modules/tags/routes.ts';
 import { TagsService } from './modules/tags/tags.ts';
 import { ThumbnailService } from './modules/thumbnails/thumbnails.ts';
@@ -111,11 +118,12 @@ async function main(): Promise<void> {
     const nodes = new NodesService(db, store, layout, { log: (m) => logger.warn(m) });
     const deskGraph = new DeskGraph(db, config.apiUrl);
     const thumbnails = new ThumbnailService(publisher, layout);
-    const importPipeline = new ImportPipeline(store, nodes, registry, publisher, sse);
-    const files = new FilesService({ db, store, layout, access, nodes, tags, thumbnails, registry, importPipeline, deskGraph, sse, apiUrl: config.apiUrl, maxVersionTextBytes: config.maxVersionTextBytes });
+    const files = new FilesService({ db, store, layout, access, nodes, tags, thumbnails, registry, deskGraph, sse, apiUrl: config.apiUrl, maxVersionTextBytes: config.maxVersionTextBytes });
     const batches = new BatchState(db, store);
     const tokenBudget = new TokenBudget(db);
-    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, tokenBudget, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
+    const secrets = new SecretVault({ idleMs: config.secretIdleMinutes * 60_000 });
+    secrets.start();
+    const processing = new ProcessingService({ db, store, layout, access, nodes, files, registry, publisher, batches, sse, solr, tokenBudget, secrets, apiUrl: config.apiUrl, log: (m) => logger.error(m) });
     tags.setTagSync((fileRid, userRid, fields) => processing.syncTags(fileRid, userRid, fields));
     // Links made before TagLink.project_rid existed get their desk in the background.
     tags.backfillLinkProjects((m) => logger.info(m)).catch((error) => logger.error(`TagLink desk backfill failed: ${(error as Error).message}`));
@@ -126,23 +134,33 @@ async function main(): Promise<void> {
     const filters = new FiltersService(db, store, layout, access, nodes, solr);
     filters.setFilters(await loadFilters(config.filtersDir, (m) => logger.warn(m)));
 
+    const projects = new ProjectsService(db, store, layout, access, { expirationDays: config.projectExpirationDays, quotaGb: config.diskQuotaGb });
+    const covers = new ProjectCovers(db, store, layout, access, config.apiUrl);
+    const demoImporter = new DemoImporter(db, store, layout, projects, {
+        syncSetManifest: (rid) => nodes.syncSetManifest(rid),
+        reindex: (projectRid, userRid) => processing.reindexProject(projectRid, userRid, (fileRid) => tags.reindexFileTags(fileRid, userRid), () => ner.reindexProject(userRid, projectRid)),
+        log: (m) => logger.warn(m),
+    });
+    const demos = new DemosService({ dataDir: config.dataDir, access, covers, exporter: new DemoExporter(db, layout, config.apiUrl), importer: demoImporter });
+
     const deps: Deps = {
-        config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users,
-        projects: new ProjectsService(db, store, layout, access, { expirationDays: config.projectExpirationDays, quotaGb: config.diskQuotaGb }),
+        config, logger, db, store, layout, sse, solr, nomad, queue, publisher, access, users, projects, covers, demos,
         deskGraph, nodes, graph, deletes, files, thumbnails,
         semantic: new SemanticSearch({ db, access, registry, publisher, sse, layout, logger }),
+        setMerge: new SetMerge(db, store, layout, access, nodes),
         zipJobs: new ZipJobs(layout, files, publisher, config.setZipJobTtlMs, registry),
-        importPipeline, registry,
+        registry,
         serviceHelp: new ServiceHelp({ dir: path.join(config.helpDir, 'services'), bundleMaxFiles: config.help.bundleMaxFiles, archiveMaxBytes: config.help.archiveMaxBytes, archiveMaxEntries: config.help.archiveMaxEntries }),
         processing, batches,
-        results: new ResultsService({ db, store, layout, nodes, batches, tags, ner, thumbnails, registry, importPipeline, sse, logger, apiUrl: config.apiUrl }),
+        results: new ResultsService({ db, store, layout, nodes, batches, tags, ner, thumbnails, registry, sse, logger, apiUrl: config.apiUrl }),
         tags,
         ner,
         filters,
-        rois: new RoisService(db, store, access, graph),
+        rois: new RoisService(db, store, access, graph, tags),
         prompts: new PromptsService(db),
         serviceGroups: new ServiceGroupsService(db, store, registry, config.dataDir),
         tokenBudget,
+        secrets,
     };
 
     const server = await createServer(config.port, config.publicDir);
@@ -160,7 +178,9 @@ async function main(): Promise<void> {
         ...miscRoutes(deps),
         ...userRoutes(deps),
         ...projectRoutes(deps),
+        ...demoRoutes(deps),
         ...fileRoutes(deps),
+        ...setRoutes(deps),
         ...graphRoutes(deps),
         ...processingRoutes(deps),
         ...resultRoutes(deps),
@@ -178,6 +198,7 @@ async function main(): Promise<void> {
         await processing.idle();
         await deletes.idle();
         await nodes.flushAllManifests();
+        secrets.stop();
         queue.close();
         process.exit(0);
     };

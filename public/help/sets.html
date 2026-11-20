@@ -23,6 +23,14 @@
 <li><strong>One-to-Many:</strong> A single input file is expanded into multiple output files, automatically forming a new set. For example, applying a <strong>PDF Split</strong> cruncher to a single multi-page PDF node expands it into a set containing its individual pages.</li>
 <li><strong>Many-to-One:</strong> An entire set of input files is consolidated into a single output node. For example, applying a <strong>JSON to CSV</strong> cruncher to a set of separate JSON data files aggregates them into a single, unified CSV spreadsheet.</li>
 </ul>
+<h2>Sets made from PDFs</h2>
+<p>When a set holds files that come from PDFs (the pages of split PDFs, or the texts and images made from those pages), MessyDesk shows <strong>one card per PDF</strong> when you open the set. The card shows the first page of the PDF. Click it to see the pages of that PDF; the path above the cards (<strong>Set name › file.pdf</strong>) takes you back. Files in the set that do not come from a PDF are shown after the PDF cards.</p>
+<p>This is only how the set is shown. The set itself stays flat, and processing, tags and search work on the individual files. When you open a file and step to the next one, you move through the set in the same order, and the bar above the file shows which PDF it belongs to.</p>
+<ul>
+<li>Use <strong>Show all files</strong> (or <strong>Group by PDF</strong>) above the cards to switch the view of the set you are looking at.</li>
+<li>To make it the default for every set, change <strong>Group PDF content</strong> in your Settings.</li>
+</ul>
+<p>A set made from just one PDF shows its pages straight away.</p>
 <h2>Creating Sets Efficiently</h2>
 <p>Manually adding files to a set one by one is tedious. The quickest and most efficient way to build a set is to leverage the ZIP workflow:</p>
 <ol>

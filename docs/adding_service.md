@@ -44,6 +44,15 @@ If previous processing is many-to-one-by-source, then we combine all files to on
 
 By default (if not defined in service.json) behaviour is one-to-one.
 
+## Tasks on region sets (ROIs)
+
+A region set only has a roi.json for the images the user drew on. A task with the param `no_rois` decides what happens to the other images (and to emptied roi.json files) when it is run on a region set:
+
+- `only`: they are left out.
+- `all`: they go to the output set as they are. With `"no_rois_output": "reference"` in the task, MessyDesk makes the references itself, without jobs. Without it, MessyDesk sends the image itself as the input of the job, and the service must answer with a reference to it (`ref_file_rid`).
+
+Without the param, every roi.json is sent to the service, as before. See MD-sharp's ROI tasks for an example (`src/modules/processing/roi-runs.ts`).
+
 ## Service types
 
 1. Services that outputs one image or text file (one-to-one)

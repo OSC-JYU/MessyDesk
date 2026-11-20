@@ -6,6 +6,7 @@ import type { Readable } from 'node:stream';
 import type { Deps } from '../../app/deps.ts';
 import { credentials, currentUser } from '../../platform/http/auth.ts';
 import { tryRid } from '../../platform/ids.ts';
+import { isPdfType } from '../../shared/service-ids.ts';
 import type { UploadPart } from './files.ts';
 import { contentTypeFor } from './metadata.ts';
 
@@ -51,7 +52,7 @@ function stream(h: ResponseToolkit, filePath: string) {
     return h.response(src);
 }
 
-export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, access, graph }: Deps): ServerRoute[] {
+export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, access, graph, sse }: Deps): ServerRoute[] {
     return [
         {
             method: 'POST',
@@ -64,10 +65,7 @@ export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, a
                 if (!raw) throw Boom.badRequest('No file uploaded');
                 const parts = (Array.isArray(raw) ? raw : [raw]) as UploadPart[];
                 const noThumbnails = ['no-thumbnails', 'no_thumbnails', 'noThumbnails'].some((k) => truthy(query[k]) || truthy(payload[k]));
-                return files.upload(rid(request.params.rid), request.params.set, parts, currentUser(request).rid, {
-                    noThumbnails,
-                    deleteOriginal: query.delete_original !== 'false',
-                });
+                return files.upload(rid(request.params.rid), request.params.set, parts, currentUser(request).rid, { noThumbnails });
             },
         },
         {
@@ -116,7 +114,7 @@ export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, a
                 const response = stream(h, meta.path);
                 const type = contentTypeFor(meta);
                 if (type.type) response.type(type.type);
-                if (meta.type === 'pdf') response.header('Content-Disposition', `inline; filename=${meta.label}`);
+                if (isPdfType(meta.type)) response.header('Content-Disposition', `inline; filename=${meta.label}`);
                 else if (!type.type) response.header('Content-Disposition', `attachment; filename=${meta.label}`);
                 return response;
             },
@@ -191,7 +189,24 @@ export function fileRoutes({ files, thumbnails, zipJobs, registry, store, ner, a
             path: '/api/sets/{rid}/files',
             handler: (request) => {
                 const q = request.query as Record<string, unknown>;
-                return files.setFiles(rid(request.params.rid), currentUser(request).rid, { thumbnails: true, limit: q.limit, skip: q.skip });
+                return files.setFiles(rid(request.params.rid), currentUser(request).rid, { thumbnails: true, limit: q.limit, skip: q.skip, group: q.group, origin: q.origin, order: q.order });
+            },
+        },
+        {
+            method: 'PUT',
+            path: '/api/sets/{rid}/watch',
+            handler: (request, h) => {
+                sse.watch(currentUser(request).rid, rid(request.params.rid));
+                return h.response().code(204);
+            },
+        },
+        {
+            method: 'DELETE',
+            path: '/api/sets/{rid}/watch',
+            handler: (request, h) => {
+                const user = currentUser(request).rid;
+                if (sse.isWatching(user, rid(request.params.rid))) sse.watch(user, null);
+                return h.response().code(204);
             },
         },
         {

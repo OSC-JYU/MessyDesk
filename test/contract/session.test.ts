@@ -35,7 +35,7 @@ test('GET /api/me returns identity and settings with defaults', async () => {
     assert.equal(res.body.access, 'admin');
     assert.equal(res.body.group, 'user');
     assert.equal(typeof res.body.mode, 'string');
-    assert.deepEqual(Object.keys(res.body.settings).sort(), ['cookie', 'motion', 'theme']);
+    assert.deepEqual(Object.keys(res.body.settings).sort(), ['cookie', 'desk_view', 'group_pdf', 'hide_demos', 'lineage_compare', 'motion', 'theme']);
 });
 
 test('PUT /api/me/settings merges and validates', async () => {

@@ -45,6 +45,18 @@ export class SseHub {
         return true;
     }
 
+    private watched = new Map<string, string>();
+
+    /** The set a user has open: its thumbnails are sent as they arrive. Null clears it. */
+    watch(userRid: string, setRid: string | null): void {
+        if (setRid) this.watched.set(userRid, setRid);
+        else this.watched.delete(userRid);
+    }
+
+    isWatching(userRid: string | null | undefined, setRid: string): boolean {
+        return Boolean(userRid) && this.watched.get(String(userRid)) === setRid;
+    }
+
     connectedUsers(): string[] {
         return [...this.connections.keys()];
     }

@@ -9,10 +9,19 @@ export const THEMES = [
 export const COOKIE_COLOURS = ['classic', 'chocolate', 'matcha', 'strawberry', 'blueberry'];
 // 'off' stops the UI's playful animations.
 export const MOTION = ['on', 'off'];
+// 'on': the set browser shows one card per original PDF instead of all its pages in a row.
+export const GROUP_PDF = ['on', 'off'];
+// 'on': a file picked in the lineage of the file viewer opens next to the file instead of replacing it.
+export const LINEAGE_COMPARE = ['on', 'off'];
 
-export const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', cookie: 'classic', motion: 'on' });
+// 'on': the "Learn MessyDesk" card with the demo desks is hidden on the front page.
+export const HIDE_DEMOS = ['on', 'off'];
+// How the front page shows the desks.
+export const DESK_VIEWS = ['grid', 'list'];
 
-const ALLOWED: Record<string, string[]> = { theme: THEMES, cookie: COOKIE_COLOURS, motion: MOTION };
+export const DEFAULT_SETTINGS = Object.freeze({ theme: 'light', cookie: 'classic', motion: 'on', group_pdf: 'on', lineage_compare: 'on', hide_demos: 'off', desk_view: 'grid' });
+
+const ALLOWED: Record<string, string[]> = { theme: THEMES, cookie: COOKIE_COLOURS, motion: MOTION, group_pdf: GROUP_PDF, lineage_compare: LINEAGE_COMPARE, hide_demos: HIDE_DEMOS, desk_view: DESK_VIEWS };
 
 // Stored settings with defaults filled in; unknown or stale values are dropped.
 export function withDefaults(stored: unknown): Record<string, string> {

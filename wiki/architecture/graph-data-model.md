@@ -22,7 +22,7 @@ Queries are sent as HTTP POST with JSON body containing the query language and s
 |------|---------------|---------|
 | `Project` | `label`, `created` | Top-level container for all user data |
 | `User` | `id` (email), `label`, `access`, `active`, `service_groups`, `settings` (map of UI preferences, see `src/modules/users/settings.ts`) | System user |
-| `File` | `uuid`, `label`, `path`, `type`, `extension`, `metadata`, `project_rid`, `set`, `expand`, `_active` | Data node (document, image, JSON, etc.) |
+| `File` | `uuid`, `label`, `path`, `type`, `extension`, `metadata`, `project_rid`, `set`, `expand`, `_active`, `page_number`, `origin_rid`, `origin_label` | Data node (document, image, JSON, etc.) |
 | `Set` | `uuid`, `label`, `project_rid`, `path`, `filepath`, `count` | Collection of files |
 | `Process` | `uuid`, `status`, `task`, `service_id`, `project_rid`, `set_process` | Processing job record |
 | `SetProcess` | `uuid`, `status`, `total_files`, `batch_processed` | Batch processing parent |

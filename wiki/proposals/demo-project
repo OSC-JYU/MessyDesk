@@ -1,0 +1,18 @@
+
+# Demo projects
+
+We need a concept of demo projects.
+
+ - admin user can create project normally.
+ - admin can then export project as demo project.
+ - user can then import demo projects.
+ - Demo project is not run when imported. It includes all necessary files even if services used are not available. Data is just copied from original demo project.
+ - Demo project is user editable and behaves like normal project.
+ - Admin can update demo project and then new imports use that version. There is no updates on already imported projects.
+ - demo projects are educational tool
+ - demo project can be shared to all users or based on user groups or even individual users.
+ 
+ Demo project concept need a format that includes all necessary data (single zip file). This allows of sharing projects between different instances.
+ - RIDs must re-created on import.
+
+ - Demo project import is shown users in desk listing page as "learn MessyDesk" desks. Nice and appealing module. 

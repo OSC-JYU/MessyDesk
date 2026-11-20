@@ -9,6 +9,7 @@ import path from 'node:path';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { toRid } from '../../platform/ids.ts';
 import { sourceFileOf } from '../../shared/graph-store.ts';
+import { FILE_TYPE, isPdfType } from '../../shared/service-ids.ts';
 
 export const PDF_ICON_SENTINEL = '__pdf_icon__';
 
@@ -52,7 +53,7 @@ export class DeskGraph {
         let record = null;
         try {
             record = await this.db.firstByRid(
-                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description',
+                '@rid AS rid, @type AS node_type, label, task, service, service_id, info, description, params_summary',
                 toRid(rid), "@type IN ['Process', 'SetProcess']",
             );
         } catch {
@@ -88,6 +89,8 @@ export class DeskGraph {
             if (vp.metadata) data.metadata = vp.metadata;
             if (vp.service) data.service = vp.service;
             if (vp.model) data.model = vp.model;
+            if (vp.params_summary) data.params_summary = vp.params_summary;
+            if (vp._file_removed) data._file_removed = true;
             if (v.t !== 'Process' && vp.path) data.image = path.join('/api/thumbnails', path.dirname(vp.path));
             nodes.push({ data });
             nodeIds.add(v.r);
@@ -116,6 +119,7 @@ export class DeskGraph {
                             service: meta?.service_id || meta?.service || ep.cruncher,
                             task: meta?.task || ep.task,
                             info: meta?.info || meta?.description,
+                            params_summary: meta?.params_summary,
                         },
                     });
                     nodeIds.add(processRid);
@@ -153,11 +157,11 @@ export class DeskGraph {
                 const raw = String(item.info || '').trim();
                 if (list.length < 2 && raw) list.push({ label: item.label || '', text: raw.length > 280 ? `${raw.slice(0, 280)}...` : raw });
             }
-            if (type !== 'image' && type !== 'pdf') continue;
+            if (type !== 'image' && !isPdfType(type)) continue;
             if (!thumbs.has(item.set)) thumbs.set(item.set, []);
             const list = thumbs.get(item.set)!;
             if (list.length >= 2) continue;
-            if (item.type === 'pdf' && !(await this.usePdfThumbnail(item))) {
+            if (isPdfType(item.type) && !(await this.usePdfThumbnail(item))) {
                 list.push(PDF_ICON_SENTINEL);
                 continue;
             }
@@ -182,11 +186,11 @@ export class DeskGraph {
     }
 
     /**
-     * Multi-page PDFs and PDFs extracted from a ZIP have no rendered cover, so the UI shows a
-     * PDF icon for them instead of a thumbnail.
+     * An original PDF has no thumbnail (the UI shows a PDF icon), nor do pages extracted from a ZIP.
      */
     async usePdfThumbnail(file: any): Promise<boolean> {
-        if (!file || file.type !== 'pdf') return true;
+        if (file?.type === FILE_TYPE.ORIGINAL_PDF) return false;
+        if (!file || file.type !== FILE_TYPE.PDF) return true;
         const pages = Number(file?.metadata?.page_count);
         if (Number.isFinite(pages) && pages > 1) return false;
         const rid = file.rid || file['@rid'];

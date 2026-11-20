@@ -8,6 +8,7 @@
 // no human tags, and importing a tag into another desk adds a DeskTag for the same entity. Machine
 // tags belong to a desk only through the TagLink.project_rid of their links.
 
+import { resolveReferences } from '../files/references.ts';
 import Boom from '@hapi/boom';
 import type { ArcadeClient, ArcadeEnvelope } from '../../platform/arcade/client.ts';
 import { toRid, tryRid, uuidv7 } from '../../platform/ids.ts';
@@ -27,6 +28,8 @@ export const ENTITY_TYPES = [
 
 /** Machine tags (autotag) are made with this type, so it must always exist. */
 export const PROTECTED_TYPE = 'Tag';
+/** Type of the tags the system puts on files itself. */
+export const SYSTEM_TYPE = 'System';
 const TYPE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,39}$/u;
 const TYPE_COLOR = /^[#\w(),.% -]{1,40}$/;
 /** Files per page of the tag view, and the most a client may ask for. */
@@ -345,14 +348,14 @@ export class TagsService {
      * callbacks with the same new label each created their own copy (162 duplicates in one run of
      * 1 000 files, perf/results/tags.md), so creation is serialised per tag in this process.
      */
-    private findOrCreateMachineEntity(type: string, label: string, userRid: string, projectRid: string | null): Promise<any | null> {
+    private findOrCreateMachineEntity(type: string, label: string, userRid: string, projectRid: string | null, look: { icon?: string; color?: string } = {}): Promise<any | null> {
         const key = `${userRid}\u0000${projectRid}\u0000${type}\u0000${label}`;
         const pending = this.creating.get(key);
         if (pending) return pending;
         const work = (async () => {
             const found = await this.findEntityForDesk(type, label, userRid, projectRid);
             if (found) return found;
-            return (await this.createEntity({ type, label, created_by: 'machine' }, userRid))?.result?.[0] ?? null;
+            return (await this.createEntity({ type, label, created_by: 'machine', ...look }, userRid))?.result?.[0] ?? null;
         })().finally(() => this.creating.delete(key));
         this.creating.set(key, work);
         return work;
@@ -383,15 +386,27 @@ export class TagsService {
         const owned = await this.access.findOwned(setRid, userRid);
         if (!owned || owned.node['@type'] !== 'Set') return [];
         const files = await this.db.rows('SELECT @rid AS rid FROM File WHERE set = :set', { set: toRid(setRid) });
-        const fileRids = files.map((r) => r.rid).filter(Boolean);
-        if (!fileRids.length) return [];
+        const members = files.map((r) => r.rid).filter(Boolean);
+        if (!members.length) return [];
+        // A member counts for the tags on itself and on the file it points to (a reference).
+        const actual = await resolveReferences(this.db, members);
+        const fileRids = [...new Set([...members, ...actual.values()])];
         // A file can have several links to one tag (by hand and by different models): count files.
         const pairs = await this.db.rows(
             'SELECT DISTINCT entity_rid, target_rid FROM TagLink WHERE target_rid IN :files AND region_id IS NULL AND owner = :owner',
             { files: fileRids, owner: userRid },
         );
+        const byTarget = new Map<string, Set<string>>();
+        for (const p of pairs) {
+            if (!p.entity_rid) continue;
+            if (!byTarget.has(p.target_rid)) byTarget.set(p.target_rid, new Set());
+            byTarget.get(p.target_rid)!.add(p.entity_rid);
+        }
         const counts = new Map<string, number>();
-        for (const p of pairs) if (p.entity_rid) counts.set(p.entity_rid, (counts.get(p.entity_rid) || 0) + 1);
+        for (const member of members) {
+            const entities = new Set([...(byTarget.get(member) || []), ...(byTarget.get(actual.get(member)!) || [])]);
+            for (const entity of entities) counts.set(entity, (counts.get(entity) || 0) + 1);
+        }
         const links = [...counts.entries()].map(([entity_rid, count]) => ({ entity_rid, count }));
         if (!links.length) return [];
         const entities = await this.db.rowsByRids('@rid AS rid, label, type, icon, color', links.map((l) => l.entity_rid), "@type = 'Entity' AND owner = :owner", { owner: userRid });
@@ -559,6 +574,19 @@ export class TagsService {
         const linked = await this.createTagLink(e, t, userRid, { ...meta, project_rid: owned.projectRid });
         if (!meta.region_id && !meta.defer_reindex) await this.reindexFileTags(t, userRid);
         return linked;
+    }
+
+    /**
+     * Puts a system tag (type "System", for example "edited") on a file, or takes it off. A system
+     * tag is a machine tag of the service "system": the user cannot change it, and it is found with
+     * the other machine tags and in the tag filter.
+     */
+    async setSystemTag(fileRid: string, label: string, userRid: string, on: boolean): Promise<void> {
+        const entity = await this.findOrCreateMachineEntity(SYSTEM_TYPE, label, userRid, null, { icon: 'mdi-cog', color: 'grey' });
+        const entityRid = tryRid(entity?.['@rid'] ?? entity?.rid);
+        if (!entityRid) return;
+        if (on) await this.link(entityRid, fileRid, userRid, { created_by: 'machine', service_id: SYSTEM_TYPE.toLowerCase(), task: label });
+        else await this.unlink(entityRid, fileRid, userRid);
     }
 
     async unlink(entityRid: string, targetRid: string, userRid: string): Promise<any> {

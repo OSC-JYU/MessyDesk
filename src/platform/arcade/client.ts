@@ -83,6 +83,11 @@ export class ArcadeClient {
         return this.run<T>('sql', command, params, options);
     }
 
+    /** Several SQL statements in one request (ArcadeDB `sqlscript`); `BEGIN; ... COMMIT;` makes them one transaction. */
+    script<T = any>(command: string, params?: Record<string, unknown>, options: QueryOptions = {}): Promise<ArcadeEnvelope<T>> {
+        return this.run<T>('sqlscript', command, params, options);
+    }
+
     cypher<T = any>(command: string, params?: Record<string, unknown>, options: QueryOptions = {}): Promise<ArcadeEnvelope<T>> {
         return this.run<T>('cypher', command, params, options);
     }

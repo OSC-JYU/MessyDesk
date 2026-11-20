@@ -2,6 +2,8 @@ import Boom from '@hapi/boom';
 import type { Request, ServerRoute } from '@hapi/hapi';
 import type { Deps } from '../../app/deps.ts';
 import { currentUser, requireAdmin } from '../../platform/http/auth.ts';
+import { BatchState } from '../batches/batch-state.ts';
+import { API_KEY_HEADER, InvalidApiKeyError, apiKeyFromHeader } from '../secrets/vault.ts';
 import { tryRid } from '../../platform/ids.ts';
 import { readJson } from '../../platform/storage/fsutil.ts';
 import path from 'node:path';
@@ -26,7 +28,7 @@ function batchSummary(batch: any, status: string, extra: Record<string, unknown>
     };
 }
 
-export function processingRoutes({ processing, queue, batches, sse, access, results, tokenBudget }: Deps): ServerRoute[] {
+export function processingRoutes({ processing, queue, batches, sse, access, results, tokenBudget, secrets }: Deps): ServerRoute[] {
     /** Jobs and batches belong to the user who started them; admins may act on any. */
     async function requireOwner(request: Request, id: string): Promise<void> {
         const user = currentUser(request);
@@ -52,6 +54,28 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
         await results.handleError(reason, payload);
     }
 
+    /** The user's own API key for this run, from the header only (never from the stored body). */
+    const userKey = (request: Request) => {
+        try {
+            return apiKeyFromHeader(request.headers[API_KEY_HEADER] as string | string[] | undefined);
+        } catch (error) {
+            if (error instanceof InvalidApiKeyError) throw Boom.badRequest(error.message);
+            throw error;
+        }
+    };
+
+    /** Drops the key of a run that has ended: a single job, or a batch with its last job done. */
+    async function releaseFinished(payload: any): Promise<void> {
+        if (!payload?.task?.secret_ref) return;
+        const batchRid = tryRid(payload.set_process);
+        if (!batchRid) {
+            secrets.release(payload.task.secret_ref);
+            return;
+        }
+        const status = String(BatchState.status(await batches.get(batchRid)) || '').toLowerCase();
+        if (['done', 'cancelled'].includes(status)) secrets.releaseScope(batchRid);
+    }
+
     return [
         // ---- starting work ---------------------------------------------------------------
         {
@@ -59,13 +83,13 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
             path: '/api/queue/{topic}/files/{rid}/{roi?}',
             handler: async (request) => {
                 rid(request.params.rid);
-                return processing.queueFile(request.params.topic, request.params.rid, request.payload || {}, currentUser(request).rid);
+                return processing.queueFile(request.params.topic, request.params.rid, request.payload || {}, currentUser(request).rid, userKey(request));
             },
         },
         {
             method: 'POST',
             path: '/api/queue/{topic}/sets/{rid}',
-            handler: (request) => processing.queueSet(request.params.topic, rid(request.params.rid), request.payload || {}, currentUser(request).rid),
+            handler: (request) => processing.queueSet(request.params.topic, rid(request.params.rid), request.payload || {}, currentUser(request).rid, userKey(request)),
         },
         {
             method: 'POST',
@@ -144,6 +168,7 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
                 const now = new Date().toISOString();
                 const batch = await batches.update(batchRid, { status: 'paused', paused_at: now, updated_at: now });
                 const status = queue.pauseBatch(batchRid);
+                secrets.releaseScope(batchRid);
                 sse.send(currentUser(request).rid, { command: 'process_update', process: { '@rid': batchRid, status: 'paused' }, batch: batchSummary(batch, 'paused', { eta_sec: batch?.eta_sec ?? null }) });
                 return { ...status, batch };
             },
@@ -156,10 +181,11 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
                 const user = currentUser(request);
                 const batchRid = rid(request.params.rid);
                 await requireOwner(request, batchRid);
-                const { batch } = await processing.resume(batchRid, user.rid);
+                const apiKey = userKey(request);
+                const { batch } = await processing.resume(batchRid, user.rid, apiKey);
                 queue.resumeBatch(batchRid);
                 await batches.update(batchRid, { status: 'resuming', pause_reason: null, updated_at: new Date().toISOString() });
-                const { pending } = await processing.redispatch(batchRid, batch, user.rid);
+                const { pending } = await processing.redispatch(batchRid, batch, user.rid, apiKey);
                 const resumed = await batches.update(batchRid, { status: 'running', updated_at: new Date().toISOString() });
                 sse.send(user.rid, { command: 'process_update', process: { '@rid': batchRid, status: 'running' }, batch: batchSummary(resumed, 'running', { eta_sec: resumed?.eta_sec ?? null, pending_files: pending }) });
                 return { status: 'running', process_rid: batchRid, resumed_messages: pending, batch: resumed };
@@ -174,6 +200,7 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
                 const job = /^job_(\d+)$/.exec(raw);
                 if (job) {
                     await requireOwner(request, raw);
+                    secrets.release(queue.payloadOf(Number(job[1]))?.task?.secret_ref);
                     const deleted = queue.cancelJob(Number(job[1]));
                     sse.send(user.rid, { command: 'process_finished', process: { '@rid': raw, status: 'cancelled' } });
                     return { status: 'cancelled', job_id: Number(job[1]), deleted };
@@ -182,6 +209,7 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
                 await requireOwner(request, batchRid);
                 await batches.update(batchRid, { status: 'cancelling', updated_at: new Date().toISOString() });
                 const status = queue.cancelBatch(batchRid);
+                secrets.releaseScope(batchRid);
                 const now = new Date().toISOString();
                 const batch = await batches.update(batchRid, { status: 'cancelled', finished_at: now, updated_at: now, eta_sec: 0 });
                 sse.send(user.rid, { command: 'process_finished', process: { '@rid': batchRid, status: 'cancelled' }, batch: batchSummary(batch, 'cancelled', { eta_sec: 0 }) });
@@ -208,6 +236,20 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
             },
         },
         {
+            // A consumer trades a task's secret_ref for the user's key. POST, so that nothing about
+            // the request lands in an access log; the answer is never cached.
+            method: 'POST',
+            path: '/api/queue/secret',
+            options: SERVICE_ONLY,
+            handler: (request, h) => {
+                const { ref, user, topic } = (request.payload || {}) as any;
+                if (!ref || !user || !topic) throw Boom.badRequest('ref, user and topic are required');
+                const key = secrets.get(String(ref), { userId: String(user), topic: String(topic) });
+                if (!key) throw Boom.notFound('The API key is no longer available');
+                return h.response({ key }).header('cache-control', 'no-store');
+            },
+        },
+        {
             method: 'POST',
             path: '/api/queue/{job_id}/heartbeat',
             options: SERVICE_ONLY,
@@ -222,10 +264,13 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
             method: 'POST',
             path: '/api/queue/{job_id}/complete',
             options: SERVICE_ONLY,
-            handler: (request) => {
+            handler: async (request) => {
                 const { adapter_id: adapterId } = (request.payload || {}) as any;
                 if (!adapterId) throw Boom.badRequest('adapter_id is required');
-                if (!queue.complete(Number(request.params.job_id), adapterId)) throw Boom.notFound('Job not found or not owned by this adapter');
+                const jobId = Number(request.params.job_id);
+                const payload = queue.payloadOf(jobId);
+                if (!queue.complete(jobId, adapterId)) throw Boom.notFound('Job not found or not owned by this adapter');
+                await releaseFinished(payload);
                 return { ok: true };
             },
         },
@@ -236,8 +281,13 @@ export function processingRoutes({ processing, queue, batches, sse, access, resu
             handler: async (request) => {
                 const { adapter_id: adapterId, error } = (request.payload || {}) as any;
                 if (!adapterId) throw Boom.badRequest('adapter_id is required');
-                const result = queue.fail(Number(request.params.job_id), error || 'unknown error', adapterId);
+                const jobId = Number(request.params.job_id);
+                const payload = queue.payloadOf(jobId);
+                const result = queue.fail(jobId, error || 'unknown error', adapterId);
                 if (!result) throw Boom.notFound('Job not found or not owned by this adapter');
+                // A job that will be retried keeps its key.
+                if (result.permanent || result.cancelled || result.batch_aborted) await releaseFinished(payload);
+                if (result.batch_aborted && result.batch_rid) secrets.releaseScope(result.batch_rid);
                 if (result.batch_aborted && result.batch_rid) {
                     // Too many failures: the batch was cancelled automatically.
                     const now = new Date().toISOString();

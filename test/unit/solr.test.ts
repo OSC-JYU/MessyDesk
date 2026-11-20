@@ -92,3 +92,23 @@ test('ROI sources keep only the wanted keys, page through results and fail loudl
         globalThis.fetch = original;
     }
 });
+
+test('a description of a file without text becomes a description-only document', async () => {
+    const posts: any[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: any) => {
+        if (init?.method === 'POST') posts.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ response: { docs: [] } }), { status: 200 });
+    }) as any;
+    try {
+        const solr = new SolrClient({ url: 'http://solr/solr', core: 'md' });
+        await solr.syncDescription({ rid: '#9:1', label: 'cat.jpg', type: 'image', project: '#5:2', owner: '#3:0' }, 'A cat on a roof');
+        await solr.syncDescription({ rid: '#9:1', label: 'cat.jpg', type: 'image', project: '#5:2', owner: '#3:0' }, '');
+        await solr.syncDescription({ rid: '#9:2', label: 'a.txt', type: 'text', project: '#5:2', owner: '#3:0' }, 'A note');
+    } finally {
+        globalThis.fetch = original;
+    }
+    assert.equal(posts.length, 2);
+    assert.deepEqual(posts[0][0], { id: '9:1:description', label: 'cat.jpg', owner: '#3:0', node: '#9:1', process: 'description', project: '#5:2', type: 'image', description: 'A cat on a roof' });
+    assert.deepEqual(posts[1], { delete: { query: 'id:"9:1:description"' } });
+});

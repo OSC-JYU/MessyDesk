@@ -41,6 +41,10 @@ export class GraphService {
         if (!data?.key || !EDITABLE_ATTRIBUTES.includes(data.key)) throw Boom.badRequest('Invalid data');
         if (data.value === null) await this.store.removeAttribute(rid, data.key);
         else await this.store.setAttribute(rid, data.key, data.value);
+        // The files made from a PDF carry its label (set browser cards).
+        if (data.key === 'label' && typeof data.value === 'string') {
+            await this.db.sql('UPDATE File SET origin_label = :label WHERE origin_rid = :rid', { label: data.value, rid: toRid(rid) });
+        }
         // The old route answered with an empty Vue Flow conversion of the update.
         return { nodes: [], edges: [] };
     }

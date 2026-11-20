@@ -30,6 +30,8 @@
 | **Descriptor** | `service.json` file describing a service's capabilities, supported types, tasks, and parameters. |
 | **Nomad** | HashiCorp Nomad. Optional service orchestrator for production deployments. |
 | **DERIVED_FROM** | Graph edge linking output files to their source files. Carries process context (process_rid, task, cruncher) as edge attributes. |
-| **Import** | Automatic processing that occurs when a PDF file is uploaded. The file is split into single-page PDFs via `md-pypdf_fs`. The Process node has `role: 'import'`. Original file is deleted by default. |
-| **processable** | Boolean field on File nodes. When `false`, only the PDF split service is offered. Absence of the field means the file is processable by all matching services. Set on non-splitter/non-zip PDF outputs. |
-| **_file_removed** | Boolean field on File nodes. When `true`, the file data has been deleted from disk but the graph node is preserved as provenance (e.g., original PDF after import split). |
+| **original-pdf** | File type of an un-split PDF: every uploaded or ZIP-extracted PDF. Services that need the whole document list it in `supported_types`; today only `md-pypdf_fs` (split) does. |
+| **pdf (page)** | File type `pdf`: a one-page PDF made by the `md-pypdf_fs` split. Page-level services (Poppler) list `pdf`. Has `page_number`, the page's number in the original PDF. |
+| **origin** | `origin_rid` / `origin_label` on a File: the `original-pdf` it comes from (a split page, a text or image made from a page). Copied from the input file when the output is created (`NodesService.originOf`), indexed, and used only to group the set browser; lineage is not affected. Renaming the PDF updates `origin_label` of its files. |
+| **Page range** | A user-typed list of pages, e.g. `1-5,8,10-`. Used by the split task (`pages`: which pages to split) and by page-level tasks on a set (`pages`: which pages of the set take part, by `page_number`). Grammar in `src/shared/page-range.ts`. |
+| **_file_removed** | Boolean field on File nodes. When `true`, the file data has been deleted from disk but the graph node is preserved as provenance (e.g., original PDF after a split with `delete_original`). |

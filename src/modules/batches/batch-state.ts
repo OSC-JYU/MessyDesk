@@ -50,8 +50,8 @@ export class BatchState {
         });
     }
 
-    /** One more input processed; marks the batch done when all are. */
-    async incrementProcessed(processRid: string, responseTime: unknown, totalFiles: unknown): Promise<any | null> {
+    /** One more input processed (or `count` more); marks the batch done when all are. */
+    async incrementProcessed(processRid: string, responseTime: unknown, totalFiles: unknown, count = 1): Promise<any | null> {
         const batch = await this.get(processRid);
         if (!batch) return null;
         const now = new Date().toISOString();
@@ -61,8 +61,8 @@ export class BatchState {
         // batch never reached "done"; perf/results/upload-and-batch.md). A conflicting update is retried
         // by the client and re-evaluates the increment.
         const counted = await this.db.first(
-            `UPDATE ${toRid(batch['@rid'])} SET processed_files = ifnull(processed_files, 0) + 1, total_time_sec = ifnull(total_time_sec, 0) + :delta, updated_at = :now RETURN AFTER`,
-            { delta: Number.isFinite(delta) ? delta : 0, now },
+            `UPDATE ${toRid(batch['@rid'])} SET processed_files = ifnull(processed_files, 0) + :count, total_time_sec = ifnull(total_time_sec, 0) + :delta, updated_at = :now RETURN AFTER`,
+            { delta: Number.isFinite(delta) ? delta : 0, now, count: Math.max(1, Math.floor(count)) },
         );
         const processed = Number(counted?.processed_files || 0);
         const total = Number(totalFiles || counted?.total_files || batch.total_files || 0);

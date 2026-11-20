@@ -2,7 +2,7 @@
 
 **Status**: Draft  
 **Date**: 2026-08-17  
-**Depends on**: [pdf-auto-import](pdf-auto-import.md)
+**Depends on**: [pdf-split-as-cruncher](pdf-split-as-cruncher.md) (replaces `pdf-auto-import` (removed))
 
 ## Problem
 

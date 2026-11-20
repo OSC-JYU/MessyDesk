@@ -78,6 +78,7 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `tasks` | object | Yes* | Task definitions (see below) |
 | `external_tasks` | string | No | `"prompts"`: the user's prompts are offered as tasks (LLM services), next to the descriptor's own `tasks` (e.g. `autotag`) |
 | `models` | object | No | Model variants for LLM services |
+| `api_key_source` | string | No | `"user"`: each user gives their own API key when they start a run (UI asks; header `X-MD-API-Key`; LLM services only). The backend keeps it in memory only, never in the queue, a file, the graph or a log; the task carries an opaque `secret_ref` that the consumer trades for the key (`POST /api/queue/secret`). A run without a key is refused. `"service"` or absent: the consumer uses its own key (env var). See `src/modules/secrets/vault.ts` |
 
 **[verified]** from descriptor files in `MD-consumers/descriptors/` and Python service `service.json` files.
 
@@ -101,6 +102,9 @@ Descriptors can come from multiple sources, resolved in priority order by `resol
 | `help` | string | Help text shown in UI |
 | `name` | string | Display name |
 | `default` | any | Default value |
+| `format` | string | `"page_range"`: the value is a page range (`1-5,8,10-`, empty = all pages); a bad one is refused with 400 before anything is queued |
+| `filter` | string | `"set_pages"`: for a set, the range picks the files whose `page_number` is in it (page numbers of the original PDF) and the param is not sent to the service; the UI offers it for sets only |
+| `warning`, `warning_if_set` | string | The UI shows `warning` while this (checkbox) param is on and the param named in `warning_if_set` has a value |
 
 ### Model definition (LLM services)
 

@@ -6,7 +6,8 @@ import path from 'node:path';
 import type { ArcadeClient } from '../../platform/arcade/client.ts';
 import { ridToPathPart, toRid, tryRid } from '../../platform/ids.ts';
 import { readJson, writeJson } from '../../platform/storage/fsutil.ts';
-import type { GraphStore } from '../../shared/graph-store.ts';
+import { sourceFileOf, type GraphStore } from '../../shared/graph-store.ts';
+import type { TagsService } from '../tags/tags.ts';
 import type { AccessService } from '../access/access.ts';
 import type { GraphService } from '../graph/graph.ts';
 
@@ -22,8 +23,10 @@ export class RoisService {
     private readonly store: GraphStore;
     private readonly access: AccessService;
     private readonly graph: GraphService;
+    private readonly tags: TagsService;
 
-    constructor(db: ArcadeClient, store: GraphStore, access: AccessService, graph: GraphService) {
+    constructor(db: ArcadeClient, store: GraphStore, access: AccessService, graph: GraphService, tags: TagsService) {
+        this.tags = tags;
         this.db = db;
         this.store = store;
         this.access = access;
@@ -38,6 +41,28 @@ export class RoisService {
         return row?.roi || null;
     }
 
+    /** An image has the system tag "has ROI" while any of its region sets holds a region. */
+    private async syncRoiTag(imageRid: string, userRid: string): Promise<void> {
+        try {
+            const rows = await this.db.rows('MATCH {type:File, as:roi, where:(type = "roi.json")}-DERIVED_FROM->{type:File, where:(@rid = :image)} RETURN roi', { image: imageRid });
+            let regions = 0;
+            for (const row of rows) {
+                if (!row.roi?.path) continue;
+                regions += RoisService.regionCount(await readJson(row.roi.path).catch(() => null));
+            }
+            await this.tags.setSystemTag(imageRid, 'has ROI', userRid, regions > 0);
+        } catch {
+            // The tag is a convenience: a failure must not fail saving the regions.
+        }
+    }
+
+    /** Regions in a roi.json: `{ rois: [...] }` or `{ rois: { id: {...} } }`. */
+    static regionCount(data: any): number {
+        const rois = data?.rois ?? data;
+        if (Array.isArray(rois)) return rois.length;
+        return rois && typeof rois === 'object' ? Object.keys(rois).length : 0;
+    }
+
     /** POST: creates the roi.json, or overwrites the existing one (upsert). */
     async save(imageParam: string, setParam: string, data: unknown, userRid: string): Promise<any> {
         const image = rid(imageParam);
@@ -50,6 +75,7 @@ export class RoisService {
         if (existing) {
             if (!existing.path) throw Boom.internal('ROI path not found for node: ' + existing['@rid']);
             await writeJson(path.dirname(existing.path), path.basename(existing.path), data);
+            await this.syncRoiTag(image, userRid);
             return existing;
         }
         const roi = await this.store.createVertex('File', {
@@ -64,6 +90,7 @@ export class RoisService {
         const file = `${ridToPathPart(roi['@rid'])}.roi.json`;
         await writeJson(dir, file, data);
         await this.store.setAttributes(roi['@rid'], { path: path.join(dir, file), set });
+        await this.syncRoiTag(image, userRid);
         return roi;
     }
 
@@ -85,6 +112,8 @@ export class RoisService {
         if (!owned) throw Boom.notFound('ROI not found: ' + roiParam);
         if (!owned.node.path) throw Boom.internal('ROI path not found for node: ' + roiParam);
         await writeJson(path.dirname(owned.node.path), path.basename(owned.node.path), data);
+        const image = await sourceFileOf(this.db, owned.node['@rid'], '@rid AS rid');
+        if (image?.rid) await this.syncRoiTag(image.rid, userRid);
         return { message: 'ROI updated successfully' };
     }
 
@@ -98,6 +127,7 @@ export class RoisService {
         );
         if (!row) throw Boom.notFound('ROI not found for delete');
         await this.graph.deleteNode(toRid(roi), userRid);
+        await this.syncRoiTag(image, userRid);
         return { message: 'ROI deleted successfully', deleted: true };
     }
 }
