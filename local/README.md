@@ -29,11 +29,11 @@ The first build takes a while; later starts are quick.
 |---|---|
 | `backend` | The API, with the UI built into it (one port for both) |
 | `arcadedb`, `solr`, `solr-init` | Graph database and search index (the schema is created on first start) |
-| `md-sharp`, `md-poppler`, `md-pypdf`, `md-zip`, `md-text-base`, `md-tesseract`, `md-docori` | Base services (`md-docori` detects page orientation) |
+| `md-sharp`, `md-poppler`, `md-pypdf`, `md-zip`, `md-text-base`, `md-tesseract`, `md-docori`, `md-indra-ocr` | Base services (`md-docori` detects page orientation, `md-indra-ocr` is CPU-only OCR to Markdown) |
 | `md-lingua`, `libretranslate` | Language detection, and machine translation (the upstream LibreTranslate image; MD-LibreTranslate only supplies its descriptor) |
 | `md-gensim` | Only with `--profile linguistics`: word counts, TF-IDF similarity indexes (text reuse) and topic models (LDA, NMF, LSI, HDP, k-means) |
 | `md-gliner2` | Only with `--profile machine_learning`: zero-shot entity extraction and classification |
-| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler`, `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-docori`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
+| `consumer-*` | One MD-consumers instance per queue topic: `md-thumbnailer` and `md-sharp` (md-sharp), `md-poppler`, `md-pypdf_fs`, `md-zip_fs`, `md-text-base_fs`, `md-tesseract`, `md-docori`, `md-indra-ocr`, `md-lingua`, `md-libretranslate`, `md-solr` (Solr directly) |
 
 Each consumer finds its service by `DEV_URL`, so Nomad is not needed. Everything shares the `md-data`
 volume: the backend sees it as `data/` and the services and consumers as `$MD_PATH/data`, so the `_fs`

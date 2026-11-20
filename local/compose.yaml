@@ -191,6 +191,20 @@ services:
       # /app is not writable for uid 1000; outputs go to the data volume, this is only scratch.
       OUTPUT_FOLDER: /tmp/output
 
+  # CPU-only OCR (ONNX Runtime) with layout-aware Markdown output. Works over HTTP (the consumer
+  # moves the files), so it needs no shared volume. Models are downloaded from Hugging Face on
+  # first use and kept in a volume.
+  md-indra-ocr:
+    image: localhost/messydesk/md-indra-ocr:local
+    build: ../../MD-indra-ocr
+    restart: unless-stopped
+    cpus: ${SERVICE_CPUS:-0}
+    environment:
+      SERVICE_LOCAL_URL: http://md-indra-ocr:9013
+      INDRA_THREADS: ${INDRA_THREADS:-4}
+    volumes:
+      - indra-models:/models:Z
+
   # ---- language services ----------------------------------------------------------------------
 
   md-lingua:
@@ -301,6 +315,14 @@ services:
       TOPIC: md-docori
       DEV_URL: http://md-docori:9012
 
+  consumer-indra-ocr:
+    <<: *consumer
+    depends_on: [backend, md-indra-ocr]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-indra-ocr
+      DEV_URL: http://md-indra-ocr:9013
+
   # Solr has no MessyDesk service in front of it: the consumer talks to Solr directly.
   consumer-solr:
     <<: *consumer
@@ -355,3 +377,4 @@ volumes:
   arcadedb-data: {}
   solr-data: {}
   libretranslate-models: {}
+  indra-models: {}
