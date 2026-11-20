@@ -205,6 +205,16 @@ services:
     volumes:
       - indra-models:/models:Z
 
+  # Flattens photographed pages (perspective and page curl) with a CPU torch model that is part of
+  # the image. Works over HTTP (the consumer moves the files), so it needs no shared volume.
+  md-uvdoc:
+    image: localhost/messydesk/md-uvdoc:local
+    build: ../../MD-UVDoc
+    restart: unless-stopped
+    cpus: ${SERVICE_CPUS:-0}
+    environment:
+      SERVICE_LOCAL_URL: http://md-uvdoc:9006
+
   # ---- language services ----------------------------------------------------------------------
 
   md-lingua:
@@ -215,6 +225,17 @@ services:
       <<: *service-env
       SERVICE_LOCAL_URL: http://md-lingua:9011
       OUTPUT_DIR: /tmp/output
+
+  # Sentence boundary detection (ONNX, CPU). Works over HTTP (the consumer moves the files), so it
+  # needs no shared volume.
+  md-minisbd:
+    image: localhost/messydesk/md-minisbd:local
+    build: ../../MD-MiniSBD
+    restart: unless-stopped
+    cpus: ${SERVICE_CPUS:-0}
+    mem_limit: ${SERVICE_MEM:-2g}
+    environment:
+      SERVICE_LOCAL_URL: http://md-minisbd:9011
 
   # The upstream image, with no MessyDesk wrapper: consumer-libretranslate calls its API
   # (MD-LibreTranslate holds only the descriptor). Models for LIBRETRANSLATE_LANGUAGES are
@@ -323,6 +344,14 @@ services:
       TOPIC: md-indra-ocr
       DEV_URL: http://md-indra-ocr:9013
 
+  consumer-uvdoc:
+    <<: *consumer
+    depends_on: [backend, md-uvdoc]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-uvdoc
+      DEV_URL: http://md-uvdoc:9006
+
   # Solr has no MessyDesk service in front of it: the consumer talks to Solr directly.
   consumer-solr:
     <<: *consumer
@@ -339,6 +368,14 @@ services:
       <<: *consumer-env
       TOPIC: md-lingua
       DEV_URL: http://md-lingua:9011
+
+  consumer-minisbd:
+    <<: *consumer
+    depends_on: [backend, md-minisbd]
+    environment:
+      <<: *consumer-env
+      TOPIC: md-minisbd
+      DEV_URL: http://md-minisbd:9011
 
   # LibreTranslate serves no /config, so the descriptor comes from the MD-LibreTranslate checkout.
   consumer-libretranslate:

@@ -7,7 +7,7 @@ set -u
 
 BASE=(
   MessyDesk-UI MD-consumers MD-sharp MD-poppler MD-pypdf_fs MD-zip_fs MD-text-base_fs
-  MD-tesseract MD-docori MD-indra-ocr MD-lingua MD-LibreTranslate
+  MD-tesseract MD-docori MD-indra-ocr MD-UVDoc MD-lingua MD-MiniSBD MD-LibreTranslate
 )
 OPTIONAL=(MD-gensim MD-Gliner2)
 
