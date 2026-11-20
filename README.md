@@ -4,7 +4,6 @@ Digital humanities desktop for collecting, organising and processing research ma
 the rewritten backend: same HTTP API, events, queue messages, database schema and data layout as
 the old `MessyDesk` backend, so MessyDesk-UI and MD-consumers work against it unchanged.
 
-**No release yet — this is under active development.**
 
 ## Run locally
 
