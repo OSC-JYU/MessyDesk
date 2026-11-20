@@ -34,6 +34,8 @@ x-consumer: &consumer
   image: localhost/messydesk/md-consumer:local
   build: ../../MD-consumers
   restart: unless-stopped
+  cpus: ${CONSUMER_CPUS:-0}
+  mem_limit: ${CONSUMER_MEM:-512m}
   depends_on: [backend]
   volumes:
     - md-data:/md/data:z
@@ -50,6 +52,12 @@ x-consumer-env: &consumer-env
 
 x-service: &service
   restart: unless-stopped
+  # Upper limit of CPU cores per service container (each separately). 0 = no limit. Rootless podman
+  # needs the cpu cgroup controller delegated to the user for a non-zero value:
+  # sudo systemctl edit user@.service -> [Service] Delegate=cpu cpuset io memory pids
+  cpus: ${SERVICE_CPUS:-0}
+  # Memory cap per service container; a container above it is killed (OOM). ML services may need more.
+  mem_limit: ${SERVICE_MEM:-2g}
   # The node images run as uid 1000 (node); the Python ones are set to the same uid so every
   # file on the shared volume has one owner.
   user: "1000:1000"

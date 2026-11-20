@@ -16,12 +16,6 @@
 			"path": "../MD-roihu-slurm"
 		},
 		{
-			"path": "../MD-Gliner2"
-		},
-		{
-			"path": "../MD-MiniSBD"
-		},
-		{
 			"path": "../MD-text-base_fs"
 		}
 	],

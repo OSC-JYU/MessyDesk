@@ -403,8 +403,9 @@ export class ResultsService {
         if (!message?.set_process) return;
         const batchRid = tryRid(message.set_process);
         if (!batchRid) return;
-        const total = Number(message?.total_files || message?.batch_total_files || 0);
-        const current = Number(message?.current_file || 0);
+        // A grouped many-to-one run has total_files/current_file per group; the batch counts all files.
+        const total = Number(message?.batch_total_files || message?.total_files || 0);
+        const current = Number(message?.batch_current_file || message?.current_file || 0);
         let batch = null;
         if (total > 0 && current > 0) batch = await batches.incrementProcessed(batchRid, Number(message?.response?.time || 0), total);
         if (message?.summary) {

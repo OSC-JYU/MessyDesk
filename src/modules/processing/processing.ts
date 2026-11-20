@@ -27,7 +27,12 @@ import type { TagFields } from '../tags/tags.ts';
 import type { TokenBudget } from '../usage/token-budget.ts';
 import type { SecretVault } from '../secrets/vault.ts';
 import { manyToOneGroups } from './grouping.ts';
+import { isRoiSet, planRoiRun, referencesLocally, roiMode, type RoiImage } from './roi-runs.ts';
 import { pageInRange, parsePageRange } from '../../shared/page-range.ts';
+
+const STOPPED_BATCH = ['paused', 'cancelling', 'cancelled'];
+// How many references of a ROI run are made between two progress updates.
+const REFERENCE_STEP = 100;
 
 export function isSearchOutputTask(service: any, task: any): boolean {
     const def = task?.id ? service?.tasks?.[task.id] : null;
@@ -297,7 +302,8 @@ export class ProcessingService {
                 msg.search_output = true;
                 msg.search_source_set = args.inputSet;
             }
-            if (args.service.tasks?.[args.task.id]?.source === 'source_file') {
+            // A placeholder of a ROI run is the image itself, it has no source file to add.
+            if (args.service.tasks?.[args.task.id]?.source === 'source_file' && !f.roi_placeholder) {
                 const source = await this.sourceFileOf(file['@rid'], args.userRid);
                 if (source) msg.file.source = source;
             }
@@ -386,27 +392,75 @@ export class ProcessingService {
             return rid;
         }
 
+        let jobs = files;
+        let references: RoiImage[] = [];
+        if (!prompt && isRoiSet(set)) {
+            ({ jobs, references } = await planRoiRun(this.db, rid, files, roiMode(task), referencesLocally(service, task)));
+            if (!jobs.length && !references.length) throw Boom.badRequest('None of the images has regions');
+        }
+        const total = jobs.length + references.length;
         const nodes = await this.nodes.createSetProcessWithOutput(service, task, set, prompt || behaviour !== 'many-to-one');
+        const outputSet = nodes.set?.['@rid'] ?? null;
         await this.batches.init(nodes.process['@rid'], {
             topic,
             task_id: task.id,
             input_set: rid,
-            output_set: nodes.set ? nodes.set['@rid'] : null,
+            output_set: outputSet,
             task_payload_json: JSON.stringify(payload),
-            total_files: files.length,
+            total_files: total,
         });
         this.sse.send(userRid, { command: 'add', type: 'process', input: rid, node: nodes.process, output: nodes.set });
         // Starts the progress bar at once; later updates come with the results.
         this.sse.send(userRid, {
             command: 'process_update',
             process: { '@rid': nodes.process['@rid'], status: 'running' },
-            batch: { status: 'running', state: 'running', processed_files: 0, failed_files: 0, total_files: files.length, avg_sec_per_file: 0, eta_sec: null },
-            total_files: files.length,
+            batch: { status: 'running', state: 'running', processed_files: 0, failed_files: 0, total_files: total, avg_sec_per_file: 0, eta_sec: null },
+            total_files: total,
         });
         const ref = this.keepKey(service, topic, apiKey, userRid, nodes.process['@rid']);
         const runTask = ref ? { ...task, secret_ref: ref } : task;
-        this.inBackground(nodes.process['@rid'], () => this.dispatchBatchFiles({ service, task: runTask, files, batchRid: nodes.process['@rid'], inputSet: rid, outputSet: nodes.set?.['@rid'] ?? null, userRid, total: files.length }));
+        const batchRid = nodes.process['@rid'];
+        this.inBackground(batchRid, async () => {
+            // Images without regions are passed on first, in MessyDesk; then the jobs go out.
+            if (references.length && outputSet && !(await this.referenceImages(batchRid, outputSet, references, total, userRid))) return;
+            if (jobs.length) await this.dispatchBatchFiles({ service, task: runTask, files: jobs, batchRid, inputSet: rid, outputSet, userRid, total, startIndex: references.length + 1 });
+        });
         return rid;
+    }
+
+    /**
+     * References in the output set to images that had no regions (see roi-runs.ts). Each one counts
+     * as a processed file of the batch. They are made REFERENCE_STEP at a time, in one database
+     * request each, and the progress bar moves after each step.
+     * Returns false when the batch was paused or cancelled meanwhile.
+     */
+    private async referenceImages(batchRid: string, outputSet: string, images: RoiImage[], total: number, userRid: string): Promise<boolean> {
+        let pending = 0;
+        const flush = async (): Promise<boolean> => {
+            if (!pending) return true;
+            const batch = await this.batches.incrementProcessed(batchRid, 0, total, pending);
+            pending = 0;
+            const count = await this.nodes.updateFileCount(outputSet, 'later');
+            const finished = BatchState.status(batch) === 'done';
+            if (finished) await this.nodes.flushSetManifest(outputSet);
+            this.sse.send(userRid, {
+                command: finished ? 'process_finished' : 'process_update',
+                process: { '@rid': batchRid, status: finished ? 'done' : 'running' },
+                set: { '@rid': outputSet, status: finished ? 'finished' : 'running', count },
+                batch: {
+                    status: BatchState.status(batch), state: BatchState.status(batch), processed_files: batch?.processed_files ?? 0,
+                    failed_files: batch?.failed_files ?? 0, total_files: total, avg_sec_per_file: 0, eta_sec: finished ? 0 : null,
+                },
+                current_file: batch?.processed_files ?? 0,
+                total_files: total,
+            });
+            return !STOPPED_BATCH.includes(BatchState.status(batch) || 'running') || finished;
+        };
+        for (let i = 0; i < images.length; i += REFERENCE_STEP) {
+            pending = await this.nodes.createReferenceFiles(batchRid, outputSet, images.slice(i, i + REFERENCE_STEP));
+            if (!(await flush())) return false;
+        }
+        return true;
     }
 
     /**
@@ -577,16 +631,29 @@ export class ProcessingService {
         await this.budget?.apply(service, task, userRid);
         const listing = await this.files.setFiles(batch.input_set, userRid, { limit: 10000 });
         const done = new Set(await this.batches.processedInputs(rid));
-        const pending = filterSetPages(service.tasks?.[task.id], task, listing.files).filter((f: any) => !done.has(f['@rid']));
+        let candidates = filterSetPages(service.tasks?.[task.id], task, listing.files);
+        let missing: RoiImage[] = [];
+        const inputSet = await this.files.metadata(batch.input_set, userRid);
+        if (!isPromptTask(service, task) && isRoiSet(inputSet)) {
+            const plan = await planRoiRun(this.db, toRid(batch.input_set), candidates, roiMode(task), referencesLocally(service, task));
+            missing = plan.references.filter((image) => !done.has(image.rid));
+            candidates = plan.jobs;
+        }
+        const pending = candidates.filter((f: any) => !done.has(f['@rid']));
         const current = BatchState.status(await this.batches.get(rid));
         if (current !== 'resuming' && current !== 'running') throw Boom.conflict(`Batch changed state before dispatch (status: ${current || 'unknown'})`);
         const ref = this.keepKey(service, batch.topic, apiKey, userRid, rid);
         if (ref) task.secret_ref = ref;
-        this.inBackground(rid, () => this.dispatchBatchFiles({
-            service, task, files: pending, batchRid: rid, inputSet: batch.input_set, outputSet: batch.output_set, userRid,
-            total: batch.total_files || listing.files.length, startIndex: Number(batch.processed_files || 0) + 1, searchOutput: batch.search_output === true,
-        }));
-        return { pending: pending.length };
+        const total = batch.total_files || listing.files.length;
+        this.inBackground(rid, async () => {
+            if (missing.length && !(await this.referenceImages(rid, batch.output_set, missing, total, userRid))) return;
+            const processed = missing.length ? Number((await this.batches.get(rid))?.processed_files || 0) : Number(batch.processed_files || 0);
+            await this.dispatchBatchFiles({
+                service, task, files: pending, batchRid: rid, inputSet: batch.input_set, outputSet: batch.output_set, userRid,
+                total, startIndex: processed + 1, searchOutput: batch.search_output === true,
+            });
+        });
+        return { pending: pending.length + missing.length };
     }
 
     /** Publishes a tag-field update for the search index (md-solr update_tags), or writes it directly. */

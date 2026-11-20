@@ -28,6 +28,21 @@ function ridOf(value: unknown): string | undefined {
     return (value as any)['@rid'];
 }
 
+function originFrom(parent: any): Record<string, unknown> {
+    const origin: Record<string, unknown> = {};
+    if (parent.type === FILE_TYPE.ORIGINAL_PDF) {
+        origin.origin_rid = parent.rid;
+        origin.origin_label = parent.label;
+    } else if (parent.origin_rid) {
+        origin.origin_rid = parent.origin_rid;
+        origin.origin_label = parent.origin_label;
+        if (Number.isFinite(Number(parent.page_number))) origin.page_number = Number(parent.page_number);
+    }
+    return origin;
+}
+
+export interface ReferenceSpec { rid: string; project_rid?: string | null; type?: string; extension?: string; label?: string }
+
 export class NodesService {
     private readonly db: ArcadeClient;
     private readonly store: GraphStore;
@@ -318,17 +333,7 @@ export class NodesService {
         const parent = await this.db.first(
             `SELECT @rid AS rid, type, label, origin_rid, origin_label, page_number FROM ${toRid(sourceRid)} WHERE @type = 'File'`,
         ).catch(() => null);
-        if (!parent) return {};
-        const origin: Record<string, unknown> = {};
-        if (parent.type === FILE_TYPE.ORIGINAL_PDF) {
-            origin.origin_rid = parent.rid;
-            origin.origin_label = parent.label;
-        } else if (parent.origin_rid) {
-            origin.origin_rid = parent.origin_rid;
-            origin.origin_label = parent.origin_label;
-            if (Number.isFinite(Number(parent.page_number))) origin.page_number = Number(parent.page_number);
-        }
-        return origin;
+        return parent ? originFrom(parent) : {};
     }
 
     /** File node for a process output (createProcessFileNode). */
@@ -389,6 +394,54 @@ export class NodesService {
         if (lineage) await this.store.connectDerivedFrom(node['@rid'], lineage, processRid);
         if (msg.output_set) this.scheduleSetManifest(msg.output_set);
         return node;
+    }
+
+    /**
+     * Many references in an output set at once, the same nodes and lineage edges as
+     * createReferenceFile makes one by one: one query for the files, one for the process and one
+     * script (one transaction) for all nodes and edges. Returns how many were made.
+     */
+    async createReferenceFiles(processRid: string, outputSet: string, files: ReferenceSpec[]): Promise<number> {
+        if (!files.length) return 0;
+        const p = toRid(processRid);
+        const sources = new Map((await this.db.rowsByRids(
+            '@rid AS rid, path, type, label, origin_rid, origin_label, page_number', files.map((f) => f.rid), "@type = 'File'",
+        )).map((row: any) => [String(row.rid), row]));
+        const proc = await this.db.first(`SELECT uuid, service_id, service, label, task FROM ${p}`).catch(() => null);
+        const params: Record<string, unknown> = {
+            processRid: p,
+            processId: proc?.uuid || p,
+            cruncher: String(proc?.service_id || proc?.service || proc?.label || ''),
+            task: String(proc?.task || ''),
+        };
+        const lines: string[] = [];
+        let made = 0;
+        for (const file of files) {
+            const ref = toRid(file.rid);
+            const source = sources.get(ref);
+            if (!source?.path) throw new Error(`Reference source not found or missing path: ${ref}`);
+            params[`c${made}`] = {
+                ...originFrom(source),
+                uuid: uuidv7(),
+                project_rid: file.project_rid || null,
+                type: file.type,
+                extension: file.extension,
+                label: file.label,
+                description: '',
+                info: '',
+                expand: false,
+                _active: true,
+                ref,
+                path: source.path,
+                set: toRid(outputSet),
+            };
+            lines.push(`LET $v${made} = CREATE VERTEX File CONTENT :c${made};`);
+            lines.push(`CREATE EDGE ${EDGE.DERIVED_FROM} FROM $v${made} TO ${ref} SET process_rid = :processRid, process_id = :processId, cruncher = :cruncher, task = :task;`);
+            made += 1;
+        }
+        await this.db.script(['BEGIN;', ...lines, 'COMMIT;'].join('\n'), params);
+        this.scheduleSetManifest(outputSet);
+        return made;
     }
 
     /** error.json node for a failed job. */
