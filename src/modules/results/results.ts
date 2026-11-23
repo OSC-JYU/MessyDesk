@@ -244,7 +244,7 @@ export class ResultsService {
         if (refRid && !refNode) throw Boom.badData(`Reference source file not found: ${refRid}`);
         let info = '';
         if (refRid && typeof refNode?.info === 'string') info = refNode.info;
-        else if (contentPath && (message.file.type === 'text' || String(message.file.type).includes('json') || message.file.type === 'csv')) info = (await textDescription(contentPath, message.file.type)) || '';
+        else if (contentPath && (message.file.type === 'text' || String(message.file.type).includes('json') || message.file.type === 'csv' || message.file.type === 'page.xml')) info = (await textDescription(contentPath, message.file.type)) || '';
         const processRid = message.process['@rid'];
 
         let fileNode: any;

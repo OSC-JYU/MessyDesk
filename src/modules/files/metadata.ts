@@ -68,12 +68,36 @@ function nerSummary(data: string): string | null {
     }
 }
 
-/** The `info` preview: first 150 characters, or a summary for ner.json and ocr.json. */
+const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+function decodeXml(text: string): string {
+    return text.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (whole, name: string) => {
+        if (name[0] === '#') {
+            const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+            return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+        }
+        return XML_ENTITIES[name] ?? whole;
+    });
+}
+
+/** The text lines of a PAGE XML (page.xml), in document order: each TextLine's own TextEquiv. */
+export function pageXmlLines(xml: string): string[] {
+    const lines: string[] = [];
+    for (const match of xml.matchAll(/<(?:\w+:)?TextLine\b[^>]*>([\s\S]*?)<\/(?:\w+:)?TextLine>/g)) {
+        const own = match[1].replace(/<(?:\w+:)?Word\b[\s\S]*?<\/(?:\w+:)?Word>/g, '');
+        const unicode = /<(?:\w+:)?Unicode>([\s\S]*?)<\/(?:\w+:)?Unicode>/.exec(own);
+        lines.push(decodeXml(unicode ? unicode[1] : ''));
+    }
+    return lines;
+}
+
+/** The `info` preview: first 150 characters, or a summary for ner.json, ocr.json and page.xml. */
 export async function textDescription(filePath: string, fileType: string): Promise<string | null> {
     const max = 150;
     try {
         const data = await fsp.readFile(filePath, 'utf8');
         if (fileType === 'ner.json') return nerSummary(data);
+        if (fileType === 'page.xml') return pageXmlLines(data).join(' ').substring(0, max);
         if (fileType === 'ocr.json') {
             const json = JSON.parse(data);
             let text = '';
@@ -88,7 +112,7 @@ export async function textDescription(filePath: string, fileType: string): Promi
 
 /** The first two text snippets of a set, as shown on its node. */
 export async function setTextSamples(db: ArcadeClient, setRid: string): Promise<Array<{ label: string; text: string }>> {
-    const rows = await db.rows("SELECT label, info FROM File WHERE set = :set AND type = 'text' AND info IS NOT NULL AND info <> '' ORDER BY label LIMIT 2", { set: setRid });
+    const rows = await db.rows("SELECT label, info FROM File WHERE set = :set AND type IN ['text', 'page.xml'] AND info IS NOT NULL AND info <> '' ORDER BY label LIMIT 2", { set: setRid });
     return rows.map((r) => {
         const raw = String(r.info).trim();
         return { label: r.label || '', text: raw.length > 280 ? `${raw.slice(0, 280)}...` : raw };
@@ -101,6 +125,7 @@ export function contentTypeFor(file: { type?: string; extension?: string; label?
     if (file.type === 'image') return { type: 'image/png' };
     if (file.extension === 'csv') return { type: 'text/csv; charset=utf-8' };
     if (file.type === 'text' || file.type === 'data') return { type: 'text/plain; charset=utf-8' };
+    if (file.type === 'page.xml') return { type: 'application/xml; charset=utf-8' };
     if (String(file.type || '').includes('.json')) return { type: 'application/json' };
     const safe = encodeURIComponent(String(file.label || '')).replace(/['()]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase()).replace(/\*/g, '%2A');
     return { disposition: `attachment; filename="${safe}"` };

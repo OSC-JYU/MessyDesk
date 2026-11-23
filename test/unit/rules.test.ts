@@ -9,7 +9,7 @@ import { normalizeDescriptor, resolveBehaviour, DescriptorError } from '../../sr
 import { servicesForNode, filterMatchesNode } from '../../src/modules/services/matching.ts';
 import { sortFiles } from '../../src/modules/processing/grouping.ts';
 import { isSearchOutputTask, queueName, resolveModel } from '../../src/modules/processing/processing.ts';
-import { detectType, contentTypeFor } from '../../src/modules/files/metadata.ts';
+import { detectType, contentTypeFor, pageXmlLines } from '../../src/modules/files/metadata.ts';
 import { normalizeJsonSchema } from '../../src/modules/prompts/prompts.ts';
 import { validatePatch, withDefaults } from '../../src/modules/users/settings.ts';
 import { cypherString } from '../../src/platform/arcade/client.ts';
@@ -182,4 +182,20 @@ test('resolveModel fills the chosen model from the descriptor', () => {
     const llm: any = { model: { id: 'custom' } };
     resolveModel({ external_tasks: true, models: {} }, llm);
     assert.deepEqual(llm.model, { id: 'custom' });
+});
+
+
+test('pageXmlLines reads the text of each TextLine of a PAGE XML in order', () => {
+    const xml = `<?xml version='1.0' encoding='UTF-8'?>
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15"><Page imageFilename="a.jpg" imageWidth="9" imageHeight="9">
+  <TextRegion id="r0"><Coords points="0,0"/>
+    <TextLine id="r0l0"><Coords points="0,0"/><TextEquiv><Unicode>Herra &amp; rouva &#228;</Unicode></TextEquiv></TextLine>
+    <TextLine id="r0l1"><Coords points="0,0"/><Word id="w"><TextEquiv><Unicode>word</Unicode></TextEquiv></Word><TextEquiv><Unicode>toinen rivi</Unicode></TextEquiv></TextLine>
+    <TextEquiv><Unicode>region text</Unicode></TextEquiv>
+  </TextRegion>
+  <pc:TextLine id="x"><pc:TextEquiv><pc:Unicode>prefixed</pc:Unicode></pc:TextEquiv></pc:TextLine>
+</Page></PcGts>`;
+    assert.deepEqual(pageXmlLines(xml), ['Herra & rouva ä', 'toinen rivi', 'prefixed']);
+    assert.deepEqual(pageXmlLines('<PcGts><Page imageFilename="b.png"/></PcGts>'), []);
+    assert.equal(contentTypeFor({ type: 'page.xml', extension: 'xml', label: 'a.page.xml' }).type, 'application/xml; charset=utf-8');
 });
